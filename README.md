@@ -1,6 +1,6 @@
-#🚀 EasyCheck
+🚀 EasyCheck
 
-🛠 #Tech Stack
+🛠 Tech Stack
 Frontend: Next.js, Tailwind CSS
 
 Backend: Express.js, TypeScript
@@ -9,7 +9,7 @@ Database: Supabase via Prisma ORM
 
 Tooling: Prettier, NVM (Node 22)
 
-#📥 วิธีการติดตั้ง (Getting Started)
+📥 วิธีการติดตั้ง (Getting Started)
 เพื่อให้เครื่องทุกคนรันได้เหมือนกัน ห้ามข้าม!
 1. Clone Project
 git clone https://github.com/EasyChecks/easychecks.git
@@ -35,13 +35,13 @@ nvm use
 ในโฟลเดอร์ backend ให้รันคำสั่งนี้เพื่อให้โค้ดรู้จักฐานข้อมูล:
 npx prisma generate
 
-#🏃‍♂️ วิธีการรันโปรเจกต์
+🏃‍♂️ วิธีการรันโปรเจกต์
 เปิด Terminal แยก 2 หน้าจอ:
 
 Backend: cd backend && npm run dev (รันที่พอร์ต 3001)
 Frontend: cd frontend && npm run dev (รันที่พอร์ต 3000)
 
-#🚩 กฎเหล็กของทีม (Team Rules)
+🚩 กฎเหล็กของทีม (Team Rules)
 Case Sensitivity: ห้ามตั้งชื่อไฟล์หรือโฟลเดอร์ด้วยตัวพิมพ์ใหญ่ (ให้ใช้camelCase)
 Format on Save: ลง Extension Prettier ใน VS Code และตั้งค่า Format on Save ทุกคน โค้ดจะได้ไม่เละ
 Commit History: ก่อน Push งาน ให้รัน npm run format ที่ Root เสมอ

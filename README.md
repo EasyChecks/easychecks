@@ -1,6 +1,6 @@
 #🚀 EasyCheck
 
-#🛠 Tech Stack
+🛠 #Tech Stack
 Frontend: Next.js, Tailwind CSS
 
 Backend: Express.js, TypeScript

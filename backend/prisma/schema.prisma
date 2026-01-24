@@ -45,3 +45,99 @@ enum LeaveStatus {
 }
 
 // --- Models (ตาราง) ---
+model User {
+  userId       String     @id @default(autoincrement()) @map("user_id")
+  employeeId   String?    @unique @map("employee_id")
+  username     String     @unique
+  firstName    String     @map("first_name")
+  lastName     String     @map("last_name")
+  role         Role       @default(USER)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  // Relations (ความสัมพันธ์)
+  attendances    Attendance[]
+  leaveRequests  LeaveRequest[]  @relation("Requester")
+  approvedLeaves LeaveRequest[]  @relation("Approver")
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+  downloadLogs   DownloadLog[]
+
+  @@map("users") // ชื่อตารางจริงใน DB
+}
+
+model Attendance {
+  attendanceId  Int              @id @default(autoincrement()) @map("attendance_id")
+  userId        String           @map("user_id")
+  checkIn       DateTime         @default(now()) @map("check_in")
+  checkInPhoto  String?          @map("check_in_photo") // URL รูป
+  checkOut      DateTime?        @map("check_out")
+  checkOutPhoto String?          @map("check_out_photo") // URL รูป
+  status        AttendanceStatus @default(ON_TIME)
+  note          String?
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("attendance")
+}
+
+model LeaveRequest {
+  leaveId       Int         @id @default(autoincrement()) @map("leave_id")
+  userId        String      @map("user_id")
+  leaveType     LeaveType   @map("leave_type")
+  startDate     DateTime    @map("start_date") @db.Date
+  endDate       DateTime    @map("end_date") @db.Date
+  reason        String?
+  status        LeaveStatus @default(PENDING)
+  attachmentUrl String?     @map("attachment_url")
+  
+  approvedByUserId Int?     @map("approved_by_user_id")
+  adminComment     String?  @map("admin_comment")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user     User  @relation("Requester", fields: [userId], references: [userId], onDelete: Cascade)
+  approver User? @relation("Approver", fields: [approvedByUserId], references: [userId])
+
+  @@map("leave_requests")
+}
+
+model AuditLog {
+  logId       Int      @id @default(autoincrement()) @map("log_id")
+  userId      String?  @map("user_id")
+  action      String
+  targetTable String   @map("target_table")
+  targetId    Int      @map("target_id")
+  oldValues   Json?    @map("old_values") // Supabase/Postgres รองรับ JSON
+  newValues   Json?    @map("new_values")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [userId])
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  notificationId Int      @id @default(autoincrement()) @map("notification_id")
+  userId         String   @map("user_id")
+  message        String
+  isRead         Boolean  @default(false) @map("is_read")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model DownloadLog {
+  logId      Int      @id @default(autoincrement()) @map("log_id")
+  userId     String   @map("user_id")
+  fileName   String   @map("file_name")
+  reportType String   @map("report_type")
+  downloadAt DateTime @default(now()) @map("download_at")
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("download_logs")
+}

@@ -51,6 +51,7 @@ model User {
   username     String     @unique
   firstName    String     @map("first_name")
   lastName     String     @map("last_name")
+  branchId     Int?       @map("branch_id") // สาขาที่สังกัด (ใส่ ? ไว้ก่อนเผื่อ Admin ไม่มีสาขา)
   role         Role       @default(USER)
   status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now()) @map("created_at")
@@ -64,6 +65,17 @@ model User {
   downloadLogs   DownloadLog[]
 
   @@map("users") // ชื่อตารางจริงใน DB
+}
+
+model Branch {
+  branchId   Int      @id @default(autoincrement()) @map("branch_id")
+  name       String   @map("name")   // ชื่อเต็ม เช่น "Head Office"
+  code       String   @unique @map("code")   // รหัสย่อ เช่น "BKK" (เอาไว้เจนรหัสพนักงาน)
+  address    String?  @map("address")
+  createdAt  DateTime @default(now()) @map("created_at")
+  // Relation: สาขานี้มีพนักงานใครบ้าง
+  users      User[]
+  @@map("branches")
 }
 
 model Attendance {

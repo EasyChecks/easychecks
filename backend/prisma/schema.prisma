@@ -10,13 +10,13 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // --- Enums (ตัวเลือก) ---
 enum Role {
   SUPERADMIN
   ADMIN
+  MANAGER
   USER
 }
 
@@ -44,65 +44,111 @@ enum LeaveStatus {
   REJECTED
 }
 
+enum ShiftType {
+  REGULAR // ประจำ (ทุกวัน)
+  SPECIFIC_DAY // กำหนดวันเฉพาะ
+  CUSTOM // กำหนดกะเฉพาะ
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
 // --- Models (ตาราง) ---
 model User {
-  userId       String     @id @default(autoincrement()) @map("user_id")
-  employeeId   String?    @unique @map("employee_id")
-  username     String     @unique
-  firstName    String     @map("first_name")
-  lastName     String     @map("last_name")
-  branchId     Int?       @map("branch_id") // สาขาที่สังกัด (ใส่ ? ไว้ก่อนเผื่อ Admin ไม่มีสาขา)
-  role         Role       @default(USER)
-  status       UserStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now()) @map("created_at")
+  userId            Int        @id @default(autoincrement()) @map("user_id")
+  employeeId        String     @unique @map("employee_id")
+  username          String     @unique
+  firstName         String     @map("first_name")
+  lastName          String     @map("last_name")
+  nickname          String?    @map("nickname") // ชื่อเล่น
+  nationalId        String     @unique @map("national_id") // รหัสบัตรประชาชน 13 หลัก
+  emergent_tel      String     @map("emergent_tel") // เบอร์ฉุกเฉิน
+  emergent_name     String     @map("emergent_name") // ชื่อผู้ติดต่อฉุกเฉิน
+  emergent_relation String     @map("emergent_relation") // ความสัมพันธ์
+  phone             String     @map("phone") // เบอร์โทร
+  email             String     @unique
+  password          String     @map("password")
+  avatarUrl         String?    @map("avatar_url")
+  branchId          Int?       @map("branch_id") // สาขาที่สังกัด
+  role              Role       @default(USER)
+  status            UserStatus @default(ACTIVE)
+  createdAt         DateTime   @default(now()) @map("created_at")
 
   // Relations (ความสัมพันธ์)
+  branch         Branch?        @relation(fields: [branchId], references: [branchId])
   attendances    Attendance[]
-  leaveRequests  LeaveRequest[]  @relation("Requester")
-  approvedLeaves LeaveRequest[]  @relation("Approver")
+  shifts         Shift[] // กะงานที่ผู้ใช้มี
+  leaveRequests  LeaveRequest[] @relation("Requester")
+  approvedLeaves LeaveRequest[] @relation("Approver")
   auditLogs      AuditLog[]
   notifications  Notification[]
   downloadLogs   DownloadLog[]
+  locations      Location[] // สถานที่ที่ user สร้าง
 
   @@map("users") // ชื่อตารางจริงใน DB
 }
 
 model Branch {
-  branchId   Int      @id @default(autoincrement()) @map("branch_id")
-  name       String   @map("name")   // ชื่อเต็ม เช่น "Head Office"
-  code       String   @unique @map("code")   // รหัสย่อ เช่น "BKK" (เอาไว้เจนรหัสพนักงาน)
-  address    String?  @map("address")
-  createdAt  DateTime @default(now()) @map("created_at")
+  branchId  Int      @id @default(autoincrement()) @map("branch_id")
+  name      String   @map("name") // ชื่อเต็ม เช่น "สำนักงานใหญ่"
+  code      String   @unique @map("code") // รหัสย่อ เช่น "BKK" (เอาไว้เจนรหัสพนักงาน)
+  address   String?  @map("address")
+  createdAt DateTime @default(now()) @map("created_at")
   // Relation: สาขานี้มีพนักงานใครบ้าง
-  users      User[]
+  users     User[]
+
   @@map("branches")
 }
 
 model Attendance {
-  attendanceId  Int              @id @default(autoincrement()) @map("attendance_id")
-  userId        String           @map("user_id")
-  checkIn       DateTime         @default(now()) @map("check_in")
-  checkInPhoto  String?          @map("check_in_photo") // URL รูป
-  checkOut      DateTime?        @map("check_out")
-  checkOutPhoto String?          @map("check_out_photo") // URL รูป
-  status        AttendanceStatus @default(ON_TIME)
-  note          String?
+  attendanceId    Int      @id @default(autoincrement()) @map("attendance_id")
+  userId          Int      @map("user_id")
+  shiftId         Int?     @map("shift_id") // ผูกกับกะ (optional)
+  locationId      Int?     @map("location_id") // สถานที่เข้างาน
+  checkIn         DateTime @default(now()) @map("check_in")
+  checkInPhoto    String?  @map("check_in_photo") // URL รูป
+  checkInLat      Float?   @map("check_in_lat") // GPS ละติจูด
+  checkInLng      Float?   @map("check_in_lng") // GPS ลองจิจูด
+  checkInAddress  String?  @map("check_in_address") // ที่อยู่
+  checkInDistance Float?   @map("check_in_distance") // ระยะห่างจาก location (เมตร)
 
-  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  checkOut         DateTime? @map("check_out")
+  checkOutPhoto    String?   @map("check_out_photo") // URL รูป
+  checkOutLat      Float?    @map("check_out_lat")
+  checkOutLng      Float?    @map("check_out_lng")
+  checkOutAddress  String?   @map("check_out_address")
+  checkOutDistance Float?    @map("check_out_distance")
+
+  status         AttendanceStatus @default(ON_TIME)
+  lateMinutes    Int?             @map("late_minutes") // จำนวนนาทีที่มาสาย
+  note           String?
+  isAutoCheckout Boolean          @default(false) @map("is_auto_checkout") // checkout อัตโนมัติ
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  user     User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  shift    Shift?    @relation(fields: [shiftId], references: [shiftId], onDelete: SetNull)
+  location Location? @relation(fields: [locationId], references: [locationId], onDelete: SetNull)
 
   @@map("attendance")
 }
 
 model LeaveRequest {
   leaveId       Int         @id @default(autoincrement()) @map("leave_id")
-  userId        String      @map("user_id")
+  userId        Int         @map("user_id")
   leaveType     LeaveType   @map("leave_type")
   startDate     DateTime    @map("start_date") @db.Date
   endDate       DateTime    @map("end_date") @db.Date
   reason        String?
   status        LeaveStatus @default(PENDING)
   attachmentUrl String?     @map("attachment_url")
-  
+
   approvedByUserId Int?     @map("approved_by_user_id")
   adminComment     String?  @map("admin_comment")
   createdAt        DateTime @default(now()) @map("created_at")
@@ -115,7 +161,7 @@ model LeaveRequest {
 
 model AuditLog {
   logId       Int      @id @default(autoincrement()) @map("log_id")
-  userId      String?  @map("user_id")
+  userId      Int?     @map("user_id")
   action      String
   targetTable String   @map("target_table")
   targetId    Int      @map("target_id")
@@ -132,7 +178,7 @@ model AuditLog {
 
 model Notification {
   notificationId Int      @id @default(autoincrement()) @map("notification_id")
-  userId         String   @map("user_id")
+  userId         Int      @map("user_id")
   message        String
   isRead         Boolean  @default(false) @map("is_read")
   createdAt      DateTime @default(now()) @map("created_at")
@@ -144,7 +190,7 @@ model Notification {
 
 model DownloadLog {
   logId      Int      @id @default(autoincrement()) @map("log_id")
-  userId     String   @map("user_id")
+  userId     Int      @map("user_id")
   fileName   String   @map("file_name")
   reportType String   @map("report_type")
   downloadAt DateTime @default(now()) @map("download_at")
@@ -152,4 +198,52 @@ model DownloadLog {
   user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("download_logs")
+}
+
+model Location {
+  locationId   Int      @id @default(autoincrement()) @map("location_id")
+  locationName String   @map("location_name") // ชื่อสถานที่
+  latitude     Float    @map("latitude") // ละติจูด
+  longitude    Float    @map("longitude") // ลองจิจูด
+  radius       Float    @map("radius") // รัศมี (เมตร)
+  userId       Int      @map("user_id") // ผู้สร้าง location
+  role         Role     @default(USER) // Role ของผู้ที่สร้าง
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user        User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  attendances Attendance[] // การเข้างานที่ใช้ location นี้
+  shifts      Shift[] // กะที่ใช้ location นี้
+
+  @@map("locations")
+}
+
+// ตารางงาน/กะ (Shift Schedule)
+model Shift {
+  shiftId   Int       @id @default(autoincrement()) @map("shift_id")
+  name      String    @map("name") // ชื่อกะ เช่น "กะเช้า", "กะบ่าย"
+  shiftType ShiftType @default(REGULAR) @map("shift_type") // ประเภทกะ
+  startTime String    @map("start_time") // เวลาเริ่ม HH:MM
+  endTime   String    @map("end_time") // เวลาสิ้นสุด HH:MM
+
+  // การตั้งค่าเวลา
+  gracePeriodMinutes   Int @default(15) @map("grace_period_minutes") // เข้าก่อนได้กี่นาที
+  lateThresholdMinutes Int @default(30) @map("late_threshold_minutes") // สายเกินนี้ถือว่าขาด
+
+  // กำหนดวัน (สำหรับ SPECIFIC_DAY)
+  specificDays DayOfWeek[] // วันที่ใช้กะนี้
+  customDate   DateTime?   @map("custom_date") @db.Date // วันที่เฉพาะ (สำหรับ CUSTOM)
+
+  // ผูกกับ Location และ User
+  locationId Int? @map("location_id") // สถานที่ที่ต้องเข้างาน
+  userId     Int  @map("user_id") // พนักงานคนนี้
+
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  location    Location?    @relation(fields: [locationId], references: [locationId], onDelete: SetNull)
+  attendances Attendance[] // การเข้างานในกะนี้
+
+  @@map("shifts")
 }

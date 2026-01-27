@@ -76,21 +76,35 @@ model User {
   email             String     @unique
   password          String     @map("password")
   avatarUrl         String?    @map("avatar_url")
+  birthDate         DateTime?  @map("birth_date") @db.Date // วันเกิด
   branchId          Int?       @map("branch_id") // สาขาที่สังกัด
   role              Role       @default(USER)
   status            UserStatus @default(ACTIVE)
   createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @default(now()) @updatedAt @map("updated_at")
+  
+  updatedByUserId   Int?       @map("updated_by_user_id") // ผู้แก้ไขข้อมูลล่าสุด
 
   // Relations (ความสัมพันธ์)
-  branch         Branch?        @relation(fields: [branchId], references: [branchId])
-  attendances    Attendance[]
-  shifts         Shift[] // กะงานที่ผู้ใช้มี
-  leaveRequests  LeaveRequest[] @relation("Requester")
-  approvedLeaves LeaveRequest[] @relation("Approver")
-  auditLogs      AuditLog[]
-  notifications  Notification[]
-  downloadLogs   DownloadLog[]
-  locations      Location[] // สถานที่ที่ user สร้าง
+  branch         Branch?        @relation("UserBranch", fields: [branchId], references: [branchId])
+  updatedBy      User?          @relation("UserUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
+  attendances         Attendance[]
+  shifts              Shift[]        @relation("UserShift") // กะงานที่ผู้ใช้มี
+  leaveRequests       LeaveRequest[] @relation("Requester")
+  approvedLeaves      LeaveRequest[] @relation("Approver")
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+  downloadLogs        DownloadLog[]
+  locationsCreated    Location[]     @relation("LocationCreator") // สถานที่ที่ user สร้าง
+  locationsUpdated    Location[]     @relation("LocationUpdater") // สถานที่ที่ user แก้ไข
+  locationsDeleted    Location[]     @relation("LocationDeleter") // สถานที่ที่ user ลบ
+  usersUpdated        User[]         @relation("UserUpdater") // ผู้ใช้ที่แก้ไข
+  shiftsCreated       Shift[]        @relation("ShiftCreator") // กะที่สร้าง
+  shiftsUpdated       Shift[]        @relation("ShiftUpdater") // กะที่แก้ไข
+  shiftsDeleted       Shift[]        @relation("ShiftDeleter") // กะที่ลบ
+  branchesCreated     Branch[]       @relation("BranchCreator") // สาขาที่สร้าง
+  branchesUpdated     Branch[]       @relation("BranchUpdater") // สาขาที่แก้ไข
+  branchesDeleted     Branch[]       @relation("BranchDeleter") // สาขาที่ลบ
 
   @@map("users") // ชื่อตารางจริงใน DB
 }
@@ -101,8 +115,18 @@ model Branch {
   code      String   @unique @map("code") // รหัสย่อ เช่น "BKK" (เอาไว้เจนรหัสพนักงาน)
   address   String?  @map("address")
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  
+  createdByUserId Int?     @map("created_by_user_id") // ผู้สร้างสาขา
+  updatedByUserId Int?     @map("updated_by_user_id") // ผู้แก้ไขล่าสุด
+  deletedAt       DateTime? @map("deleted_at") // เวลาที่ลบ (soft delete)
+  deletedByUserId Int?     @map("deleted_by_user_id") // ผู้ที่ทำการลบ
+  
   // Relation: สาขานี้มีพนักงานใครบ้าง
-  users     User[]
+  users     User[]  @relation("UserBranch")
+  creator   User?   @relation("BranchCreator", fields: [createdByUserId], references: [userId], onDelete: SetNull)
+  updatedBy User?   @relation("BranchUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
+  deletedBy User?   @relation("BranchDeleter", fields: [deletedByUserId], references: [userId], onDelete: SetNull)
 
   @@map("branches")
 }
@@ -152,6 +176,7 @@ model LeaveRequest {
   approvedByUserId Int?     @map("approved_by_user_id")
   adminComment     String?  @map("admin_comment")
   createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") // เวลาแก้ไข/อนุมัติ
 
   user     User  @relation("Requester", fields: [userId], references: [userId], onDelete: Cascade)
   approver User? @relation("Approver", fields: [approvedByUserId], references: [userId])
@@ -209,8 +234,15 @@ model Location {
   userId       Int      @map("user_id") // ผู้สร้าง location
   role         Role     @default(USER) // Role ของผู้ที่สร้าง
   createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") // เวลาที่แก้ไขล่าสุด
+  
+  updatedByUserId Int?     @map("updated_by_user_id") // ผู้แก้ไขล่าสุด
+  deletedAt       DateTime? @map("deleted_at") // เวลาที่ลบ (soft delete)
+  deletedByUserId Int?     @map("deleted_by_user_id") // ผู้ที่ทำการลบ
 
-  user        User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  creator     User         @relation("LocationCreator", fields: [userId], references: [userId], onDelete: Cascade)
+  updatedBy   User?        @relation("LocationUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
+  deletedBy   User?        @relation("LocationDeleter", fields: [deletedByUserId], references: [userId], onDelete: SetNull)
   attendances Attendance[] // การเข้างานที่ใช้ location นี้
   shifts      Shift[] // กะที่ใช้ location นี้
 
@@ -239,9 +271,17 @@ model Shift {
 
   isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  
+  createdByUserId Int?     @map("created_by_user_id") // ผู้สร้างกะ
+  updatedByUserId Int?     @map("updated_by_user_id") // ผู้แก้ไขล่าสุด
+  deletedAt       DateTime? @map("deleted_at") // เวลาที่ลบ (soft delete)
+  deletedByUserId Int?     @map("deleted_by_user_id") // ผู้ที่ทำการลบ
 
-  user        User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  user        User         @relation("UserShift", fields: [userId], references: [userId], onDelete: Cascade)
+  creator     User?        @relation("ShiftCreator", fields: [createdByUserId], references: [userId], onDelete: SetNull)
+  updatedBy   User?        @relation("ShiftUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
+  deletedBy   User?        @relation("ShiftDeleter", fields: [deletedByUserId], references: [userId], onDelete: SetNull)
   location    Location?    @relation(fields: [locationId], references: [locationId], onDelete: SetNull)
   attendances Attendance[] // การเข้างานในกะนี้
 

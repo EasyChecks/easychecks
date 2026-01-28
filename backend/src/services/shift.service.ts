@@ -1,6 +1,5 @@
 import { PrismaClient, ShiftType, DayOfWeek, Role } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma.js';
 
 /**
  * 🔧 Shift Service - จัดการตารางงาน/กะ
@@ -16,7 +15,8 @@ export interface CreateShiftDTO {
   specificDays?: DayOfWeek[];
   customDate?: Date;
   locationId?: number;
-  userId: number;
+  userId: number; // พนักงานที่ได้รับมอบหมายกะนี้
+  createdByUserId: number; // ผู้สร้างกะ (admin/superadmin)
 }
 
 export interface UpdateShiftDTO {
@@ -70,6 +70,7 @@ export const createShift = async (data: CreateShiftDTO) => {
       customDate: data.customDate,
       locationId: data.locationId,
       userId: data.userId,
+      createdByUserId: data.createdByUserId,
     },
     include: {
       location: true,
@@ -195,7 +196,10 @@ export const updateShift = async (shiftId: number, userId: number, role: Role, d
 
   const updatedShift = await prisma.shift.update({
     where: { shiftId },
-    data,
+    data: {
+      ...data,
+      updatedByUserId: userId,
+    },
     include: {
       location: true,
       user: {
@@ -215,7 +219,7 @@ export const updateShift = async (shiftId: number, userId: number, role: Role, d
 /**
  * ลบกะ (Admin only)
  */
-export const deleteShift = async (shiftId: number) => {
+export const deleteShift = async (shiftId: number, deletedByUserId: number, deleteReason: string) => {
   const shift = await prisma.shift.findUnique({
     where: { shiftId },
   });
@@ -224,10 +228,19 @@ export const deleteShift = async (shiftId: number) => {
     throw new Error('ไม่พบกะที่ระบุ');
   }
 
-  // Soft delete - เปลี่ยน isActive เป็น false
+  if (!deleteReason || deleteReason.trim().length === 0) {
+    throw new Error('กรุณาระบุเหตุผลในการลบ');
+  }
+
+  // Soft delete - เปลี่ยน isActive เป็น false และบันทึกผู้ลบ
   const deletedShift = await prisma.shift.update({
     where: { shiftId },
-    data: { isActive: false },
+    data: { 
+      isActive: false,
+      deletedAt: new Date(),
+      deletedByUserId,
+      deleteReason,
+    },
   });
 
   return deletedShift;
@@ -284,7 +297,7 @@ function getDayOfWeek(date: Date): DayOfWeek {
   return days[date.getDay()];
 }
 
-export default {
+export const shiftService = {
   createShift,
   getShiftsByUserId,
   getAllShifts,
@@ -293,3 +306,5 @@ export default {
   deleteShift,
   getActiveShiftsForToday,
 };
+
+export default shiftService;

@@ -276,6 +276,7 @@ model Shift {
   updatedByUserId Int?     @map("updated_by_user_id") // ผู้แก้ไขล่าสุด
   deletedAt       DateTime? @map("deleted_at") // เวลาที่ลบ (soft delete)
   deletedByUserId Int?     @map("deleted_by_user_id") // ผู้ที่ทำการลบ
+  deleteReason    String?  @map("delete_reason") // เหตุผลที่ลบ
 
   user        User         @relation("UserShift", fields: [userId], references: [userId], onDelete: Cascade)
   creator     User?        @relation("ShiftCreator", fields: [createdByUserId], references: [userId], onDelete: SetNull)

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import * as attendanceService from '../services/attendance.service';
 import { sendSuccess, sendError } from '../utils/response';
 

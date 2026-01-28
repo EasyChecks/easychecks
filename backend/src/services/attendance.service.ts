@@ -1,6 +1,6 @@
-import { PrismaClient, AttendanceStatus, Shift, Location } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { PrismaClient, AttendanceStatus } from '@prisma/client';
+import type { Shift, Location } from '@prisma/client';
+import { prisma } from '../lib/prisma.js';
 
 /**
  * 📋 Attendance Service - จัดการการเข้า-ออกงาน
@@ -19,6 +19,7 @@ export interface CheckInDTO {
 
 export interface CheckOutDTO {
   userId: number;
+  attendanceId?: number; // เพิ่ม attendanceId เพื่อระบุการเข้างานที่จะออก
   shiftId?: number;
   photo?: string;
   latitude?: number;
@@ -257,22 +258,37 @@ export const checkIn = async (data: CheckInDTO) => {
  * 🚪 Check-out
  */
 export const checkOut = async (data: CheckOutDTO) => {
-  const { userId, shiftId, photo, latitude, longitude, address } = data;
+  const { userId, attendanceId, shiftId, photo, latitude, longitude, address } = data;
 
-  // หาการ check-in ล่าสุดที่ยังไม่ได้ check-out
-  const attendance = await prisma.attendance.findFirst({
-    where: {
-      userId,
-      ...(shiftId && { shiftId }),
-      checkOut: null,
-    },
-    orderBy: {
-      checkIn: 'desc',
-    },
-    include: {
-      location: true,
-    },
-  });
+  // หาการ check-in ตาม attendanceId หรือ หาล่าสุดที่ยังไม่ได้ check-out
+  let attendance;
+  
+  if (attendanceId) {
+    attendance = await prisma.attendance.findFirst({
+      where: {
+        attendanceId,
+        userId, // ต้องเป็นของ user นี้
+        checkOut: null,
+      },
+      include: {
+        location: true,
+      },
+    });
+  } else {
+    attendance = await prisma.attendance.findFirst({
+      where: {
+        userId,
+        ...(shiftId && { shiftId }),
+        checkOut: null,
+      },
+      orderBy: {
+        checkIn: 'desc',
+      },
+      include: {
+        location: true,
+      },
+    });
+  }
 
   if (!attendance) {
     throw new Error('ไม่พบการ check-in ที่ยังไม่ได้ check-out');
@@ -469,7 +485,7 @@ export const deleteAttendance = async (attendanceId: number) => {
   return { message: 'ลบข้อมูลการเข้างานเรียบร้อยแล้ว' };
 };
 
-export default {
+export const attendanceService = {
   checkIn,
   checkOut,
   getAttendanceHistory,
@@ -477,3 +493,5 @@ export default {
   updateAttendance,
   deleteAttendance,
 };
+
+export default attendanceService;

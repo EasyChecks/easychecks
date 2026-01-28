@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import * as shiftService from '../services/shift.service';
 import { sendSuccess, sendError } from '../utils/response';
 
@@ -21,6 +21,7 @@ export const createShift = async (req: Request, res: Response) => {
     const shift = await shiftService.createShift({
       ...req.body,
       userId: req.body.userId || userId, // Admin สามารถสร้างให้ user อื่นได้
+      createdByUserId: userId, // บันทึกว่าใครสร้าง
     });
 
     sendSuccess(res, shift, 'สร้างกะเรียบร้อยแล้ว', 201);
@@ -120,12 +121,23 @@ export const updateShift = async (req: Request, res: Response) => {
 /**
  * ลบกะ (Admin only)
  * DELETE /api/shifts/:id
+ * Body: { deleteReason: string }
  */
 export const deleteShift = async (req: Request, res: Response) => {
   try {
     const shiftId = parseInt(req.params.id);
+    const userId = req.user?.userId;
+    const { deleteReason } = req.body;
 
-    await shiftService.deleteShift(shiftId);
+    if (!userId) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
+    }
+
+    if (!deleteReason || deleteReason.trim().length === 0) {
+      return sendError(res, 'กรุณาระบุเหตุผลในการลบ', 400);
+    }
+
+    await shiftService.deleteShift(shiftId, userId, deleteReason);
 
     sendSuccess(res, null, 'ลบกะเรียบร้อยแล้ว');
   } catch (error: any) {

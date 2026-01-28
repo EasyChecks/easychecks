@@ -64,7 +64,6 @@ enum DayOfWeek {
 model User {
   userId            Int        @id @default(autoincrement()) @map("user_id")
   employeeId        String     @unique @map("employee_id")
-  username          String     @unique
   firstName         String     @map("first_name")
   lastName          String     @map("last_name")
   nickname          String?    @map("nickname") // ชื่อเล่น

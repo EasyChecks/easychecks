@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { PrismaClient, Role, UserStatus, AttendanceStatus, LeaveType, LeaveStatus, ShiftType, DayOfWeek } from '@prisma/client';
 import { faker } from '@faker-js/faker/locale/th';
 import { Pool } from 'pg';
@@ -55,28 +56,21 @@ function getThaiName() {
   };
 }
 
-// Upload avatar และคืน URL (รูปผู้ใหญ่จาก RandomUser API)
+// รูปโปรไฟล์จาก RandomUser API (ไม่อัปโหลด Supabase เพื่อความเร็ว)
 async function getAvatarUrl(employeeId: string, index: number): Promise<string> {
-  try {
-    // สลับเพศเพื่อความหลากหลาย
-    const gender = index % 2 === 0 ? 'male' : 'female';
-    const avatarUrl = await uploadAvatarToSupabase(employeeId, gender);
-    console.log(`   📸 อัปโหลดรูป: ${employeeId}`);
-    return avatarUrl;
-  } catch (error) {
-    console.error(`   ❌ ไม่สามารถอัปโหลดรูป ${employeeId}:`, error);
-    // Fallback to UI Avatars
-    return `https://ui-avatars.com/api/?name=${employeeId}&background=random&size=200`;
-  }
+  // ใช้ RandomUser API โดยตรง (รูปคนจริง) ไม่ต้องอัปโหลดขึ้น Supabase
+  const gender = index % 2 === 0 ? 'men' : 'women';
+  const imageNumber = (index % 100); // 0-99
+  return `https://randomuser.me/api/portraits/${gender}/${imageNumber}.jpg`;
 }
 
 async function main() {
   console.log('🌱 เริ่ม seeding ข้อมูลทดสอบ (Updated Schema)...\n');
 
-  // ตรวจสอบและสร้าง Supabase bucket
-  console.log('📦 ตรวจสอบ Supabase Storage Bucket...');
-  await ensureBucketExists();
-  console.log('');
+  // ข้ามการตรวจสอบ Supabase bucket เพราะไม่ใช้แล้ว
+  // console.log('📦 ตรวจสอบ Supabase Storage Bucket...');
+  // await ensureBucketExists();
+  // console.log('');
 
   // ลบข้อมูลเก่าทั้งหมด
   console.log('🗑️  ลบข้อมูลเก่า...');
@@ -135,7 +129,6 @@ async function main() {
   const superadmin = await prisma.user.create({
     data: {
       employeeId: 'SA001',
-      username: 'superadmin',
       firstName: 'ผู้จัดการ',
       lastName: 'ระบบ',
       nickname: 'Admin',
@@ -164,7 +157,6 @@ async function main() {
     const admin = await prisma.user.create({
       data: {
         employeeId: `${branch.code}${String(employeeCounter[branch.code]++).padStart(4, '0')}`,
-        username: `admin_${branch.code.toLowerCase()}`,
         firstName: name.firstName,
         lastName: name.lastName,
         nickname: name.nickname,
@@ -195,7 +187,6 @@ async function main() {
       const manager = await prisma.user.create({
         data: {
           employeeId,
-          username: `${branch.code.toLowerCase()}_manager_${i + 1}`,
           firstName: name.firstName,
           lastName: name.lastName,
           nickname: name.nickname,
@@ -227,7 +218,6 @@ async function main() {
       const user = await prisma.user.create({
         data: {
           employeeId,
-          username: `${branch.code.toLowerCase()}_user_${i + 1}`,
           firstName: name.firstName,
           lastName: name.lastName,
           nickname: name.nickname,
@@ -323,9 +313,9 @@ async function main() {
   console.log('📋 สร้างข้อมูลการเข้างาน...');
   const allUsers = [superadmin, ...admins, ...managers, ...users];
   const activeUsers = allUsers.filter(u => u.status === UserStatus.ACTIVE);
-  const attendanceCount = faker.number.int({ min: 80, max: 120 });
+  const attendanceCount = 100;
   
-  for (let i = 0; i < attendanceCount; i++) {
+  const attendanceData = Array.from({ length: attendanceCount }, () => {
     const user = faker.helpers.arrayElement(activeUsers);
     const date = faker.date.recent({ days: 30 });
     const checkIn = new Date(date);
@@ -336,29 +326,29 @@ async function main() {
       ? new Date(checkIn.getTime() + faker.number.int({ min: 7, max: 10 }) * 60 * 60 * 1000)
       : null;
 
-    await prisma.attendance.create({
-      data: {
-        userId: user.userId,
-        checkIn,
-        checkOut,
-        status: faker.helpers.arrayElement([
-          AttendanceStatus.ON_TIME,
-          AttendanceStatus.ON_TIME,
-          AttendanceStatus.ON_TIME,
-          AttendanceStatus.LATE,
-          AttendanceStatus.ABSENT,
-        ]),
-        note: faker.datatype.boolean({ probability: 0.2 })
-          ? faker.helpers.arrayElement([
-              'ติดธุระส่วนตัว',
-              'รถติด',
-              'ลืมบันทึกเวลา',
-              'ทำงานนอกสถานที่',
-            ])
-          : null,
-      },
-    });
-  }
+    return {
+      userId: user.userId,
+      checkIn,
+      checkOut,
+      status: faker.helpers.arrayElement([
+        AttendanceStatus.ON_TIME,
+        AttendanceStatus.ON_TIME,
+        AttendanceStatus.ON_TIME,
+        AttendanceStatus.LATE,
+        AttendanceStatus.ABSENT,
+      ]),
+      note: faker.datatype.boolean({ probability: 0.2 })
+        ? faker.helpers.arrayElement([
+            'ติดธุระส่วนตัว',
+            'รถติด',
+            'ลืมบันทึกเวลา',
+            'ทำงานนอกสถานที่',
+          ])
+        : null,
+    };
+  });
+  
+  await prisma.attendance.createMany({ data: attendanceData });
   console.log(`✅ สร้าง ${attendanceCount} รายการเข้างานแล้ว\n`);
 
   // 8-12. สร้างข้อมูลอื่นๆ (ลดลงเหลือสรุป)
@@ -366,63 +356,55 @@ async function main() {
   
   // Leaves
   const leaveCount = 30;
-  for (let i = 0; i < leaveCount; i++) {
+  const leaveData = Array.from({ length: leaveCount }, () => {
     const user = faker.helpers.arrayElement(allStaff);
     const startDate = faker.date.future({ years: 0.1 });
     const endDate = new Date(startDate);
     endDate.setDate(startDate.getDate() + faker.number.int({ min: 1, max: 5 }));
     const status = faker.helpers.arrayElement([LeaveStatus.PENDING, LeaveStatus.APPROVED, LeaveStatus.APPROVED, LeaveStatus.REJECTED]);
 
-    await prisma.leaveRequest.create({
-      data: {
-        userId: user.userId,
-        leaveType: faker.helpers.arrayElement([LeaveType.SICK, LeaveType.PERSONAL, LeaveType.VACATION]),
-        startDate,
-        endDate,
-        reason: faker.helpers.arrayElement(['ติดธุระส่วนตัว', 'ไม่สบาย', 'ไปพบแพทย์', 'กิจส่วนตัว']),
-        status,
-        approvedByUserId: status !== LeaveStatus.PENDING ? faker.helpers.arrayElement([...admins, ...managers, superadmin]).userId : null,
-        adminComment: status === LeaveStatus.REJECTED ? 'ช่วงนี้มีคนลาเยอะ' : null,
-      },
-    });
-  }
+    return {
+      userId: user.userId,
+      leaveType: faker.helpers.arrayElement([LeaveType.SICK, LeaveType.PERSONAL, LeaveType.VACATION]),
+      startDate,
+      endDate,
+      reason: faker.helpers.arrayElement(['ติดธุระส่วนตัว', 'ไม่สบาย', 'ไปพบแพทย์', 'กิจส่วนตัว']),
+      status,
+      approvedByUserId: status !== LeaveStatus.PENDING ? faker.helpers.arrayElement([...admins, ...managers, superadmin]).userId : null,
+      adminComment: status === LeaveStatus.REJECTED ? 'ช่วงนี้มีคนลาเยอะ' : null,
+    };
+  });
+  
+  await prisma.leaveRequest.createMany({ data: leaveData });
   console.log(`✅ สร้าง ${leaveCount} คำขอลา\n`);
 
   // Notifications, Audit Logs, Download Logs (simplified)
   console.log('🔔 สร้างข้อมูลอื่นๆ...');
-  for (let i = 0; i < 50; i++) {
-    await prisma.notification.create({
-      data: {
-        userId: faker.helpers.arrayElement(allStaff).userId,
-        message: faker.helpers.arrayElement(['คำขอลาได้รับการอนุมัติ', 'อย่าลืมบันทึกเวลาออกงาน']),
-        isRead: faker.datatype.boolean({ probability: 0.6 }),
-      },
-    });
-  }
+  
+  const notificationData = Array.from({ length: 50 }, () => ({
+    userId: faker.helpers.arrayElement(allStaff).userId,
+    message: faker.helpers.arrayElement(['คำขอลาได้รับการอนุมัติ', 'อย่าลืมบันทึกเวลาออกงาน']),
+    isRead: faker.datatype.boolean({ probability: 0.6 }),
+  }));
+  await prisma.notification.createMany({ data: notificationData });
 
-  for (let i = 0; i < 30; i++) {
-    await prisma.auditLog.create({
-      data: {
-        userId: faker.helpers.arrayElement([...admins, superadmin]).userId,
-        action: faker.helpers.arrayElement(['CREATE_USER', 'APPROVE_LEAVE', 'UPDATE_ATTENDANCE']),
-        targetTable: 'users',
-        targetId: faker.number.int({ min: 1, max: 100 }),
-        newValues: { status: 'APPROVED' },
-        ipAddress: faker.internet.ipv4(),
-        userAgent: faker.internet.userAgent(),
-      },
-    });
-  }
+  const auditLogData = Array.from({ length: 30 }, () => ({
+    userId: faker.helpers.arrayElement([...admins, superadmin]).userId,
+    action: faker.helpers.arrayElement(['CREATE_USER', 'APPROVE_LEAVE', 'UPDATE_ATTENDANCE']),
+    targetTable: 'users',
+    targetId: faker.number.int({ min: 1, max: 100 }),
+    newValues: { status: 'APPROVED' },
+    ipAddress: faker.internet.ipv4(),
+    userAgent: faker.internet.userAgent(),
+  }));
+  await prisma.auditLog.createMany({ data: auditLogData });
 
-  for (let i = 0; i < 20; i++) {
-    await prisma.downloadLog.create({
-      data: {
-        userId: faker.helpers.arrayElement([...admins, superadmin]).userId,
-        fileName: `report_${faker.date.recent({ days: 30 }).toISOString().split('T')[0]}.pdf`,
-        reportType: 'attendance_report',
-      },
-    });
-  }
+  const downloadLogData = Array.from({ length: 20 }, () => ({
+    userId: faker.helpers.arrayElement([...admins, superadmin]).userId,
+    fileName: `report_${faker.date.recent({ days: 30 }).toISOString().split('T')[0]}.pdf`,
+    reportType: 'attendance_report',
+  }));
+  await prisma.downloadLog.createMany({ data: downloadLogData });
 
   // สรุป
   console.log('\n═══════════════════════════════════════');
@@ -440,11 +422,11 @@ async function main() {
   console.log(`📝 คำขอลา: ${leaveCount} คำขอ`);
   console.log('═══════════════════════════════════════\n');
 
-  console.log('🔑 ตัวอย่าง Login Credentials (password = รหัสบัตรประชาชน):');
+  console.log('🔑 ตัวอย่าง Login Credentials (login ด้วย employeeId, password = รหัสบัตรประชาชน):');
   console.log('═══════════════════════════════════════');
-  console.log(`Superadmin: superadmin / ${superadminNationalId}`);
-  console.log(`Admin BKK: ${admins[0].username} / ${admins[0].password}`);
-  console.log(`User: ${users[0].username} / ${users[0].password}`);
+  console.log(`Superadmin: SA001 / ${superadminNationalId}`);
+  console.log(`Admin BKK: ${admins[0].employeeId} / ${admins[0].password}`);
+  console.log(`User: ${users[0].employeeId} / ${users[0].password}`);
   console.log('═══════════════════════════════════════\n');
   
   console.log('✨ Seeding เสร็จสมบูรณ์!\n');

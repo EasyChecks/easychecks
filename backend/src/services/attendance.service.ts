@@ -32,7 +32,7 @@ export interface CheckOutDTO {
  */
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
-  return hours * 60 + minutes;
+  return (hours || 0) * 60 + (minutes || 0);
 }
 
 /**
@@ -226,13 +226,13 @@ export const checkIn = async (data: CheckInDTO) => {
   const attendance = await prisma.attendance.create({
     data: {
       userId,
-      shiftId,
-      locationId,
-      checkInPhoto: photo,
-      checkInLat: latitude,
-      checkInLng: longitude,
-      checkInAddress: address,
-      checkInDistance: distance,
+      shiftId: shiftId ?? null,
+      locationId: locationId ?? null,
+      checkInPhoto: photo ?? null,
+      checkInLat: latitude ?? null,
+      checkInLng: longitude ?? null,
+      checkInAddress: address ?? null,
+      checkInDistance: distance ?? null,
       status,
       lateMinutes,
       note: message,
@@ -320,11 +320,11 @@ export const checkOut = async (data: CheckOutDTO) => {
     },
     data: {
       checkOut: new Date(),
-      checkOutPhoto: photo,
-      checkOutLat: latitude,
-      checkOutLng: longitude,
-      checkOutAddress: address,
-      checkOutDistance: distance,
+      checkOutPhoto: photo ?? null,
+      checkOutLat: latitude ?? null,
+      checkOutLng: longitude ?? null,
+      checkOutAddress: address ?? null,
+      checkOutDistance: distance ?? null,
     },
     include: {
       user: {

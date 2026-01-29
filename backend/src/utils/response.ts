@@ -20,7 +20,7 @@ export function sendSuccess<T>(
   const response: ApiResponse<T> = {
     success: true,
     message,
-    data,
+    ...(data !== undefined && { data }),
   };
   res.status(statusCode).json(response);
 }

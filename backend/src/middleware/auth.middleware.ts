@@ -27,15 +27,16 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
     // const token = req.headers.authorization?.replace('Bearer ', '');
     // const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Placeholder: ใช้ข้อมูลจาก header ชั่วคราว
+    // Placeholder: ใช้ข้อมูลจาก header ชั่วคราว (Mock Auth)
     const userId = req.headers['x-user-id'];
     const employeeId = req.headers['x-employee-id'];
-    const role = req.headers['x-role'] as any;
+    const role = req.headers['x-user-role'] as any; // แก้จาก x-role เป็น x-user-role
     
     if (!userId || !employeeId || !role) {
       res.status(401).json({
         success: false,
-        error: 'Unauthorized - กรุณา login ก่อน'
+        error: 'Unauthorized - กรุณา login ก่อน',
+        hint: 'ส่ง headers: x-user-id, x-employee-id, x-user-role'
       });
       return;
     }

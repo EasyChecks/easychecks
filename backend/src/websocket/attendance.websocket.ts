@@ -190,12 +190,12 @@ async function handleCheckIn(ws: AuthenticatedWebSocket, message: CheckInMessage
       locationId,
       latitude: message.latitude,
       longitude: message.longitude,
-      photo: message.photo
+      photo: message.photo || ''
     });
 
     // 5. ส่งผลลัพธ์กลับ
     ws.send(JSON.stringify({
-      type: 'check-in-success',
+      type: 'success',
       message: 'เข้างานสำเร็จ',
       data: result
     } as SuccessResponse));
@@ -230,11 +230,11 @@ async function handleCheckOut(ws: AuthenticatedWebSocket, message: CheckOutMessa
       userId: ws.userId,
       latitude: message.latitude,
       longitude: message.longitude,
-      photo: message.photo
+      photo: message.photo || ''
     });
 
     ws.send(JSON.stringify({
-      type: 'check-out-success',
+      type: 'success',
       message: 'ออกงานสำเร็จ',
       data: result
     } as SuccessResponse));

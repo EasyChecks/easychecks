@@ -1,5 +1,6 @@
 import { PrismaClient, ShiftType, DayOfWeek, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
  * 🔧 Shift Service - จัดการตารางงาน/กะ
@@ -58,6 +59,14 @@ export const createShift = async (data: CreateShiftDTO) => {
     throw new Error('กะแบบ CUSTOM ต้องระบุวันที่');
   }
 
+  // แปลง customDate เป็น Date object ถ้าเป็น string
+  let parsedCustomDate: Date | undefined = undefined;
+  if (data.customDate) {
+    parsedCustomDate = typeof data.customDate === 'string' 
+      ? new Date(data.customDate) 
+      : data.customDate;
+  }
+
   const shift = await prisma.shift.create({
     data: {
       name: data.name,
@@ -67,7 +76,7 @@ export const createShift = async (data: CreateShiftDTO) => {
       gracePeriodMinutes: data.gracePeriodMinutes ?? 15,
       lateThresholdMinutes: data.lateThresholdMinutes ?? 30,
       specificDays: data.specificDays ?? [],
-      customDate: data.customDate,
+      customDate: parsedCustomDate,
       locationId: data.locationId,
       userId: data.userId,
       createdByUserId: data.createdByUserId,
@@ -83,6 +92,15 @@ export const createShift = async (data: CreateShiftDTO) => {
         },
       },
     },
+  });
+
+  // 📋 Audit Log - CREATE_SHIFT
+  await createAuditLog({
+    userId: data.createdByUserId,
+    action: AuditAction.CREATE_SHIFT,
+    targetTable: 'shifts',
+    targetId: shift.shiftId,
+    newValues: shift,
   });
 
   return shift;
@@ -213,6 +231,16 @@ export const updateShift = async (shiftId: number, userId: number, role: Role, d
     },
   });
 
+  // 📋 Audit Log - UPDATE_SHIFT
+  await createAuditLog({
+    userId: userId,
+    action: AuditAction.UPDATE_SHIFT,
+    targetTable: 'shifts',
+    targetId: shiftId,
+    oldValues: existingShift,
+    newValues: updatedShift,
+  });
+
   return updatedShift;
 };
 
@@ -241,6 +269,16 @@ export const deleteShift = async (shiftId: number, deletedByUserId: number, dele
       deletedByUserId,
       deleteReason,
     },
+  });
+
+  // 📋 Audit Log - DELETE_SHIFT
+  await createAuditLog({
+    userId: deletedByUserId,
+    action: AuditAction.DELETE_SHIFT,
+    targetTable: 'shifts',
+    targetId: shiftId,
+    oldValues: shift,
+    newValues: { isActive: false, deleteReason },
   });
 
   return deletedShift;

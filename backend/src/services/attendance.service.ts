@@ -1,6 +1,7 @@
 import { PrismaClient, AttendanceStatus } from '@prisma/client';
 import type { Shift, Location } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
+import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
  * 📋 Attendance Service - จัดการการเข้า-ออกงาน
@@ -251,6 +252,15 @@ export const checkIn = async (data: CheckInDTO) => {
     },
   });
 
+  // 📋 Audit Log - CHECK_IN
+  await createAuditLog({
+    userId,
+    action: AuditAction.CHECK_IN,
+    targetTable: 'attendance',
+    targetId: attendance.attendanceId,
+    newValues: attendance,
+  });
+
   return attendance;
 };
 
@@ -338,6 +348,16 @@ export const checkOut = async (data: CheckOutDTO) => {
       shift: true,
       location: true,
     },
+  });
+
+  // 📋 Audit Log - CHECK_OUT
+  await createAuditLog({
+    userId,
+    action: AuditAction.CHECK_OUT,
+    targetTable: 'attendance',
+    targetId: updatedAttendance.attendanceId,
+    oldValues: { checkOut: null },
+    newValues: updatedAttendance,
   });
 
   return updatedAttendance;
@@ -463,13 +483,23 @@ export const updateAttendance = async (
     },
   });
 
+  // 📋 Audit Log - UPDATE_ATTENDANCE
+  await createAuditLog({
+    userId: attendance.userId,
+    action: AuditAction.UPDATE_ATTENDANCE,
+    targetTable: 'attendance',
+    targetId: attendanceId,
+    oldValues: attendance,
+    newValues: updatedAttendance,
+  });
+
   return updatedAttendance;
 };
 
 /**
  * 🗑️ ลบการเข้างาน (Admin only)
  */
-export const deleteAttendance = async (attendanceId: number) => {
+export const deleteAttendance = async (attendanceId: number, deletedByUserId?: number) => {
   const attendance = await prisma.attendance.findUnique({
     where: { attendanceId },
   });
@@ -480,6 +510,15 @@ export const deleteAttendance = async (attendanceId: number) => {
 
   await prisma.attendance.delete({
     where: { attendanceId },
+  });
+
+  // 📋 Audit Log - DELETE_ATTENDANCE
+  await createAuditLog({
+    userId: deletedByUserId || attendance.userId,
+    action: AuditAction.DELETE_ATTENDANCE,
+    targetTable: 'attendance',
+    targetId: attendanceId,
+    oldValues: attendance,
   });
 
   return { message: 'ลบข้อมูลการเข้างานเรียบร้อยแล้ว' };

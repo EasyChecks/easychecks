@@ -12,7 +12,34 @@ if (!connectionString) {
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 
-const prisma = new PrismaClient({ adapter });
+let prismaInstance: any = null;
 
-export { prisma };
+async function initPrisma() {
+  if (!prismaInstance) {
+    try {
+      prismaInstance = new PrismaClient({ adapter });
+      console.log('✓ Prisma connected');
+    } catch (error) {
+      console.error('✗ Prisma connection failed:', error);
+      throw error;
+    }
+  }
+  return prismaInstance;
+}
+
+// Export lazy getter
+export async function getPrisma() {
+  return await initPrisma();
+}
+
+export let prisma: any = null;
+
+// Initialize on module load (async)
+(async () => {
+  prisma = await initPrisma();
+})().catch((err) => {
+  console.error('Failed to initialize Prisma:', err);
+  process.exit(1);
+});
+
 export default prisma;

@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import attendanceRoutes from './attendance.routes';
-import shiftRoutes from './shift.routes';
+import attendanceRoutes from './attendance.routes.js';
+import shiftRoutes from './shift.routes.js';
+import downloadRoutes from './download.routes.js';
 
 const router = Router();
 
@@ -11,5 +12,6 @@ const router = Router();
 // API Routes
 router.use('/attendance', attendanceRoutes);
 router.use('/shifts', shiftRoutes);
+router.use('/download', downloadRoutes);
 
 export default router;

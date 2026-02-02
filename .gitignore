@@ -7,3 +7,6 @@ frontend/ .next/
 frontend/node_modules/
 backend/node_modules/
 easycheck.pdf
+FRONTEND_TASKS.md
+backend/TEST_DOWNLOAD_API.md
+backend/DOWNLOAD_API.md

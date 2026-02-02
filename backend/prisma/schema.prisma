@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -12,7 +6,301 @@ datasource db {
   provider = "postgresql"
 }
 
-// --- Enums (ตัวเลือก) ---
+model User {
+  userId                                                  Int                  @id @default(autoincrement()) @map("user_id")
+  employeeId                                              String               @unique @map("employee_id")
+  firstName                                               String               @map("first_name")
+  lastName                                                String               @map("last_name")
+  nickname                                                String?              @map("nickname")
+  nationalId                                              String               @unique @map("national_id")
+  emergent_tel                                            String               @map("emergent_tel")
+  emergent_name                                           String               @map("emergent_name")
+  emergent_relation                                       String               @map("emergent_relation")
+  phone                                                   String               @map("phone")
+  email                                                   String               @unique
+  password                                                String               @map("password")
+  avatarUrl                                               String?              @map("avatar_url")
+  birthDate                                               DateTime?            @map("birth_date") @db.Date
+  branchId                                                Int?                 @map("branch_id")
+  role                                                    Role                 @default(USER)
+  status                                                  UserStatus           @default(ACTIVE)
+  createdAt                                               DateTime             @default(now()) @map("created_at")
+  updatedAt                                               DateTime             @default(now()) @updatedAt @map("updated_at")
+  updatedByUserId                                         Int?                 @map("updated_by_user_id")
+  attendances                                             Attendance[]
+  auditLogs                                               AuditLog[]
+  branchesCreated                                         Branch[]             @relation("BranchCreator")
+  branchesDeleted                                         Branch[]             @relation("BranchDeleter")
+  branchesUpdated                                         Branch[]             @relation("BranchUpdater")
+  downloadLogs                                            DownloadLog[]
+  event_participants                                      event_participants[]
+  events_events_created_by_user_idTousers                 events[]             @relation("events_created_by_user_idTousers")
+  events_events_deleted_by_user_idTousers                 events[]             @relation("events_deleted_by_user_idTousers")
+  events_events_updated_by_user_idTousers                 events[]             @relation("events_updated_by_user_idTousers")
+  late_requests_late_requests_approved_by_user_idTousers  late_requests[]      @relation("late_requests_approved_by_user_idTousers")
+  late_requests_late_requests_deleted_by_user_idTousers   late_requests[]      @relation("late_requests_deleted_by_user_idTousers")
+  late_requests_late_requests_updated_by_user_idTousers   late_requests[]      @relation("late_requests_updated_by_user_idTousers")
+  late_requests_late_requests_user_idTousers              late_requests[]      @relation("late_requests_user_idTousers")
+  approvedLeaves                                          LeaveRequest[]       @relation("Approver")
+  leave_requests_leave_requests_deleted_by_user_idTousers LeaveRequest[]       @relation("leave_requests_deleted_by_user_idTousers")
+  leave_requests_leave_requests_updated_by_user_idTousers LeaveRequest[]       @relation("leave_requests_updated_by_user_idTousers")
+  leaveRequests                                           LeaveRequest[]       @relation("Requester")
+  locationsDeleted                                        Location[]           @relation("LocationDeleter")
+  locationsUpdated                                        Location[]           @relation("LocationUpdater")
+  locationsCreated                                        Location[]           @relation("LocationCreator")
+  notifications                                           Notification[]
+  shiftsCreated                                           Shift[]              @relation("ShiftCreator")
+  shiftsDeleted                                           Shift[]              @relation("ShiftDeleter")
+  shiftsUpdated                                           Shift[]              @relation("ShiftUpdater")
+  shifts                                                  Shift[]              @relation("UserShift")
+  branch                                                  Branch?              @relation("UserBranch", fields: [branchId], references: [branchId])
+  updatedBy                                               User?                @relation("UserUpdater", fields: [updatedByUserId], references: [userId])
+  usersUpdated                                            User[]               @relation("UserUpdater")
+
+  @@map("users")
+}
+
+model Branch {
+  branchId           Int                  @id @default(autoincrement()) @map("branch_id")
+  name               String               @map("name")
+  code               String               @unique @map("code")
+  address            String?              @map("address")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @default(now()) @updatedAt @map("updated_at")
+  createdByUserId    Int?                 @map("created_by_user_id")
+  updatedByUserId    Int?                 @map("updated_by_user_id")
+  deletedAt          DateTime?            @map("deleted_at")
+  deletedByUserId    Int?                 @map("deleted_by_user_id")
+  creator            User?                @relation("BranchCreator", fields: [createdByUserId], references: [userId])
+  deletedBy          User?                @relation("BranchDeleter", fields: [deletedByUserId], references: [userId])
+  updatedBy          User?                @relation("BranchUpdater", fields: [updatedByUserId], references: [userId])
+  event_participants event_participants[]
+  users              User[]               @relation("UserBranch")
+
+  @@map("branches")
+}
+
+model Attendance {
+  attendanceId     Int              @id @default(autoincrement()) @map("attendance_id")
+  userId           Int              @map("user_id")
+  shiftId          Int?             @map("shift_id")
+  locationId       Int?             @map("location_id")
+  checkIn          DateTime         @default(now()) @map("check_in")
+  checkInPhoto     String?          @map("check_in_photo")
+  checkInLat       Float?           @map("check_in_lat")
+  checkInLng       Float?           @map("check_in_lng")
+  checkInAddress   String?          @map("check_in_address")
+  checkInDistance  Float?           @map("check_in_distance")
+  checkOut         DateTime?        @map("check_out")
+  checkOutPhoto    String?          @map("check_out_photo")
+  checkOutLat      Float?           @map("check_out_lat")
+  checkOutLng      Float?           @map("check_out_lng")
+  checkOutAddress  String?          @map("check_out_address")
+  checkOutDistance Float?           @map("check_out_distance")
+  status           AttendanceStatus @default(ON_TIME)
+  lateMinutes      Int?             @map("late_minutes")
+  note             String?
+  isAutoCheckout   Boolean          @default(false) @map("is_auto_checkout")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  // Soft delete fields
+  deletedAt        DateTime?        @map("deleted_at")
+  deletedByUserId  Int?             @map("deleted_by_user_id")
+  deleteReason     String?          @map("delete_reason")
+  
+  event_id         Int?
+  events           events?          @relation(fields: [event_id], references: [event_id])
+  location         Location?        @relation(fields: [locationId], references: [locationId])
+  shift            Shift?           @relation(fields: [shiftId], references: [shiftId])
+  user             User             @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("attendance")
+}
+
+model LeaveRequest {
+  leaveId                                        Int         @id @default(autoincrement()) @map("leave_id")
+  userId                                         Int         @map("user_id")
+  leaveType                                      LeaveType   @map("leave_type")
+  startDate                                      DateTime    @map("start_date") @db.Date
+  endDate                                        DateTime    @map("end_date") @db.Date
+  reason                                         String?
+  status                                         LeaveStatus @default(PENDING)
+  attachmentUrl                                  String?     @map("attachment_url")
+  approvedByUserId                               Int?        @map("approved_by_user_id")
+  adminComment                                   String?     @map("admin_comment")
+  createdAt                                      DateTime    @default(now()) @map("created_at")
+  updatedAt                                      DateTime    @default(now()) @updatedAt @map("updated_at")
+  approved_at                                    DateTime?
+  number_of_days                                 Int         @default(1)
+  rejection_reason                               String?
+  deleted_at                                     DateTime?
+  deleted_by_user_id                             Int?
+  updated_by_user_id                             Int?
+  approver                                       User?       @relation("Approver", fields: [approvedByUserId], references: [userId])
+  users_leave_requests_deleted_by_user_idTousers User?       @relation("leave_requests_deleted_by_user_idTousers", fields: [deleted_by_user_id], references: [userId])
+  users_leave_requests_updated_by_user_idTousers User?       @relation("leave_requests_updated_by_user_idTousers", fields: [updated_by_user_id], references: [userId])
+  user                                           User        @relation("Requester", fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("leave_requests")
+}
+
+model AuditLog {
+  logId       Int      @id @default(autoincrement()) @map("log_id")
+  userId      Int?     @map("user_id")
+  action      String
+  targetTable String   @map("target_table")
+  targetId    Int      @map("target_id")
+  oldValues   Json?    @map("old_values")
+  newValues   Json?    @map("new_values")
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User?    @relation(fields: [userId], references: [userId])
+
+  @@map("audit_logs")
+}
+
+model Notification {
+  notificationId Int      @id @default(autoincrement()) @map("notification_id")
+  userId         Int      @map("user_id")
+  message        String
+  isRead         Boolean  @default(false) @map("is_read")
+  createdAt      DateTime @default(now()) @map("created_at")
+  user           User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model DownloadLog {
+  logId      Int      @id @default(autoincrement()) @map("log_id")
+  userId     Int      @map("user_id")
+  fileName   String   @map("file_name")
+  reportType String   @map("report_type")
+  downloadAt DateTime @default(now()) @map("download_at")
+  user       User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("download_logs")
+}
+
+model Location {
+  locationId      Int             @id @default(autoincrement()) @map("location_id")
+  locationName    String          @map("location_name")
+  latitude        Float           @map("latitude")
+  longitude       Float           @map("longitude")
+  radius          Float           @default(100) @map("radius")
+  userId          Int             @map("user_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at")
+  updatedByUserId Int?            @map("updated_by_user_id")
+  deletedAt       DateTime?       @map("deleted_at")
+  deletedByUserId Int?            @map("deleted_by_user_id")
+  delete_reason   String?
+  address         String?
+  description     String?
+  is_active       Boolean         @default(true)
+  location_type   LocationType    @default(OTHER)
+  purpose         LocationPurpose @default(WORK_SITE)
+  attendances     Attendance[]
+  events          events[]
+  deletedBy       User?           @relation("LocationDeleter", fields: [deletedByUserId], references: [userId])
+  updatedBy       User?           @relation("LocationUpdater", fields: [updatedByUserId], references: [userId])
+  creator         User            @relation("LocationCreator", fields: [userId], references: [userId], onDelete: Cascade)
+  shifts          Shift[]
+
+  @@map("locations")
+}
+
+model Shift {
+  shiftId              Int          @id @default(autoincrement()) @map("shift_id")
+  name                 String       @map("name")
+  shiftType            ShiftType    @default(REGULAR) @map("shift_type")
+  startTime            String       @map("start_time")
+  endTime              String       @map("end_time")
+  gracePeriodMinutes   Int          @default(15) @map("grace_period_minutes")
+  lateThresholdMinutes Int          @default(30) @map("late_threshold_minutes")
+  specificDays         DayOfWeek[]
+  customDate           DateTime?    @map("custom_date") @db.Date
+  locationId           Int?         @map("location_id")
+  userId               Int          @map("user_id")
+  isActive             Boolean      @default(true) @map("is_active")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @default(now()) @updatedAt @map("updated_at")
+  createdByUserId      Int?         @map("created_by_user_id")
+  updatedByUserId      Int?         @map("updated_by_user_id")
+  deletedAt            DateTime?    @map("deleted_at")
+  deletedByUserId      Int?         @map("deleted_by_user_id")
+  deleteReason         String?      @map("delete_reason")
+  attendances          Attendance[]
+  creator              User?        @relation("ShiftCreator", fields: [createdByUserId], references: [userId])
+  deletedBy            User?        @relation("ShiftDeleter", fields: [deletedByUserId], references: [userId])
+  location             Location?    @relation(fields: [locationId], references: [locationId])
+  updatedBy            User?        @relation("ShiftUpdater", fields: [updatedByUserId], references: [userId])
+  user                 User         @relation("UserShift", fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("shifts")
+}
+
+model event_participants {
+  participant_id Int      @id @default(autoincrement())
+  event_id       Int
+  user_id        Int?
+  branch_id      Int?
+  role           Role?
+  created_at     DateTime @default(now())
+  branches       Branch?  @relation(fields: [branch_id], references: [branchId], onDelete: Cascade)
+  events         events   @relation(fields: [event_id], references: [event_id], onDelete: Cascade)
+  users          User?    @relation(fields: [user_id], references: [userId], onDelete: Cascade)
+}
+
+model events {
+  event_id                               Int                  @id @default(autoincrement())
+  event_name                             String
+  description                            String?
+  location_id                            Int
+  start_date_time                        DateTime
+  end_date_time                          DateTime
+  participant_type                       EventParticipantType @default(ALL)
+  is_active                              Boolean              @default(true)
+  created_by_user_id                     Int
+  created_at                             DateTime             @default(now())
+  updated_by_user_id                     Int?
+  updated_at                             DateTime             @default(now())
+  deleted_at                             DateTime?
+  deleted_by_user_id                     Int?
+  delete_reason                          String?
+  attendance                             Attendance[]
+  event_participants                     event_participants[]
+  users_events_created_by_user_idTousers User                 @relation("events_created_by_user_idTousers", fields: [created_by_user_id], references: [userId], onDelete: Cascade)
+  users_events_deleted_by_user_idTousers User?                @relation("events_deleted_by_user_idTousers", fields: [deleted_by_user_id], references: [userId])
+  locations                              Location             @relation(fields: [location_id], references: [locationId], onDelete: Cascade)
+  users_events_updated_by_user_idTousers User?                @relation("events_updated_by_user_idTousers", fields: [updated_by_user_id], references: [userId])
+}
+
+model late_requests {
+  late_request_id                                Int            @id @default(autoincrement())
+  user_id                                        Int
+  attendance_id                                  Int?
+  request_date                                   DateTime       @db.Date
+  scheduled_time                                 String
+  actual_time                                    String
+  late_minutes                                   Int
+  reason                                         String
+  status                                         ApprovalStatus @default(PENDING)
+  attachment_url                                 String?
+  approved_by_user_id                            Int?
+  admin_comment                                  String?
+  approved_at                                    DateTime?
+  rejection_reason                               String?
+  created_at                                     DateTime       @default(now())
+  updated_at                                     DateTime       @default(now())
+  deleted_at                                     DateTime?
+  deleted_by_user_id                             Int?
+  updated_by_user_id                             Int?
+  users_late_requests_approved_by_user_idTousers User?          @relation("late_requests_approved_by_user_idTousers", fields: [approved_by_user_id], references: [userId])
+  users_late_requests_deleted_by_user_idTousers  User?          @relation("late_requests_deleted_by_user_idTousers", fields: [deleted_by_user_id], references: [userId])
+  users_late_requests_updated_by_user_idTousers  User?          @relation("late_requests_updated_by_user_idTousers", fields: [updated_by_user_id], references: [userId])
+  users_late_requests_user_idTousers             User           @relation("late_requests_user_idTousers", fields: [user_id], references: [userId], onDelete: Cascade)
+}
+
 enum Role {
   SUPERADMIN
   ADMIN
@@ -45,9 +333,9 @@ enum LeaveStatus {
 }
 
 enum ShiftType {
-  REGULAR // ประจำ (ทุกวัน)
-  SPECIFIC_DAY // กำหนดวันเฉพาะ
-  CUSTOM // กำหนดกะเฉพาะ
+  REGULAR
+  SPECIFIC_DAY
+  CUSTOM
 }
 
 enum DayOfWeek {
@@ -60,230 +348,29 @@ enum DayOfWeek {
   SUNDAY
 }
 
-// --- Models (ตาราง) ---
-model User {
-  userId            Int        @id @default(autoincrement()) @map("user_id")
-  employeeId        String     @unique @map("employee_id")
-  firstName         String     @map("first_name")
-  lastName          String     @map("last_name")
-  nickname          String?    @map("nickname") // ชื่อเล่น
-  nationalId        String     @unique @map("national_id") // รหัสบัตรประชาชน 13 หลัก
-  emergent_tel      String     @map("emergent_tel") // เบอร์ฉุกเฉิน
-  emergent_name     String     @map("emergent_name") // ชื่อผู้ติดต่อฉุกเฉิน
-  emergent_relation String     @map("emergent_relation") // ความสัมพันธ์
-  phone             String     @map("phone") // เบอร์โทร
-  email             String     @unique
-  password          String     @map("password")
-  avatarUrl         String?    @map("avatar_url")
-  birthDate         DateTime?  @map("birth_date") @db.Date // วันเกิด
-  branchId          Int?       @map("branch_id") // สาขาที่สังกัด
-  role              Role       @default(USER)
-  status            UserStatus @default(ACTIVE)
-  createdAt         DateTime   @default(now()) @map("created_at")
-  updatedAt         DateTime   @default(now()) @updatedAt @map("updated_at")
-  
-  updatedByUserId   Int?       @map("updated_by_user_id") // ผู้แก้ไขข้อมูลล่าสุด
-
-  // Relations (ความสัมพันธ์)
-  branch         Branch?        @relation("UserBranch", fields: [branchId], references: [branchId])
-  updatedBy      User?          @relation("UserUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
-  attendances         Attendance[]
-  shifts              Shift[]        @relation("UserShift") // กะงานที่ผู้ใช้มี
-  leaveRequests       LeaveRequest[] @relation("Requester")
-  approvedLeaves      LeaveRequest[] @relation("Approver")
-  auditLogs           AuditLog[]
-  notifications       Notification[]
-  downloadLogs        DownloadLog[]
-  locationsCreated    Location[]     @relation("LocationCreator") // สถานที่ที่ user สร้าง
-  locationsUpdated    Location[]     @relation("LocationUpdater") // สถานที่ที่ user แก้ไข
-  locationsDeleted    Location[]     @relation("LocationDeleter") // สถานที่ที่ user ลบ
-  usersUpdated        User[]         @relation("UserUpdater") // ผู้ใช้ที่แก้ไข
-  shiftsCreated       Shift[]        @relation("ShiftCreator") // กะที่สร้าง
-  shiftsUpdated       Shift[]        @relation("ShiftUpdater") // กะที่แก้ไข
-  shiftsDeleted       Shift[]        @relation("ShiftDeleter") // กะที่ลบ
-  branchesCreated     Branch[]       @relation("BranchCreator") // สาขาที่สร้าง
-  branchesUpdated     Branch[]       @relation("BranchUpdater") // สาขาที่แก้ไข
-  branchesDeleted     Branch[]       @relation("BranchDeleter") // สาขาที่ลบ
-
-  @@map("users") // ชื่อตารางจริงใน DB
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
-model Branch {
-  branchId  Int      @id @default(autoincrement()) @map("branch_id")
-  name      String   @map("name") // ชื่อเต็ม เช่น "สำนักงานใหญ่"
-  code      String   @unique @map("code") // รหัสย่อ เช่น "BKK" (เอาไว้เจนรหัสพนักงาน)
-  address   String?  @map("address")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
-  
-  createdByUserId Int?     @map("created_by_user_id") // ผู้สร้างสาขา
-  updatedByUserId Int?     @map("updated_by_user_id") // ผู้แก้ไขล่าสุด
-  deletedAt       DateTime? @map("deleted_at") // เวลาที่ลบ (soft delete)
-  deletedByUserId Int?     @map("deleted_by_user_id") // ผู้ที่ทำการลบ
-  
-  // Relation: สาขานี้มีพนักงานใครบ้าง
-  users     User[]  @relation("UserBranch")
-  creator   User?   @relation("BranchCreator", fields: [createdByUserId], references: [userId], onDelete: SetNull)
-  updatedBy User?   @relation("BranchUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
-  deletedBy User?   @relation("BranchDeleter", fields: [deletedByUserId], references: [userId], onDelete: SetNull)
-
-  @@map("branches")
+enum EventParticipantType {
+  ALL
+  INDIVIDUAL
+  BRANCH
+  ROLE
 }
 
-model Attendance {
-  attendanceId    Int      @id @default(autoincrement()) @map("attendance_id")
-  userId          Int      @map("user_id")
-  shiftId         Int?     @map("shift_id") // ผูกกับกะ (optional)
-  locationId      Int?     @map("location_id") // สถานที่เข้างาน
-  checkIn         DateTime @default(now()) @map("check_in")
-  checkInPhoto    String?  @map("check_in_photo") // URL รูป
-  checkInLat      Float?   @map("check_in_lat") // GPS ละติจูด
-  checkInLng      Float?   @map("check_in_lng") // GPS ลองจิจูด
-  checkInAddress  String?  @map("check_in_address") // ที่อยู่
-  checkInDistance Float?   @map("check_in_distance") // ระยะห่างจาก location (เมตร)
-
-  checkOut         DateTime? @map("check_out")
-  checkOutPhoto    String?   @map("check_out_photo") // URL รูป
-  checkOutLat      Float?    @map("check_out_lat")
-  checkOutLng      Float?    @map("check_out_lng")
-  checkOutAddress  String?   @map("check_out_address")
-  checkOutDistance Float?    @map("check_out_distance")
-
-  status         AttendanceStatus @default(ON_TIME)
-  lateMinutes    Int?             @map("late_minutes") // จำนวนนาทีที่มาสาย
-  note           String?
-  isAutoCheckout Boolean          @default(false) @map("is_auto_checkout") // checkout อัตโนมัติ
-  createdAt      DateTime         @default(now()) @map("created_at")
-
-  user     User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  shift    Shift?    @relation(fields: [shiftId], references: [shiftId], onDelete: SetNull)
-  location Location? @relation(fields: [locationId], references: [locationId], onDelete: SetNull)
-
-  @@map("attendance")
+enum LocationPurpose {
+  WORK_SITE
+  EVENT
 }
 
-model LeaveRequest {
-  leaveId       Int         @id @default(autoincrement()) @map("leave_id")
-  userId        Int         @map("user_id")
-  leaveType     LeaveType   @map("leave_type")
-  startDate     DateTime    @map("start_date") @db.Date
-  endDate       DateTime    @map("end_date") @db.Date
-  reason        String?
-  status        LeaveStatus @default(PENDING)
-  attachmentUrl String?     @map("attachment_url")
-
-  approvedByUserId Int?     @map("approved_by_user_id")
-  adminComment     String?  @map("admin_comment")
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") // เวลาแก้ไข/อนุมัติ
-
-  user     User  @relation("Requester", fields: [userId], references: [userId], onDelete: Cascade)
-  approver User? @relation("Approver", fields: [approvedByUserId], references: [userId])
-
-  @@map("leave_requests")
-}
-
-model AuditLog {
-  logId       Int      @id @default(autoincrement()) @map("log_id")
-  userId      Int?     @map("user_id")
-  action      String
-  targetTable String   @map("target_table")
-  targetId    Int      @map("target_id")
-  oldValues   Json?    @map("old_values") // Supabase/Postgres รองรับ JSON
-  newValues   Json?    @map("new_values")
-  ipAddress   String?  @map("ip_address")
-  userAgent   String?  @map("user_agent")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  user User? @relation(fields: [userId], references: [userId])
-
-  @@map("audit_logs")
-}
-
-model Notification {
-  notificationId Int      @id @default(autoincrement()) @map("notification_id")
-  userId         Int      @map("user_id")
-  message        String
-  isRead         Boolean  @default(false) @map("is_read")
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
-
-  @@map("notifications")
-}
-
-model DownloadLog {
-  logId      Int      @id @default(autoincrement()) @map("log_id")
-  userId     Int      @map("user_id")
-  fileName   String   @map("file_name")
-  reportType String   @map("report_type")
-  downloadAt DateTime @default(now()) @map("download_at")
-
-  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
-
-  @@map("download_logs")
-}
-
-model Location {
-  locationId   Int      @id @default(autoincrement()) @map("location_id")
-  locationName String   @map("location_name") // ชื่อสถานที่
-  latitude     Float    @map("latitude") // ละติจูด
-  longitude    Float    @map("longitude") // ลองจิจูด
-  radius       Float    @map("radius") // รัศมี (เมตร)
-  userId       Int      @map("user_id") // ผู้สร้าง location
-  role         Role     @default(USER) // Role ของผู้ที่สร้าง
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") // เวลาที่แก้ไขล่าสุด
-  
-  updatedByUserId Int?     @map("updated_by_user_id") // ผู้แก้ไขล่าสุด
-  deletedAt       DateTime? @map("deleted_at") // เวลาที่ลบ (soft delete)
-  deletedByUserId Int?     @map("deleted_by_user_id") // ผู้ที่ทำการลบ
-
-  creator     User         @relation("LocationCreator", fields: [userId], references: [userId], onDelete: Cascade)
-  updatedBy   User?        @relation("LocationUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
-  deletedBy   User?        @relation("LocationDeleter", fields: [deletedByUserId], references: [userId], onDelete: SetNull)
-  attendances Attendance[] // การเข้างานที่ใช้ location นี้
-  shifts      Shift[] // กะที่ใช้ location นี้
-
-  @@map("locations")
-}
-
-// ตารางงาน/กะ (Shift Schedule)
-model Shift {
-  shiftId   Int       @id @default(autoincrement()) @map("shift_id")
-  name      String    @map("name") // ชื่อกะ เช่น "กะเช้า", "กะบ่าย"
-  shiftType ShiftType @default(REGULAR) @map("shift_type") // ประเภทกะ
-  startTime String    @map("start_time") // เวลาเริ่ม HH:MM
-  endTime   String    @map("end_time") // เวลาสิ้นสุด HH:MM
-
-  // การตั้งค่าเวลา
-  gracePeriodMinutes   Int @default(15) @map("grace_period_minutes") // เข้าก่อนได้กี่นาที
-  lateThresholdMinutes Int @default(30) @map("late_threshold_minutes") // สายเกินนี้ถือว่าขาด
-
-  // กำหนดวัน (สำหรับ SPECIFIC_DAY)
-  specificDays DayOfWeek[] // วันที่ใช้กะนี้
-  customDate   DateTime?   @map("custom_date") @db.Date // วันที่เฉพาะ (สำหรับ CUSTOM)
-
-  // ผูกกับ Location และ User
-  locationId Int? @map("location_id") // สถานที่ที่ต้องเข้างาน
-  userId     Int  @map("user_id") // พนักงานคนนี้
-
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
-  
-  createdByUserId Int?     @map("created_by_user_id") // ผู้สร้างกะ
-  updatedByUserId Int?     @map("updated_by_user_id") // ผู้แก้ไขล่าสุด
-  deletedAt       DateTime? @map("deleted_at") // เวลาที่ลบ (soft delete)
-  deletedByUserId Int?     @map("deleted_by_user_id") // ผู้ที่ทำการลบ
-  deleteReason    String?  @map("delete_reason") // เหตุผลที่ลบ
-
-  user        User         @relation("UserShift", fields: [userId], references: [userId], onDelete: Cascade)
-  creator     User?        @relation("ShiftCreator", fields: [createdByUserId], references: [userId], onDelete: SetNull)
-  updatedBy   User?        @relation("ShiftUpdater", fields: [updatedByUserId], references: [userId], onDelete: SetNull)
-  deletedBy   User?        @relation("ShiftDeleter", fields: [deletedByUserId], references: [userId], onDelete: SetNull)
-  location    Location?    @relation(fields: [locationId], references: [locationId], onDelete: SetNull)
-  attendances Attendance[] // การเข้างานในกะนี้
-
-  @@map("shifts")
+enum LocationType {
+  OFFICE
+  BRANCH
+  EVENT
+  SITE
+  MEETING
+  OTHER
 }

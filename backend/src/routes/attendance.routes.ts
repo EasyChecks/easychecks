@@ -1,67 +1,102 @@
 import { Router } from 'express';
-import * as attendanceController from '../controllers/attendance.controller';
-import { authenticate } from '../middleware/auth.middleware';
-import { requireRole } from '../middleware/role.middleware';
+import * as attendanceController from '../controllers/attendance.controller.js';
+// TODO: หลังจากเพื่อนทำ Auth เสร็จ ให้ uncomment 2 บรรทัดนี้
+// import { authenticate } from '../middleware/auth.middleware';
+// import { requireRole } from '../middleware/role.middleware';
 
 const router = Router();
 
 /**
- * 🔐 Attendance Routes
+ * 📋 Attendance Routes - เส้นทาง API สำหรับการเข้า-ออกงาน
  * 
- * Permissions:
+ * 🔴 หมายเหตุ: ตอนนี้ยังไม่ใส่ Auth Middleware
+ * - รอเพื่อนทำ Auth เสร็จก่อนค่อยเปิดใช้งาน
+ * - ตอนนี้ส่ง userId มาใน body แทน
+ * 
+ * Permissions (อนาคต):
  * - Check-in/Check-out: ทุก Role ที่ authenticate แล้ว
  * - Read History: User (own history) and Admin (all history)
  * - Update/Delete: Admin only
  */
 
-// ต้อง authenticate ทุก route
-router.use(authenticate);
+// TODO: หลังจากเพื่อนทำ Auth เสร็จ ให้ uncomment บรรทัดนี้
+// router.use(authenticate);
 
 /**
  * @route   POST /api/attendance/check-in
- * @desc    เข้างาน
- * @access  Authenticated (ทุก Role)
- * @body    shiftId?, locationId?, photo?, latitude?, longitude?, address?
+ * @desc    เข้างาน (บันทึกเวลาเข้า)
+ * @access  ตอนนี้: Public (Dev Mode) | อนาคต: Authenticated (ทุก Role)
+ * @body    {
+ *            userId: number,        // (จำเป็น) รหัสผู้ใช้
+ *            shiftId?: number,      // (optional) รหัสกะงาน
+ *            locationId?: number,   // (optional) รหัสสถานที่
+ *            photo?: string,        // (optional) รูปภาพ Base64
+ *            latitude?: number,     // (optional) ละติจูด GPS
+ *            longitude?: number,    // (optional) ลองจิจูด GPS
+ *            address?: string       // (optional) ที่อยู่
+ *          }
  */
 router.post('/check-in', attendanceController.checkIn);
 
 /**
  * @route   POST /api/attendance/check-out
- * @desc    ออกงาน
- * @access  Authenticated (ทุก Role)
- * @body    shiftId?, photo?, latitude?, longitude?, address?
+ * @desc    ออกงาน (บันทึกเวลาออก)
+ * @access  ตอนนี้: Public (Dev Mode) | อนาคต: Authenticated (ทุก Role)
+ * @body    {
+ *            userId: number,        // (จำเป็น) รหัสผู้ใช้
+ *            attendanceId?: number, // (optional) รหัส attendance ที่จะออก
+ *            shiftId?: number,      // (optional) รหัสกะงาน
+ *            photo?: string,        // (optional) รูปภาพ Base64
+ *            latitude?: number,     // (optional) ละติจูด GPS
+ *            longitude?: number,    // (optional) ลองจิจูด GPS
+ *            address?: string       // (optional) ที่อยู่
+ *          }
  */
 router.post('/check-out', attendanceController.checkOut);
 
 /**
- * @route   GET /api/attendance/history
- * @desc    ดึงประวัติการเข้างานของตัวเอง
- * @access  Authenticated
+ * @route   GET /api/attendance/history/:userId
+ * @desc    ดึงประวัติการเข้างานของ user คนนั้น
+ * @access  ตอนนี้: Public (Dev Mode) | อนาคต: Authenticated
  * @query   startDate?, endDate?, status?
  */
-router.get('/history', attendanceController.getHistory);
+router.get('/history/:userId', attendanceController.getHistory);
 
 /**
  * @route   GET /api/attendance
  * @desc    ดึงประวัติการเข้างานทั้งหมด (Admin only)
- * @access  Admin only
+ * @access  ตอนนี้: Public (Dev Mode) | อนาคต: Admin only
  * @query   userId?, startDate?, endDate?, status?
  */
-router.get('/', requireRole(['ADMIN', 'SUPERADMIN']), attendanceController.getAllAttendances);
+// TODO: หลังจากเพื่อนทำ Auth เสร็จ ให้เพิ่ม requireRole(['ADMIN', 'SUPERADMIN'])
+router.get('/', attendanceController.getAllAttendances);
+
+/**
+ * @route   GET /api/attendance/today/:userId
+ * @desc    ดึงข้อมูลการเข้างานวันนี้ของ user
+ * @access  ตอนนี้: Public (Dev Mode) | อนาคต: Authenticated
+ */
+router.get('/today/:userId', attendanceController.getTodayAttendance);
 
 /**
  * @route   PUT /api/attendance/:id
  * @desc    อัปเดตการเข้างาน (แก้ไขข้อมูล)
- * @access  Admin only
- * @body    status?, note?, checkIn?, checkOut?
+ * @access  ตอนนี้: Public (Dev Mode) | อนาคต: Admin only
+ * @body    { 
+ *            updatedByUserId: number, // (จำเป็น) ผู้แก้ไข
+ *            status?, note?, checkIn?, checkOut? 
+ *          }
  */
-router.put('/:id', requireRole(['ADMIN', 'SUPERADMIN']), attendanceController.updateAttendance);
+// TODO: หลังจากเพื่อนทำ Auth เสร็จ ให้เพิ่ม requireRole(['ADMIN', 'SUPERADMIN'])
+router.put('/:id', attendanceController.updateAttendance);
 
 /**
  * @route   DELETE /api/attendance/:id
  * @desc    ลบการเข้างาน
- * @access  Admin only
+ * @access  ตอนนี้: Public (Dev Mode) | อนาคต: Admin only
+ * @body    { deletedByUserId: number } // (จำเป็น) ผู้ลบ
  */
-router.delete('/:id', requireRole(['ADMIN', 'SUPERADMIN']), attendanceController.deleteAttendance);
+// TODO: หลังจากเพื่อนทำ Auth เสร็จ ให้เพิ่ม requireRole(['ADMIN', 'SUPERADMIN'])
+router.delete('/:id', attendanceController.deleteAttendance);
 
 export default router;

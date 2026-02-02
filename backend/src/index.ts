@@ -27,5 +27,4 @@ setupAttendanceWebSocket(server);
 
 server.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
-  console.log(`📡 WebSocket endpoint: ws://localhost:${PORT}/ws/attendance`);
 });

@@ -1,264 +1,292 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import { Server } from 'http';
 import { parse } from 'url';
-import { attendanceService } from '../services/attendance.service.js';
-import { shiftService } from '../services/shift.service.js';
 
+/**
+ * 📡 WebSocket Service - Real-time Data Polling
+ * 
+ * 🔴 หมายเหตุ: WebSocket นี้ใช้สำหรับ "รับข้อมูลแบบ real-time" เท่านั้น
+ * - ไม่ใช่สำหรับ check-in/check-out (ให้ใช้ REST API แทน)
+ * - ใช้สำหรับ broadcast ข้อมูลไปยัง clients หลังจากมีการ CUD (Create/Update/Delete)
+ * 
+ * Flow:
+ * 1. Client connect มาที่ /ws/attendance
+ * 2. Server ส่ง 'connected' message กลับ
+ * 3. เมื่อมีการ CUD ผ่าน REST API, server จะ broadcast ไปยังทุก client
+ * 4. Client รับข้อมูลและอัพเดต UI
+ */
+
+// ============================================
+// 📦 Types - รูปแบบข้อมูล
+// ============================================
+
+// WebSocket ที่มีข้อมูล user (optional ตอนนี้ยังไม่มี auth)
 interface AuthenticatedWebSocket extends WebSocket {
-  userId?: number;
-  employeeId?: string;
-  role?: string;
+  userId?: number;        // รหัสผู้ใช้
+  employeeId?: string;    // รหัสพนักงาน
+  role?: string;          // Role
+  branchId?: number;      // สาขา
+  isAlive?: boolean;      // สำหรับ heartbeat
 }
 
-interface CheckInMessage {
-  type: 'check-in';
-  shiftId?: number;
-  locationId?: number;
-  latitude: number;
-  longitude: number;
-  photo?: string; // Base64 encoded image
+// ประเภทข้อมูลที่จะ broadcast
+type AttendanceAction = 'CHECK_IN' | 'CHECK_OUT' | 'UPDATE' | 'DELETE';
+type ShiftAction = 'CREATE' | 'UPDATE' | 'DELETE';
+
+// ============================================
+// 📡 Global Variables
+// ============================================
+
+// เก็บ WebSocket Server instance ไว้ใช้ broadcast
+let wss: WebSocketServer | null = null;
+
+// ============================================
+// 🛠️ Helper Functions
+// ============================================
+
+/**
+ * 📡 Broadcast message ไปยังทุก connected clients
+ */
+function broadcast(data: object) {
+  if (!wss) {
+    console.warn('⚠️ WebSocket server not initialized');
+    return;
+  }
+
+  const message = JSON.stringify(data);
+  
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
 }
 
-interface CheckOutMessage {
-  type: 'check-out';
-  attendanceId: number;
-  latitude: number;
-  longitude: number;
-  photo?: string;
+/**
+ * 💓 Heartbeat - ตรวจสอบว่า client ยังเชื่อมต่ออยู่
+ */
+function heartbeat(ws: AuthenticatedWebSocket) {
+  ws.isAlive = true;
 }
 
-interface ErrorResponse {
-  type: 'error';
-  message: string;
-  code?: string;
-}
+// ============================================
+// 📋 Main Functions
+// ============================================
 
-interface SuccessResponse {
-  type: 'success';
-  message: string;
-  data?: any;
-}
-
+/**
+ * 🚀 Setup WebSocket Server
+ * 
+ * เรียกใช้ใน index.ts เพื่อ setup WebSocket
+ */
 export function setupAttendanceWebSocket(server: Server) {
-  const wss = new WebSocketServer({ 
+  wss = new WebSocketServer({ 
     noServer: true,
     path: '/ws/attendance'
   });
 
-  // Handle HTTP upgrade requests
+  // ===== Handle HTTP upgrade requests =====
   server.on('upgrade', (request, socket, head) => {
     const { pathname } = parse(request.url || '');
     
     if (pathname === '/ws/attendance') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
+      wss!.handleUpgrade(request, socket, head, (ws) => {
+        wss!.emit('connection', ws, request);
       });
     } else {
+      // ปฏิเสธ connection ที่ไม่ใช่ /ws/attendance
       socket.destroy();
     }
   });
 
+  // ===== Handle new connections =====
   wss.on('connection', (ws: AuthenticatedWebSocket, request) => {
     console.log('📡 New WebSocket connection');
 
-    // Parse authentication from query params (e.g., ?userId=1&employeeId=SA001&role=USER)
+    // Parse query params (optional - ตอนนี้ยังไม่มี auth)
+    // ตัวอย่าง: /ws/attendance?userId=1&employeeId=SA001&role=USER&branchId=1
     const { query } = parse(request.url || '', true);
-    const userId = query.userId ? parseInt(query.userId as string) : undefined;
-    const employeeId = query.employeeId as string;
-    const role = query.role as string;
-
-    if (!userId || !employeeId || !role) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'Authentication required. Please provide userId, employeeId, and role',
-        code: 'AUTH_REQUIRED'
-      } as ErrorResponse));
-      ws.close();
-      return;
+    
+    // เก็บข้อมูล user ไว้ใน ws object (ถ้ามี)
+    if (query.userId) {
+      ws.userId = parseInt(query.userId as string);
+    }
+    if (query.employeeId) {
+      ws.employeeId = query.employeeId as string;
+    }
+    if (query.role) {
+      ws.role = query.role as string;
+    }
+    if (query.branchId) {
+      ws.branchId = parseInt(query.branchId as string);
     }
 
-    ws.userId = userId;
-    ws.employeeId = employeeId;
-    ws.role = role;
+    // Setup heartbeat
+    ws.isAlive = true;
+    ws.on('pong', () => heartbeat(ws));
 
-    console.log(`✅ User ${employeeId} (${role}) connected`);
-
-    // Send welcome message
+    // ===== ส่ง welcome message =====
     ws.send(JSON.stringify({
       type: 'connected',
-      message: `Welcome ${employeeId}! You are connected to real-time attendance system.`,
-      userId,
-      employeeId,
-      role
+      message: 'เชื่อมต่อกับระบบ real-time สำเร็จ',
+      timestamp: new Date().toISOString(),
+      // ส่งข้อมูล user กลับไป (ถ้ามี)
+      ...(ws.userId && { userId: ws.userId }),
+      ...(ws.employeeId && { employeeId: ws.employeeId }),
+      ...(ws.role && { role: ws.role }),
     }));
 
-    // Handle incoming messages
-    ws.on('message', async (data: Buffer) => {
+    console.log(`✅ Client connected ${ws.employeeId ? `(${ws.employeeId})` : ''}`);
+
+    // ===== Handle incoming messages =====
+    ws.on('message', (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString());
         
         switch (message.type) {
-          case 'check-in':
-            await handleCheckIn(ws, message as CheckInMessage);
-            break;
-            
-          case 'check-out':
-            await handleCheckOut(ws, message as CheckOutMessage);
-            break;
-            
           case 'ping':
-            ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+            // ตอบ pong กลับ (heartbeat)
+            ws.send(JSON.stringify({ 
+              type: 'pong', 
+              timestamp: new Date().toISOString() 
+            }));
+            break;
+            
+          case 'subscribe':
+            // TODO: สำหรับอนาคต - subscribe เฉพาะ channel ที่สนใจ
+            // เช่น subscribe('attendance:branch:1')
+            ws.send(JSON.stringify({ 
+              type: 'subscribed', 
+              channel: message.channel,
+              message: `Subscribed to ${message.channel}` 
+            }));
             break;
             
           default:
+            // ไม่รับ message อื่นๆ (check-in/check-out ให้ใช้ REST API)
             ws.send(JSON.stringify({
               type: 'error',
-              message: `Unknown message type: ${message.type}`,
-              code: 'UNKNOWN_TYPE'
-            } as ErrorResponse));
+              message: `ไม่รองรับ message type: ${message.type}. กรุณาใช้ REST API สำหรับ check-in/check-out`,
+              code: 'USE_REST_API'
+            }));
         }
       } catch (error) {
         console.error('❌ Error processing message:', error);
         ws.send(JSON.stringify({
           type: 'error',
-          message: 'Failed to process message',
+          message: 'ไม่สามารถประมวลผล message ได้',
           code: 'PROCESSING_ERROR'
-        } as ErrorResponse));
+        }));
       }
     });
 
+    // ===== Handle disconnect =====
     ws.on('close', () => {
-      console.log(`🔌 User ${employeeId} disconnected`);
+      console.log(`🔌 Client disconnected ${ws.employeeId ? `(${ws.employeeId})` : ''}`);
     });
 
+    // ===== Handle error =====
     ws.on('error', (error) => {
-      console.error(`❌ WebSocket error for ${employeeId}:`, error);
+      console.error(`❌ WebSocket error ${ws.employeeId ? `for ${ws.employeeId}` : ''}:`, error);
     });
   });
+
+  // ===== Setup heartbeat interval =====
+  // ตรวจสอบทุก 30 วินาทีว่า clients ยังเชื่อมต่ออยู่
+  const interval = setInterval(() => {
+    wss!.clients.forEach((ws: AuthenticatedWebSocket) => {
+      if (ws.isAlive === false) {
+        console.log('💀 Terminating inactive connection');
+        return ws.terminate();
+      }
+      
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+
+  wss.on('close', () => {
+    clearInterval(interval);
+  });
+
+  console.log('📡 WebSocket server initialized at /ws/attendance');
 
   return wss;
 }
 
-async function handleCheckIn(ws: AuthenticatedWebSocket, message: CheckInMessage) {
-  try {
-    if (!ws.userId) {
-      throw new Error('User not authenticated');
-    }
+// ============================================
+// 📡 Broadcast Functions - เรียกใช้หลัง CUD
+// ============================================
 
-    // 1. ตรวจสอบว่ามี shift วันนี้หรือไม่
-    const shiftsToday = await shiftService.getActiveShiftsForToday(ws.userId);
-    
-    if (shiftsToday.length === 0) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'คุณไม่มีกะงานสำหรับวันนี้',
-        code: 'NO_SHIFT_TODAY'
-      } as ErrorResponse));
-      return;
-    }
-
-    // 2. ถ้าไม่ระบุ shiftId ใช้ shift แรก
-    const shift = message.shiftId 
-      ? shiftsToday.find(s => s.shiftId === message.shiftId)
-      : shiftsToday[0];
-
-    if (!shift) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'ไม่พบกะงานที่ระบุ',
-        code: 'SHIFT_NOT_FOUND'
-      } as ErrorResponse));
-      return;
-    }
-
-    // 3. ใช้ locationId จาก shift หรือจากที่ส่งมา
-    const locationId = message.locationId || shift.locationId;
-
-    if (!locationId) {
-      ws.send(JSON.stringify({
-        type: 'error',
-        message: 'ไม่พบข้อมูลสถานที่',
-        code: 'LOCATION_REQUIRED'
-      } as ErrorResponse));
-      return;
-    }
-
-    // 4. เรียก service เพื่อ check-in
-    const result = await attendanceService.checkIn({
-      userId: ws.userId,
-      shiftId: shift.shiftId,
-      locationId,
-      latitude: message.latitude,
-      longitude: message.longitude,
-      photo: message.photo || ''
-    });
-
-    // 5. ส่งผลลัพธ์กลับ
-    ws.send(JSON.stringify({
-      type: 'success',
-      message: 'เข้างานสำเร็จ',
-      data: result
-    } as SuccessResponse));
-
-    // Broadcast to admins (optional - for real-time monitoring)
-    broadcastToAdmins(ws, {
-      type: 'attendance-update',
-      action: 'check-in',
-      employeeId: ws.employeeId,
-      data: result
-    });
-
-  } catch (error: any) {
-    console.error('❌ Check-in error:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: error.message || 'เข้างานไม่สำเร็จ',
-      code: 'CHECK_IN_FAILED'
-    } as ErrorResponse));
-  }
+/**
+ * 📡 Broadcast การเปลี่ยนแปลง Attendance
+ * 
+ * เรียกใช้หลังจาก:
+ * - Check-in (action: 'CHECK_IN')
+ * - Check-out (action: 'CHECK_OUT')
+ * - Update attendance (action: 'UPDATE')
+ * - Delete attendance (action: 'DELETE')
+ * 
+ * @param action - ประเภทการกระทำ
+ * @param data - ข้อมูล attendance (หรือ { attendanceId } สำหรับ DELETE)
+ */
+export function broadcastAttendanceUpdate(action: AttendanceAction, data: any) {
+  broadcast({
+    type: 'attendance_update',
+    action,
+    data,
+    timestamp: new Date().toISOString(),
+  });
+  
+  console.log(`📡 Broadcasted attendance ${action}`);
 }
 
-async function handleCheckOut(ws: AuthenticatedWebSocket, message: CheckOutMessage) {
-  try {
-    if (!ws.userId) {
-      throw new Error('User not authenticated');
-    }
-
-    // เรียก service เพื่อ check-out
-    const result = await attendanceService.checkOut({
-      attendanceId: message.attendanceId,
-      userId: ws.userId,
-      latitude: message.latitude,
-      longitude: message.longitude,
-      photo: message.photo || ''
-    });
-
-    ws.send(JSON.stringify({
-      type: 'success',
-      message: 'ออกงานสำเร็จ',
-      data: result
-    } as SuccessResponse));
-
-    // Broadcast to admins
-    broadcastToAdmins(ws, {
-      type: 'attendance-update',
-      action: 'check-out',
-      employeeId: ws.employeeId,
-      data: result
-    });
-
-  } catch (error: any) {
-    console.error('❌ Check-out error:', error);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: error.message || 'ออกงานไม่สำเร็จ',
-      code: 'CHECK_OUT_FAILED'
-    } as ErrorResponse));
-  }
+/**
+ * 📡 Broadcast การเปลี่ยนแปลง Shift
+ * 
+ * เรียกใช้หลังจาก:
+ * - Create shift (action: 'CREATE')
+ * - Update shift (action: 'UPDATE')
+ * - Delete shift (action: 'DELETE')
+ * 
+ * @param action - ประเภทการกระทำ
+ * @param data - ข้อมูล shift (หรือ { shiftId, deleteReason } สำหรับ DELETE)
+ */
+export function broadcastShiftUpdate(action: ShiftAction, data: any) {
+  broadcast({
+    type: 'shift_update',
+    action,
+    data,
+    timestamp: new Date().toISOString(),
+  });
+  
+  console.log(`📡 Broadcasted shift ${action}`);
 }
 
-function broadcastToAdmins(currentWs: AuthenticatedWebSocket, message: any) {
-  // ส่งข้อความไปหา admins ที่เชื่อมต่ออยู่
-  // จะต้องเก็บ clients ไว้ใน Map หรือ Set
-  // ตอนนี้ข้ามไปก่อน - จะเพิ่มในอนาคต
+/**
+ * 📡 Broadcast ข้อมูลทั่วไป
+ * 
+ * ใช้สำหรับ broadcast ข้อมูลอื่นๆ ที่ไม่ใช่ attendance/shift
+ * 
+ * @param type - ประเภทข้อมูล
+ * @param data - ข้อมูล
+ */
+export function broadcastMessage(type: string, data: any) {
+  broadcast({
+    type,
+    data,
+    timestamp: new Date().toISOString(),
+  });
+  
+  console.log(`📡 Broadcasted ${type}`);
 }
+
+// ============================================
+// 📤 Export
+// ============================================
+
+export default {
+  setupAttendanceWebSocket,
+  broadcastAttendanceUpdate,
+  broadcastShiftUpdate,
+  broadcastMessage,
+};

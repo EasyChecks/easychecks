@@ -1,0 +1,63 @@
+import express from 'express';
+import {
+  createLocation,
+  getAllLocations,
+  getNearbyLocations,
+  getLocationStatistics,
+  getLocationById,
+  updateLocation,
+  deleteLocation,
+  restoreLocation,
+} from '../controllers/location.controller.js';
+import { authenticate } from '../middleware/auth.middleware.js';
+import { requireRole } from '../middleware/role.middleware.js';
+
+const router = express.Router();
+
+/**
+ * Location Routes - จัดการ API สถานที่/แผนที่
+ */
+
+// Admin/SuperAdmin เท่านั้นที่สร้างได้
+router.post(
+  '/',
+  authenticate,
+  requireRole(['ADMIN', 'SUPERADMIN']),
+  createLocation
+); // สร้างสถานที่
+
+// ทุกคนที่ login แล้วสามารถดูได้
+router.get('/', authenticate, getAllLocations); // ดูรายการสถานที่
+router.get('/nearby', authenticate, getNearbyLocations); // ค้นหาสถานที่ใกล้เคียง
+router.get('/:id', authenticate, getLocationById); // ดูสถานที่ตาม ID
+
+// Admin/SuperAdmin เท่านั้น
+router.get(
+  '/admin/statistics',
+  authenticate,
+  requireRole(['ADMIN', 'SUPERADMIN']),
+  getLocationStatistics
+); // สถิติ
+
+router.patch(
+  '/:id',
+  authenticate,
+  requireRole(['ADMIN', 'SUPERADMIN']),
+  updateLocation
+); // แก้ไข
+
+router.delete(
+  '/:id',
+  authenticate,
+  requireRole(['ADMIN', 'SUPERADMIN']),
+  deleteLocation
+); // ลบ (soft delete)
+
+router.post(
+  '/:id/restore',
+  authenticate,
+  requireRole(['ADMIN', 'SUPERADMIN']),
+  restoreLocation
+); // กู้คืน
+
+export default router;

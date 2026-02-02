@@ -1,0 +1,7 @@
+node_modules/
+dist/
+build/
+*.d.ts
+package.json
+package-lock.json
+prisma/

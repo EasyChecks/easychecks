@@ -9,9 +9,11 @@ datasource db {
 model User {
   userId                                                  Int                  @id @default(autoincrement()) @map("user_id")
   employeeId                                              String               @unique @map("employee_id")
+  title                                                   Title                @default(MR) @map("title")
   firstName                                               String               @map("first_name")
   lastName                                                String               @map("last_name")
   nickname                                                String?              @map("nickname")
+  gender                                                  Gender               @default(MALE)
   nationalId                                              String               @unique @map("national_id")
   emergent_tel                                            String               @map("emergent_tel")
   emergent_name                                           String               @map("emergent_name")
@@ -102,12 +104,10 @@ model Attendance {
   note             String?
   isAutoCheckout   Boolean          @default(false) @map("is_auto_checkout")
   createdAt        DateTime         @default(now()) @map("created_at")
-  // Soft delete fields
+  event_id         Int?
+  deleteReason     String?          @map("delete_reason")
   deletedAt        DateTime?        @map("deleted_at")
   deletedByUserId  Int?             @map("deleted_by_user_id")
-  deleteReason     String?          @map("delete_reason")
-  
-  event_id         Int?
   events           events?          @relation(fields: [event_id], references: [event_id])
   location         Location?        @relation(fields: [locationId], references: [locationId])
   shift            Shift?           @relation(fields: [shiftId], references: [shiftId])
@@ -312,6 +312,17 @@ enum UserStatus {
   ACTIVE
   SUSPENDED
   RESIGNED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum Title {
+  MR      // นาย
+  MRS     // นาง
+  MISS    // นางสาว
 }
 
 enum AttendanceStatus {

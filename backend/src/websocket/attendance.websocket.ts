@@ -32,6 +32,7 @@ interface AuthenticatedWebSocket extends WebSocket {
 // ประเภทข้อมูลที่จะ broadcast
 type AttendanceAction = 'CHECK_IN' | 'CHECK_OUT' | 'UPDATE' | 'DELETE';
 type ShiftAction = 'CREATE' | 'UPDATE' | 'DELETE';
+type UserAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'BULK_CREATE';
 
 // ============================================
 // 📡 Global Variables
@@ -280,6 +281,29 @@ export function broadcastMessage(type: string, data: any) {
   console.log(`📡 Broadcasted ${type}`);
 }
 
+/**
+ * 📡 Broadcast การเปลี่ยนแปลง User
+ * 
+ * เรียกใช้หลังจาก:
+ * - Create user (action: 'CREATE')
+ * - Update user (action: 'UPDATE')
+ * - Delete user (action: 'DELETE')
+ * - Bulk create users (action: 'BULK_CREATE')
+ * 
+ * @param action - ประเภทการกระทำ
+ * @param data - ข้อมูล user (หรือ { userId, deleteReason } สำหรับ DELETE)
+ */
+export function broadcastUserUpdate(action: UserAction, data: any) {
+  broadcast({
+    type: 'user_update',
+    action,
+    data,
+    timestamp: new Date().toISOString(),
+  });
+  
+  console.log(`📡 Broadcasted user ${action}`);
+}
+
 // ============================================
 // 📤 Export
 // ============================================
@@ -288,5 +312,6 @@ export default {
   setupAttendanceWebSocket,
   broadcastAttendanceUpdate,
   broadcastShiftUpdate,
+  broadcastUserUpdate,
   broadcastMessage,
 };

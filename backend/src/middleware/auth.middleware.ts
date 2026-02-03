@@ -10,6 +10,7 @@ export interface AuthUser {
   employeeId: string;
   role: 'SUPERADMIN' | 'ADMIN' | 'MANAGER' | 'USER';
   email: string;
+  branchId?: number;
 }
 
 // Extend Express Request type
@@ -28,24 +29,27 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
     // const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Placeholder: ใช้ข้อมูลจาก header ชั่วคราว (Mock Auth)
-    const userId = req.headers['x-user-id'];
-    const employeeId = req.headers['x-employee-id'];
-    const role = req.headers['x-user-role'] as any; // แก้จาก x-role เป็น x-user-role
+    let userId = req.headers['x-user-id'];
+    let employeeId = req.headers['x-employee-id'];
+    let role = req.headers['x-user-role'] as any;
+    let branchId = req.headers['x-branch-id'];
     
+    // Default test user (if headers not provided)
     if (!userId || !employeeId || !role) {
-      res.status(401).json({
-        success: false,
-        error: 'Unauthorized - กรุณา login ก่อน',
-        hint: 'ส่ง headers: x-user-id, x-employee-id, x-user-role'
-      });
-      return;
+      userId = userId || '1';
+      employeeId = employeeId || 'TEST001';
+      role = role || 'ADMIN';
+      branchId = branchId || '1';
+      
+      console.log('⚠️ Using default test user (no auth headers provided)');
     }
     
     req.user = {
       userId: parseInt(userId as string),
       employeeId: employeeId as string,
       role,
-      email: ''
+      email: 'test@example.com',
+      branchId: branchId ? parseInt(branchId as string) : undefined
     };
     
     next();

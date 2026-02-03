@@ -125,12 +125,14 @@ model LeaveRequest {
   reason                                         String?
   status                                         LeaveStatus @default(PENDING)
   attachmentUrl                                  String?     @map("attachment_url")
+  medicalCertificateUrl                          String?     @map("medical_certificate_url") // ใบรับรองแพทย์ (สำหรับ SICK >= 3 วัน, MATERNITY, STERILIZATION)
   approvedByUserId                               Int?        @map("approved_by_user_id")
   adminComment                                   String?     @map("admin_comment")
   createdAt                                      DateTime    @default(now()) @map("created_at")
   updatedAt                                      DateTime    @default(now()) @updatedAt @map("updated_at")
   approved_at                                    DateTime?
   number_of_days                                 Int         @default(1)
+  paid_days                                      Int?        @map("paid_days") // จำนวนวันที่ได้รับค่าจ้าง (คำนวณตาม LeaveType)
   rejection_reason                               String?
   deleted_at                                     DateTime?
   deleted_by_user_id                             Int?
@@ -332,9 +334,14 @@ enum AttendanceStatus {
 }
 
 enum LeaveType {
-  SICK
-  PERSONAL
-  VACATION
+  SICK              // ลาป่วย - ได้รับค่าจ้างไม่เกิน 30 วันต่อปี
+  PERSONAL          // ลากิจ - ตามข้อบังคับ
+  VACATION          // ลาพักร้อน - 6 วันต่อปี, ได้รับค่าจ้าง, สะสมได้
+  MILITARY          // ลาเพื่อรับราชการทหาร - ได้รับค่าจ้างไม่เกิน 60 วันต่อปี (เฉพาะชาย)
+  TRAINING          // ลาเพื่อฝึกอบรม - ไม่ได้รับค่าจ้าง
+  MATERNITY         // ลาคลอด - ไม่เกิน 90 วัน, ได้รับค่าจ้างไม่เกิน 45 วัน (เฉพาะหญิง)
+  STERILIZATION     // ลาเพื่อทำหมัน - ตามที่แพทย์กำหนด, ได้รับค่าจ้าง
+  ORDINATION        // ลาบวช - ไม่เกิน 120 วัน (เฉพาะชาย)
 }
 
 enum LeaveStatus {

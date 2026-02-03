@@ -45,6 +45,13 @@ router.get('/my', leaveRequestController.getMyLeaveRequests);
 router.get('/my/statistics', leaveRequestController.getMyLeaveStatistics);
 
 /**
+ * @route   GET /api/leave-requests/my/quota
+ * @desc    ดึงโควต้าการลาของผู้ใช้เอง (วันลาคงเหลือทุกประเภท)
+ * @access  Authenticated
+ */
+router.get('/my/quota', leaveRequestController.getMyLeaveQuota);
+
+/**
  * @route   GET /api/leave-requests
  * @desc    ดึงใบลาทั้งหมด (Admin/Manager only)
  * @access  Admin/Superadmin/Manager

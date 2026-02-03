@@ -21,14 +21,15 @@ export const createLeaveRequest = async (req: Request, res: Response) => {
       return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
-    const { leaveType, startDate, endDate, reason, attachmentUrl } = req.body;
+    const { leaveType, startDate, endDate, reason, attachmentUrl, medicalCertificateUrl } = req.body;
 
     if (!leaveType || !startDate || !endDate) {
       return sendError(res, 'กรุณาระบุ leaveType, startDate, endDate', 400);
     }
 
-    if (!['SICK', 'PERSONAL', 'VACATION'].includes(leaveType)) {
-      return sendError(res, 'leaveType ต้องเป็น SICK, PERSONAL, หรือ VACATION', 400);
+    const validLeaveTypes = ['SICK', 'PERSONAL', 'VACATION', 'MILITARY', 'TRAINING', 'MATERNITY', 'STERILIZATION', 'ORDINATION'];
+    if (!validLeaveTypes.includes(leaveType)) {
+      return sendError(res, `leaveType ต้องเป็น ${validLeaveTypes.join(', ')}`, 400);
     }
 
     const leaveRequest = await LeaveRequestUserActions.createLeaveRequest({
@@ -38,6 +39,7 @@ export const createLeaveRequest = async (req: Request, res: Response) => {
       endDate: new Date(endDate),
       reason,
       attachmentUrl,
+      medicalCertificateUrl,
     });
 
     sendSuccess(res, leaveRequest, 'สร้างใบลาเรียบร้อยแล้ว', 201);
@@ -96,6 +98,26 @@ export const getMyLeaveStatistics = async (req: Request, res: Response) => {
 };
 
 /**
+ * GET /api/leave-requests/my/quota
+ * ดึงโควต้าการลาของผู้ใช้เอง (วันลาคงเหลือทุกประเภท)
+ */
+export const getMyLeaveQuota = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
+    }
+
+    const quota = await LeaveRequestUserActions.getLeaveQuota(userId);
+
+    sendSuccess(res, quota, 'ดึงโควต้าการลาสำเร็จ');
+  } catch (error: any) {
+    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงโควต้า');
+  }
+};
+
+/**
  * GET /api/leave-requests
  * ดึงใบลาทั้งหมด (Admin only)
  */
@@ -120,7 +142,7 @@ export const getAllLeaveRequests = async (req: Request, res: Response) => {
 export const getLeaveRequestById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const leaveId = parseInt(id);
+    const leaveId = parseInt(id as string);
 
     if (!leaveId) {
       return sendError(res, 'ID ใบลาไม่ถูกต้อง', 400);
@@ -146,7 +168,7 @@ export const updateLeaveRequest = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
     const { id } = req.params;
-    const leaveId = parseInt(id);
+    const leaveId = parseInt(id as string);
 
     if (!userId) {
       return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
@@ -170,11 +192,11 @@ export const updateLeaveRequest = async (req: Request, res: Response) => {
     const { leaveType, startDate, endDate, reason, attachmentUrl } = req.body;
 
     const updatedLeaveRequest = await LeaveRequestUserActions.updateLeaveRequest(leaveId, {
-      leaveType,
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
-      reason,
-      attachmentUrl,
+      ...(leaveType && { leaveType }),
+      ...(startDate && { startDate: new Date(startDate) }),
+      ...(endDate && { endDate: new Date(endDate) }),
+      ...(reason && { reason }),
+      ...(attachmentUrl && { attachmentUrl }),
     });
 
     sendSuccess(res, updatedLeaveRequest, 'แก้ไขใบลาเรียบร้อยแล้ว');
@@ -191,7 +213,7 @@ export const approveLeaveRequest = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
     const { id } = req.params;
-    const leaveId = parseInt(id);
+    const leaveId = parseInt(id as string);
     const { adminComment } = req.body;
 
     if (!userId) {
@@ -227,7 +249,7 @@ export const rejectLeaveRequest = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
     const { id } = req.params;
-    const leaveId = parseInt(id);
+    const leaveId = parseInt(id as string);
     const { rejectionReason } = req.body;
 
     if (!userId) {
@@ -267,7 +289,7 @@ export const deleteLeaveRequest = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
     const { id } = req.params;
-    const leaveId = parseInt(id);
+    const leaveId = parseInt(id as string);
 
     if (!userId) {
       return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);

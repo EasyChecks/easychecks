@@ -1,27 +1,83 @@
 import { prisma } from '../lib/prisma.js';
-import type { LeaveRequest, LeaveStatus } from '@prisma/client';
-import { differenceInBusinessDays, parseISO, format, isWeekend } from 'date-fns';
+import type { LeaveRequest, LeaveStatus, LeaveType, Gender } from '@prisma/client';
+import { differenceInBusinessDays, parseISO, format, isWeekend, startOfYear, endOfYear } from 'date-fns';
 
 /**
  * Leave Request Service - จัดการใบลา
  * ใช้ date-fns สำหรับจัดการวันที่
  */
 
+// กำหนดกฎการลาแต่ละประเภท
+export const LEAVE_RULES = {
+  SICK: { 
+    maxPaidDaysPerYear: 30, 
+    requireMedicalCert: 3, // ต้องมีใบรับรองแพทย์เมื่อลา >= 3 วัน
+    paid: true,
+    genderRestriction: null 
+  },
+  PERSONAL: { 
+    maxPaidDaysPerYear: null, // ไม่จำกัด แต่ตามข้อบังคับบริษัท
+    requireMedicalCert: null,
+    paid: false, // หรือตามข้อบังคับบริษัท
+    genderRestriction: null 
+  },
+  VACATION: { 
+    maxPaidDaysPerYear: 6, // 6 วันต่อปี (ทำงานครบ 1 ปี)
+    requireMedicalCert: null,
+    paid: true,
+    carryOver: true, // สะสมได้
+    genderRestriction: null 
+  },
+  MILITARY: { 
+    maxPaidDaysPerYear: 60,
+    requireMedicalCert: null,
+    paid: true,
+    genderRestriction: 'MALE' as Gender // เฉพาะชาย
+  },
+  TRAINING: { 
+    maxPaidDaysPerYear: null,
+    requireMedicalCert: null,
+    paid: false, // ไม่ได้รับค่าจ้าง
+    genderRestriction: null 
+  },
+  MATERNITY: { 
+    maxDaysTotal: 90, // ไม่เกิน 90 วัน
+    maxPaidDaysPerYear: 45, // ได้รับค่าจ้างไม่เกิน 45 วัน
+    requireMedicalCert: true, // ต้องมีใบรับรองแพทย์
+    paid: true,
+    genderRestriction: 'FEMALE' as Gender // เฉพาะหญิง
+  },
+  STERILIZATION: { 
+    maxPaidDaysPerYear: null, // ตามที่แพทย์กำหนด
+    requireMedicalCert: true, // ต้องมีใบรับรองแพทย์
+    paid: true,
+    genderRestriction: null // ทั้งสองเพศ
+  },
+  ORDINATION: { 
+    maxDaysTotal: 120,
+    requireMedicalCert: null,
+    paid: false, // ตามข้อบังคับบริษัท (เบื้องต้นไม่จ่าย)
+    genderRestriction: 'MALE' as Gender // เฉพาะชาย (เบื้องต้น)
+  },
+} as const;
+
 export interface CreateLeaveRequestDTO {
   userId: number;
-  leaveType: 'SICK' | 'PERSONAL' | 'VACATION';
+  leaveType: LeaveType;
   startDate: Date;
   endDate: Date;
   reason?: string;
   attachmentUrl?: string;
+  medicalCertificateUrl?: string; // ใบรับรองแพทย์
 }
 
 export interface UpdateLeaveRequestDTO {
-  leaveType?: 'SICK' | 'PERSONAL' | 'VACATION';
+  leaveType?: LeaveType;
   startDate?: Date;
   endDate?: Date;
   reason?: string;
   attachmentUrl?: string;
+  medicalCertificateUrl?: string;
 }
 
 export interface ApproveLeaveRequestDTO {
@@ -40,6 +96,184 @@ export interface RejectLeaveRequestDTO {
 function calculateBusinessDays(startDate: Date, endDate: Date): number {
   const days = differenceInBusinessDays(endDate, startDate) + 1; // +1 เพราะนับวันเริ่มต้นด้วย
   return days > 0 ? days : 0;
+}
+
+/**
+ * คำนวณจำนวนวันที่ได้รับค่าจ้างตามประเภทการลา
+ */
+function calculatePaidDays(leaveType: LeaveType, numberOfDays: number): number {
+  const rules = LEAVE_RULES[leaveType];
+  
+  if (!rules.paid) {
+    return 0; // ไม่ได้รับค่าจ้าง
+  }
+
+  // ถ้ามีข้อจำกัดวันที่ได้รับค่าจ้าง
+  if (rules.maxPaidDaysPerYear !== null && rules.maxPaidDaysPerYear !== undefined) {
+    return Math.min(numberOfDays, rules.maxPaidDaysPerYear);
+  }
+
+  return numberOfDays; // ได้รับค่าจ้างทุกวัน
+}
+
+/**
+ * ตรวจสอบจำนวนวันลาที่ใช้ไปในปีนี้
+ */
+async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): Promise<number> {
+  const yearStart = startOfYear(new Date());
+  const yearEnd = endOfYear(new Date());
+
+  const leaves = await prisma.leaveRequest.findMany({
+    where: {
+      userId,
+      leaveType,
+      status: 'APPROVED',
+      deleted_at: null,
+      startDate: {
+        gte: yearStart,
+        lte: yearEnd,
+      },
+    },
+    select: {
+      number_of_days: true,
+    },
+  });
+
+  return leaves.reduce((sum: number, leave: any) => sum + leave.number_of_days, 0);
+}
+
+/**
+ * ตรวจสอบจำนวนวันลาที่ได้รับค่าจ้างในปีนี้
+ */
+async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType): Promise<number> {
+  const yearStart = startOfYear(new Date());
+  const yearEnd = endOfYear(new Date());
+
+  const leaves = await prisma.leaveRequest.findMany({
+    where: {
+      userId,
+      leaveType,
+      status: 'APPROVED',
+      deleted_at: null,
+      startDate: {
+        gte: yearStart,
+        lte: yearEnd,
+      },
+    },
+    select: {
+      paid_days: true,
+    },
+  });
+
+  return leaves.reduce((sum: number, leave: any) => sum + (leave.paid_days || 0), 0);
+}
+
+/**
+ * ดูสถิติการลาแต่ละประเภทของผู้ใช้
+ */
+async function getLeaveQuota(userId: number): Promise<any> {
+  const quotas = await Promise.all(
+    Object.keys(LEAVE_RULES).map(async (leaveType) => {
+      const type = leaveType as LeaveType;
+      const rules = LEAVE_RULES[type];
+      const usedDays = await getUsedLeaveDaysThisYear(userId, type);
+      const usedPaidDays = await getUsedPaidLeaveDaysThisYear(userId, type);
+
+      // Get maxPaidDaysPerYear safely (some types have it, some don't)
+      const maxPaid = 'maxPaidDaysPerYear' in rules ? rules.maxPaidDaysPerYear : null;
+      const maxTotal = 'maxDaysTotal' in rules ? rules.maxDaysTotal : null;
+
+      return {
+        leaveType: type,
+        usedDays,
+        usedPaidDays,
+        maxPaidDaysPerYear: maxPaid,
+        maxDaysTotal: maxTotal,
+        remainingPaidDays: maxPaid 
+          ? Math.max(0, maxPaid - usedPaidDays)
+          : null,
+        isPaid: rules.paid,
+        requireMedicalCert: rules.requireMedicalCert || false,
+        genderRestriction: rules.genderRestriction || null,
+      };
+    })
+  );
+
+  return quotas;
+}
+
+/**
+ * Validate leave request based on leave type rules
+ */
+async function validateLeaveRequest(
+  userId: number,
+  leaveType: LeaveType,
+  numberOfDays: number,
+  medicalCertificateUrl?: string
+): Promise<{ isValid: boolean; message?: string }> {
+  const rules = LEAVE_RULES[leaveType];
+
+  // ตรวจสอบข้อมูลผู้ใช้
+  const user = await prisma.user.findUnique({
+    where: { userId },
+    select: { gender: true },
+  });
+
+  if (!user) {
+    return { isValid: false, message: 'ไม่พบผู้ใช้' };
+  }
+
+  // ตรวจสอบเพศ
+  if (rules.genderRestriction && user.gender !== rules.genderRestriction) {
+    const genderText = rules.genderRestriction === 'MALE' ? 'ชาย' : 'หญิง';
+    return { 
+      isValid: false, 
+      message: `การลาประเภท ${leaveType} สามารถใช้ได้เฉพาะเพศ${genderText}เท่านั้น` 
+    };
+  }
+
+  // ตรวจสอบใบรับรองแพทย์
+  if (rules.requireMedicalCert) {
+    if (typeof rules.requireMedicalCert === 'number') {
+      // ต้องมีใบรับรองแพทย์เมื่อลา >= จำนวนวันที่กำหนด
+      if (numberOfDays >= rules.requireMedicalCert && !medicalCertificateUrl) {
+        return { 
+          isValid: false, 
+          message: `การลาป่วย ${rules.requireMedicalCert} วันขึ้นไป ต้องแนบใบรับรองแพทย์` 
+        };
+      }
+    } else if (rules.requireMedicalCert === true && !medicalCertificateUrl) {
+      return { 
+        isValid: false, 
+        message: `การลาประเภท ${leaveType} ต้องแนบใบรับรองแพทย์` 
+      };
+    }
+  }
+
+  // ตรวจสอบจำนวนวันสูงสุดต่อครั้ง
+  if ('maxDaysTotal' in rules && rules.maxDaysTotal) {
+    if (numberOfDays > rules.maxDaysTotal) {
+      return { 
+        isValid: false, 
+        message: `การลาประเภท ${leaveType} ลาได้ไม่เกิน ${rules.maxDaysTotal} วันต่อครั้ง` 
+      };
+    }
+  }
+
+  // ตรวจสอบจำนวนวันที่ใช้ไปในปีนี้ (สำหรับประเภทที่มี maxPaidDaysPerYear)
+  if ('maxPaidDaysPerYear' in rules && rules.maxPaidDaysPerYear) {
+    const usedPaidDays = await getUsedPaidLeaveDaysThisYear(userId, leaveType);
+    const paidDays = calculatePaidDays(leaveType, numberOfDays);
+    
+    if (usedPaidDays + paidDays > rules.maxPaidDaysPerYear) {
+      return { 
+        isValid: false, 
+        message: `คุณใช้วันลา${leaveType}ที่ได้รับค่าจ้างไปแล้ว ${usedPaidDays} วัน (สูงสุด ${rules.maxPaidDaysPerYear} วันต่อปี)` 
+      };
+    }
+  }
+
+  return { isValid: true };
 }
 
 // ========================================================================================
@@ -63,10 +297,30 @@ async function createLeaveRequest(
   // Check if user exists
   const user = await prisma.user.findUnique({
     where: { userId: data.userId },
+    select: { userId: true, gender: true },
   });
 
   if (!user) {
     throw new Error('ไม่พบผู้ใช้');
+  }
+
+  // Calculate number of business days
+  const numberOfDays = calculateBusinessDays(startDate, endDate);
+
+  if (numberOfDays <= 0) {
+    throw new Error('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
+  }
+
+  // Validate leave request based on type
+  const validation = await validateLeaveRequest(
+    data.userId,
+    data.leaveType,
+    numberOfDays,
+    data.medicalCertificateUrl
+  );
+
+  if (!validation.isValid) {
+    throw new Error(validation.message || 'ข้อมูลการลาไม่ถูกต้อง');
   }
 
   // Check for overlapping leave requests
@@ -74,6 +328,7 @@ async function createLeaveRequest(
     where: {
       userId: data.userId,
       status: { not: 'REJECTED' },
+      deleted_at: null,
       AND: [
         { startDate: { lte: endDate } },
         { endDate: { gte: startDate } },
@@ -85,12 +340,8 @@ async function createLeaveRequest(
     throw new Error('มีใบลาที่ทับซ้อนกับช่วงวันที่นี้');
   }
 
-  // Calculate number of business days
-  const numberOfDays = calculateBusinessDays(startDate, endDate);
-
-  if (numberOfDays <= 0) {
-    throw new Error('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
-  }
+  // Calculate paid days
+  const paidDays = calculatePaidDays(data.leaveType, numberOfDays);
 
   return prisma.leaveRequest.create({
     data: {
@@ -98,10 +349,31 @@ async function createLeaveRequest(
       leaveType: data.leaveType,
       startDate,
       endDate,
-      numberOfDays,
       reason: data.reason,
       attachmentUrl: data.attachmentUrl,
+      medicalCertificateUrl: data.medicalCertificateUrl,
+      number_of_days: numberOfDays,
+      paid_days: paidDays,
       status: 'PENDING',
+    },
+    include: {
+      user: {
+        select: {
+          userId: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+          gender: true,
+        },
+      },
+      approver: {
+        select: {
+          userId: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
     },
   });
 }
@@ -154,9 +426,7 @@ async function getLeaveRequestsByUser(
 /**
  * ดึงใบลาด้วย ID
  */
-async function getLeaveRequestById(
-  leaveId: number
-): Promise<LeaveRequest | null> {
+async function getLeaveRequestById(leaveId: number) {
   return prisma.leaveRequest.findUnique({
     where: { leaveId },
     include: {
@@ -292,10 +562,10 @@ async function getLeaveStatistics(userId: number): Promise<{
     select: { numberOfDays: true, status: true },
   });
 
-  const totalDays = allLeaves.reduce((sum, leave) => sum + leave.numberOfDays, 0);
+  const totalDays = allLeaves.reduce((sum: number, leave: any) => sum + leave.numberOfDays, 0);
   const approvedDays = allLeaves
-    .filter((leave) => leave.status === 'APPROVED')
-    .reduce((sum, leave) => sum + leave.numberOfDays, 0);
+    .filter((leave: any) => leave.status === 'APPROVED')
+    .reduce((sum: number, leave: any) => sum + leave.numberOfDays, 0);
 
   return {
     total,
@@ -433,6 +703,7 @@ export const LeaveRequestUserActions = {
   updateLeaveRequest,
   deleteLeaveRequest,
   getLeaveStatistics,
+  getLeaveQuota,
 };
 
 /**

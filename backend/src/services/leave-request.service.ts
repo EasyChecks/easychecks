@@ -128,18 +128,18 @@ async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): P
       userId,
       leaveType,
       status: 'APPROVED',
-      deleted_at: null,
+      deletedAt: null,
       startDate: {
         gte: yearStart,
         lte: yearEnd,
       },
     },
     select: {
-      number_of_days: true,
+      numberOfDays: true,
     },
   });
 
-  return leaves.reduce((sum: number, leave: any) => sum + leave.number_of_days, 0);
+  return leaves.reduce((sum: number, leave: any) => sum + leave.numberOfDays, 0);
 }
 
 /**
@@ -154,18 +154,18 @@ async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType
       userId,
       leaveType,
       status: 'APPROVED',
-      deleted_at: null,
+      deletedAt: null,
       startDate: {
         gte: yearStart,
         lte: yearEnd,
       },
     },
     select: {
-      paid_days: true,
+      paidDays: true,
     },
   });
 
-  return leaves.reduce((sum: number, leave: any) => sum + (leave.paid_days || 0), 0);
+  return leaves.reduce((sum: number, leave: any) => sum + (leave.paidDays || 0), 0);
 }
 
 /**
@@ -328,7 +328,7 @@ async function createLeaveRequest(
     where: {
       userId: data.userId,
       status: { not: 'REJECTED' },
-      deleted_at: null,
+      deletedAt: null,
       AND: [
         { startDate: { lte: endDate } },
         { endDate: { gte: startDate } },
@@ -352,8 +352,8 @@ async function createLeaveRequest(
       reason: data.reason,
       attachmentUrl: data.attachmentUrl,
       medicalCertificateUrl: data.medicalCertificateUrl,
-      number_of_days: numberOfDays,
-      paid_days: paidDays,
+      numberOfDays: numberOfDays,
+      paidDays: paidDays,
       status: 'PENDING',
     },
     include: {
@@ -504,16 +504,41 @@ async function updateLeaveRequest(
     throw new Error('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
   }
 
+  // Calculate paid days if leaveType is provided
+  const leaveType = data.leaveType || leaveRequest.leaveType;
+  const paidDays = calculatePaidDays(leaveType, numberOfDays);
+
   return prisma.leaveRequest.update({
     where: { leaveId },
     data: {
-      leaveType: data.leaveType,
+      ...(data.leaveType && { leaveType: data.leaveType }),
       startDate,
       endDate,
-      numberOfDays,
-      reason: data.reason,
-      attachmentUrl: data.attachmentUrl,
+      numberOfDays: numberOfDays,
+      paidDays: paidDays,
+      ...(data.reason && { reason: data.reason }),
+      ...(data.attachmentUrl && { attachmentUrl: data.attachmentUrl }),
+      ...(data.medicalCertificateUrl && { medicalCertificateUrl: data.medicalCertificateUrl }),
       updatedAt: new Date(),
+    },
+    include: {
+      user: {
+        select: {
+          userId: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+          gender: true,
+        },
+      },
+      approver: {
+        select: {
+          userId: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
     },
   });
 }
@@ -655,6 +680,24 @@ async function approveLeaveRequest(
       approvedAt: new Date(),
       updatedAt: new Date(),
     },
+    include: {
+      user: {
+        select: {
+          userId: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+      approver: {
+        select: {
+          userId: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
   });
 }
 
@@ -685,6 +728,24 @@ async function rejectLeaveRequest(
       rejectionReason: data.rejectionReason,
       approvedAt: new Date(),
       updatedAt: new Date(),
+    },
+    include: {
+      user: {
+        select: {
+          userId: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+      approver: {
+        select: {
+          userId: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
     },
   });
 }

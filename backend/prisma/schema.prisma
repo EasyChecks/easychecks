@@ -35,14 +35,14 @@ model User {
   branchesDeleted                                         Branch[]             @relation("BranchDeleter")
   branchesUpdated                                         Branch[]             @relation("BranchUpdater")
   downloadLogs                                            DownloadLog[]
-  event_participants                                      event_participants[]
-  events_events_created_by_user_idTousers                 events[]             @relation("events_created_by_user_idTousers")
-  events_events_deleted_by_user_idTousers                 events[]             @relation("events_deleted_by_user_idTousers")
-  events_events_updated_by_user_idTousers                 events[]             @relation("events_updated_by_user_idTousers")
-  late_requests_late_requests_approved_by_user_idTousers  late_requests[]      @relation("late_requests_approved_by_user_idTousers")
-  late_requests_late_requests_deleted_by_user_idTousers   late_requests[]      @relation("late_requests_deleted_by_user_idTousers")
-  late_requests_late_requests_updated_by_user_idTousers   late_requests[]      @relation("late_requests_updated_by_user_idTousers")
-  late_requests_late_requests_user_idTousers              late_requests[]      @relation("late_requests_user_idTousers")
+  EventParticipants                                       EventParticipant[]
+  events_events_created_by_user_idTousers                 Event[]              @relation("events_created_by_user_idTousers")
+  events_events_deleted_by_user_idTousers                 Event[]              @relation("events_deleted_by_user_idTousers")
+  events_events_updated_by_user_idTousers                 Event[]              @relation("events_updated_by_user_idTousers")
+  late_requests_late_requests_approved_by_user_idTousers  LateRequest[]        @relation("late_requests_approved_by_user_idTousers")
+  late_requests_late_requests_deleted_by_user_idTousers   LateRequest[]        @relation("late_requests_deleted_by_user_idTousers")
+  late_requests_late_requests_updated_by_user_idTousers   LateRequest[]        @relation("late_requests_updated_by_user_idTousers")
+  late_requests_late_requests_user_idTousers              LateRequest[]        @relation("late_requests_user_idTousers")
   approvedLeaves                                          LeaveRequest[]       @relation("Approver")
   leave_requests_leave_requests_deleted_by_user_idTousers LeaveRequest[]       @relation("leave_requests_deleted_by_user_idTousers")
   leave_requests_leave_requests_updated_by_user_idTousers LeaveRequest[]       @relation("leave_requests_updated_by_user_idTousers")
@@ -76,7 +76,7 @@ model Branch {
   creator            User?                @relation("BranchCreator", fields: [createdByUserId], references: [userId])
   deletedBy          User?                @relation("BranchDeleter", fields: [deletedByUserId], references: [userId])
   updatedBy          User?                @relation("BranchUpdater", fields: [updatedByUserId], references: [userId])
-  event_participants event_participants[]
+  EventParticipants  EventParticipant[]
   users              User[]               @relation("UserBranch")
 
   @@map("branches")
@@ -104,11 +104,11 @@ model Attendance {
   note             String?
   isAutoCheckout   Boolean          @default(false) @map("is_auto_checkout")
   createdAt        DateTime         @default(now()) @map("created_at")
-  event_id         Int?
+  eventId          Int?             @map("event_id")
   deleteReason     String?          @map("delete_reason")
   deletedAt        DateTime?        @map("deleted_at")
   deletedByUserId  Int?             @map("deleted_by_user_id")
-  events           events?          @relation(fields: [event_id], references: [event_id])
+  event            Event?           @relation(fields: [eventId], references: [eventId])
   location         Location?        @relation(fields: [locationId], references: [locationId])
   shift            Shift?           @relation(fields: [shiftId], references: [shiftId])
   user             User             @relation(fields: [userId], references: [userId], onDelete: Cascade)
@@ -130,16 +130,16 @@ model LeaveRequest {
   adminComment                                   String?     @map("admin_comment")
   createdAt                                      DateTime    @default(now()) @map("created_at")
   updatedAt                                      DateTime    @default(now()) @updatedAt @map("updated_at")
-  approved_at                                    DateTime?
-  number_of_days                                 Int         @default(1)
-  paid_days                                      Int?        @map("paid_days") // จำนวนวันที่ได้รับค่าจ้าง (คำนวณตาม LeaveType)
-  rejection_reason                               String?
-  deleted_at                                     DateTime?
-  deleted_by_user_id                             Int?
-  updated_by_user_id                             Int?
+  approvedAt                                     DateTime?   @map("approved_at")
+  numberOfDays                                   Int         @default(1) @map("number_of_days")
+  paidDays                                       Int?        @map("paid_days") // จำนวนวันที่ได้รับค่าจ้าง (คำนวณตาม LeaveType)
+  rejectionReason                                String?     @map("rejection_reason")
+  deletedAt                                      DateTime?   @map("deleted_at")
+  deletedByUserId                                Int?        @map("deleted_by_user_id")
+  updatedByUserId                                Int?        @map("updated_by_user_id")
   approver                                       User?       @relation("Approver", fields: [approvedByUserId], references: [userId])
-  users_leave_requests_deleted_by_user_idTousers User?       @relation("leave_requests_deleted_by_user_idTousers", fields: [deleted_by_user_id], references: [userId])
-  users_leave_requests_updated_by_user_idTousers User?       @relation("leave_requests_updated_by_user_idTousers", fields: [updated_by_user_id], references: [userId])
+  users_leave_requests_deleted_by_user_idTousers User?       @relation("leave_requests_deleted_by_user_idTousers", fields: [deletedByUserId], references: [userId])
+  users_leave_requests_updated_by_user_idTousers User?       @relation("leave_requests_updated_by_user_idTousers", fields: [updatedByUserId], references: [userId])
   user                                           User        @relation("Requester", fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("leave_requests")
@@ -195,14 +195,14 @@ model Location {
   updatedByUserId Int?            @map("updated_by_user_id")
   deletedAt       DateTime?       @map("deleted_at")
   deletedByUserId Int?            @map("deleted_by_user_id")
-  delete_reason   String?
+  deleteReason    String?         @map("delete_reason")
   address         String?
   description     String?
-  is_active       Boolean         @default(true)
-  location_type   LocationType    @default(OTHER)
+  isActive        Boolean         @default(true) @map("is_active")
+  locationType    LocationType    @default(OTHER) @map("location_type")
   purpose         LocationPurpose @default(WORK_SITE)
   attendances     Attendance[]
-  events          events[]
+  events          Event[]
   deletedBy       User?           @relation("LocationDeleter", fields: [deletedByUserId], references: [userId])
   updatedBy       User?           @relation("LocationUpdater", fields: [updatedByUserId], references: [userId])
   creator         User            @relation("LocationCreator", fields: [userId], references: [userId], onDelete: Cascade)
@@ -241,66 +241,72 @@ model Shift {
   @@map("shifts")
 }
 
-model event_participants {
-  participant_id Int      @id @default(autoincrement())
-  event_id       Int
-  user_id        Int?
-  branch_id      Int?
-  role           Role?
-  created_at     DateTime @default(now())
-  branches       Branch?  @relation(fields: [branch_id], references: [branchId], onDelete: Cascade)
-  events         events   @relation(fields: [event_id], references: [event_id], onDelete: Cascade)
-  users          User?    @relation(fields: [user_id], references: [userId], onDelete: Cascade)
+model EventParticipant {
+  participantId Int      @id @default(autoincrement()) @map("participant_id")
+  eventId       Int      @map("event_id")
+  userId        Int?     @map("user_id")
+  branchId      Int?     @map("branch_id")
+  role          Role?
+  createdAt     DateTime @default(now()) @map("created_at")
+  branches      Branch?  @relation(fields: [branchId], references: [branchId], onDelete: Cascade)
+  event         Event    @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
+  users         User?    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("event_participants")
 }
 
-model events {
-  event_id                               Int                  @id @default(autoincrement())
-  event_name                             String
+model Event {
+  eventId                                Int                  @id @default(autoincrement()) @map("event_id")
+  eventName                              String               @map("event_name")
   description                            String?
-  location_id                            Int
-  start_date_time                        DateTime
-  end_date_time                          DateTime
-  participant_type                       EventParticipantType @default(ALL)
-  is_active                              Boolean              @default(true)
-  created_by_user_id                     Int
-  created_at                             DateTime             @default(now())
-  updated_by_user_id                     Int?
-  updated_at                             DateTime             @default(now())
-  deleted_at                             DateTime?
-  deleted_by_user_id                     Int?
-  delete_reason                          String?
+  locationId                             Int                  @map("location_id")
+  startDateTime                          DateTime             @map("start_date_time")
+  endDateTime                            DateTime             @map("end_date_time")
+  participantType                        EventParticipantType @default(ALL) @map("participant_type")
+  isActive                               Boolean              @default(true) @map("is_active")
+  createdByUserId                        Int                  @map("created_by_user_id")
+  createdAt                              DateTime             @default(now()) @map("created_at")
+  updatedByUserId                        Int?                 @map("updated_by_user_id")
+  updatedAt                              DateTime             @default(now()) @map("updated_at")
+  deletedAt                              DateTime?            @map("deleted_at")
+  deletedByUserId                        Int?                 @map("deleted_by_user_id")
+  deleteReason                           String?              @map("delete_reason")
   attendance                             Attendance[]
-  event_participants                     event_participants[]
-  users_events_created_by_user_idTousers User                 @relation("events_created_by_user_idTousers", fields: [created_by_user_id], references: [userId], onDelete: Cascade)
-  users_events_deleted_by_user_idTousers User?                @relation("events_deleted_by_user_idTousers", fields: [deleted_by_user_id], references: [userId])
-  locations                              Location             @relation(fields: [location_id], references: [locationId], onDelete: Cascade)
-  users_events_updated_by_user_idTousers User?                @relation("events_updated_by_user_idTousers", fields: [updated_by_user_id], references: [userId])
+  event_participants                     EventParticipant[]
+  creator                                User                 @relation("events_created_by_user_idTousers", fields: [createdByUserId], references: [userId], onDelete: Cascade)
+  deletedBy                              User?                @relation("events_deleted_by_user_idTousers", fields: [deletedByUserId], references: [userId])
+  location                               Location             @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
+  updatedBy                              User?                @relation("events_updated_by_user_idTousers", fields: [updatedByUserId], references: [userId])
+
+  @@map("events")
 }
 
-model late_requests {
-  late_request_id                                Int            @id @default(autoincrement())
-  user_id                                        Int
-  attendance_id                                  Int?
-  request_date                                   DateTime       @db.Date
-  scheduled_time                                 String
-  actual_time                                    String
-  late_minutes                                   Int
-  reason                                         String
-  status                                         ApprovalStatus @default(PENDING)
-  attachment_url                                 String?
-  approved_by_user_id                            Int?
-  admin_comment                                  String?
-  approved_at                                    DateTime?
-  rejection_reason                               String?
-  created_at                                     DateTime       @default(now())
-  updated_at                                     DateTime       @default(now())
-  deleted_at                                     DateTime?
-  deleted_by_user_id                             Int?
-  updated_by_user_id                             Int?
-  users_late_requests_approved_by_user_idTousers User?          @relation("late_requests_approved_by_user_idTousers", fields: [approved_by_user_id], references: [userId])
-  users_late_requests_deleted_by_user_idTousers  User?          @relation("late_requests_deleted_by_user_idTousers", fields: [deleted_by_user_id], references: [userId])
-  users_late_requests_updated_by_user_idTousers  User?          @relation("late_requests_updated_by_user_idTousers", fields: [updated_by_user_id], references: [userId])
-  users_late_requests_user_idTousers             User           @relation("late_requests_user_idTousers", fields: [user_id], references: [userId], onDelete: Cascade)
+model LateRequest {
+  lateRequestId                                Int            @id @default(autoincrement()) @map("late_request_id")
+  userId                                       Int            @map("user_id")
+  attendanceId                                 Int?           @map("attendance_id")
+  requestDate                                  DateTime       @db.Date @map("request_date")
+  scheduledTime                                String         @map("scheduled_time")
+  actualTime                                   String         @map("actual_time")
+  lateMinutes                                  Int            @map("late_minutes")
+  reason                                       String
+  status                                       ApprovalStatus @default(PENDING)
+  attachmentUrl                                String?        @map("attachment_url")
+  approvedByUserId                             Int?           @map("approved_by_user_id")
+  adminComment                                 String?        @map("admin_comment")
+  approvedAt                                   DateTime?      @map("approved_at")
+  rejectionReason                              String?        @map("rejection_reason")
+  createdAt                                    DateTime       @default(now()) @map("created_at")
+  updatedAt                                    DateTime       @default(now()) @map("updated_at")
+  deletedAt                                    DateTime?      @map("deleted_at")
+  deletedByUserId                              Int?           @map("deleted_by_user_id")
+  updatedByUserId                              Int?           @map("updated_by_user_id")
+  approver                                     User?          @relation("late_requests_approved_by_user_idTousers", fields: [approvedByUserId], references: [userId])
+  deletedBy                                    User?          @relation("late_requests_deleted_by_user_idTousers", fields: [deletedByUserId], references: [userId])
+  updatedBy                                    User?          @relation("late_requests_updated_by_user_idTousers", fields: [updatedByUserId], references: [userId])
+  user                                         User           @relation("late_requests_user_idTousers", fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("late_requests")
 }
 
 enum Role {

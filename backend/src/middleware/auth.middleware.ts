@@ -28,28 +28,19 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
     // const token = req.headers.authorization?.replace('Bearer ', '');
     // const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Placeholder: ใช้ข้อมูลจาก header ชั่วคราว (Mock Auth)
-    let userId = req.headers['x-user-id'];
-    let employeeId = req.headers['x-employee-id'];
-    let role = req.headers['x-user-role'] as any;
-    let branchId = req.headers['x-branch-id'];
+    // Simplified Auth: Read from headers or use defaults
+    const role = (req.headers['x-user-role'] as string) || 'ADMIN';
+    const userId = req.headers['x-user-id'] ? parseInt(req.headers['x-user-id'] as string) : 1;
+    const employeeId = (req.headers['x-employee-id'] as string) || 'TEST001';
+    const branchId = req.headers['x-branch-id'] ? parseInt(req.headers['x-branch-id'] as string) : 1;
     
-    // Default test user (if headers not provided)
-    if (!userId || !employeeId || !role) {
-      userId = userId || '1';
-      employeeId = employeeId || 'TEST001';
-      role = role || 'ADMIN';
-      branchId = branchId || '1';
-      
-      console.log('⚠️ Using default test user (no auth headers provided)');
-    }
-    
+    // Default test user with values from headers
     req.user = {
-      userId: parseInt(userId as string),
-      employeeId: employeeId as string,
-      role,
-      email: 'test@example.com',
-      branchId: branchId ? parseInt(branchId as string) : undefined
+      userId,
+      employeeId,
+      role: role as 'SUPERADMIN' | 'ADMIN' | 'MANAGER' | 'USER',
+      email: `user${userId}@example.com`,
+      branchId
     };
     
     next();

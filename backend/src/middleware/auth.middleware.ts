@@ -1,19 +1,20 @@
 import type { Request, Response, NextFunction } from 'express';
+import { authService } from '../services/auth.service.js';
 
 /**
- * 🔐 Authentication Middleware - ตรวจสอบ JWT Token
- * (Placeholder สำหรับการทำ JWT authentication จริง)
+ * 🔐 Authentication Middleware - ตรวจสอบ Session Token
  */
 
 export interface AuthUser {
   userId: number;
   employeeId: string;
-  role: 'SUPERADMIN' | 'ADMIN' | 'MANAGER' | 'USER';
+  firstName: string;
+  lastName: string;
   email: string;
-  branchId?: number;
+  role: string;
+  avatarUrl?: string;
 }
 
-// Extend Express Request type
 declare global {
   namespace Express {
     interface Request {
@@ -22,41 +23,38 @@ declare global {
   }
 }
 
-export function authenticate(req: Request, res: Response, next: NextFunction): void {
+export async function authenticate(req: Request, res: Response, next: NextFunction) {
   try {
-    // TODO: ถอดรหัส JWT token จาก Authorization header
-    // const token = req.headers.authorization?.replace('Bearer ', '');
-    // const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Placeholder: ใช้ข้อมูลจาก header ชั่วคราว (Mock Auth)
-    let userId = req.headers['x-user-id'];
-    let employeeId = req.headers['x-employee-id'];
-    let role = req.headers['x-user-role'] as any;
-    let branchId = req.headers['x-branch-id'];
-    
-    // Default test user (if headers not provided)
-    if (!userId || !employeeId || !role) {
-      userId = userId || '1';
-      employeeId = employeeId || 'TEST001';
-      role = role || 'ADMIN';
-      branchId = branchId || '1';
-      
-      console.log('⚠️ Using default test user (no auth headers provided)');
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        error: 'ต้องระบุ Token ใน Authorization header'
+      });
     }
+
+    const token = authHeader.substring(7);
+
+    // ตรวจสอบ token จาก database
+    const user = await authService.validateToken(token);
     
-    req.user = {
-      userId: parseInt(userId as string),
-      employeeId: employeeId as string,
-      role,
-      email: 'test@example.com',
-      branchId: branchId ? parseInt(branchId as string) : undefined
-    };
-    
+    req.user = user as AuthUser;
     next();
-  } catch (error) {
+  } catch (error: any) {
     res.status(401).json({
-      success: false,
-      error: 'Invalid token'
+      error: error.message || 'Token ไม่ถูกต้อง'
     });
   }
 }
+
+export function authorizeRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({
+        error: 'ไม่มีสิทธิเข้าถึง'
+      });
+    }
+    next();
+  };
+}
+

@@ -58,6 +58,8 @@ model User {
   branch                                                  Branch?              @relation("UserBranch", fields: [branchId], references: [branchId])
   updatedBy                                               User?                @relation("UserUpdater", fields: [updatedByUserId], references: [userId])
   usersUpdated                                            User[]               @relation("UserUpdater")
+  passwordResets                                          PasswordReset[]
+  sessions                                                Session[]
 
   @@map("users")
 }
@@ -303,6 +305,19 @@ model late_requests {
   users_late_requests_user_idTousers             User           @relation("late_requests_user_idTousers", fields: [user_id], references: [userId], onDelete: Cascade)
 }
 
+model PasswordReset {
+  resetId   Int      @id @default(autoincrement()) @map("reset_id")
+  userId    Int      @map("user_id")
+  token     String   @unique @map("token")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  isUsed    Boolean  @default(false) @map("is_used")
+  usedAt    DateTime? @map("used_at")
+  user      User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
 enum Role {
   SUPERADMIN
   ADMIN
@@ -391,4 +406,25 @@ enum LocationType {
   SITE
   MEETING
   OTHER
+}
+
+model Session {
+  id                       Int     @id @default(autoincrement())
+  userId                   Int     @map("user_id")
+  token                    String  @unique
+  expiresAt                DateTime @map("expires_at")
+  refreshToken             String  @unique
+  refreshTokenExpiresAt    DateTime @map("refresh_token_expires_at")
+  createdAt                DateTime @default(now()) @map("created_at")
+  ipAddress                String? @map("ip_address")
+  userAgent                String? @map("user_agent")
+  
+  user      User    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([token])
+  @@index([refreshToken])
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([refreshTokenExpiresAt])
+  @@map("sessions")
 }

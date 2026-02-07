@@ -3,7 +3,8 @@ import { PrismaClient, Role, UserStatus, AttendanceStatus, LeaveType, LeaveStatu
 import { faker } from '@faker-js/faker/locale/th';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { uploadAvatarToSupabase, ensureBucketExists } from '../src/utils/supabase-storage.js';
+import bcrypt from 'bcrypt';
+// import { uploadAvatarToSupabase, ensureBucketExists } from '../src/utils/supabase-storage.js';
 
 // ใช้ direct connection สำหรับ seeding
 const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
@@ -72,29 +73,8 @@ async function main() {
   // await ensureBucketExists();
   // console.log('');
 
-  // ลบข้อมูลเก่าทั้งหมด
-  console.log('🗑️  ลบข้อมูลเก่า...');
-  await prisma.location.deleteMany();
-  await prisma.downloadLog.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.auditLog.deleteMany();
-  await prisma.leaveRequest.deleteMany();
-  await prisma.attendance.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.branch.deleteMany();
-  
-  // Reset sequences สำหรับทุก table (ใช้ชื่อ table ที่ map แล้วจาก @@map)
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE branches_branch_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE users_user_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE locations_location_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE shifts_shift_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE attendance_attendance_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE leave_requests_leave_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE notifications_notification_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE audit_logs_log_id_seq RESTART WITH 1`);
-  await prisma.$executeRawUnsafe(`ALTER SEQUENCE download_logs_log_id_seq RESTART WITH 1`);
-  
-  console.log('✅ ลบข้อมูลเก่าและ reset sequences เสร็จแล้ว\n');
+  // ✅ เก็บข้อมูลเก่าไว้ - เพิ่มข้อมูลใหม่เท่านั้น (ไม่ลบ)
+  console.log('📦 Append Mode: เพิ่มข้อมูลใหม่โดยเก็บข้อมูลเก่า\n');
 
   // 1. สร้างสาขา (เริ่มจาก 1)
   console.log('🏢 สร้างสาขา...');
@@ -126,6 +106,7 @@ async function main() {
   // 2. สร้าง Superadmin (ไม่มีสาขา)
   console.log('👥 สร้างผู้ใช้...');
   const superadminNationalId = generateNationalId();
+  const superadminPassword = await bcrypt.hash('password123', 10);
   const superadmin = await prisma.user.create({
     data: {
       employeeId: 'SA001',
@@ -138,7 +119,7 @@ async function main() {
       emergent_relation: 'ติดต่อฉุกเฉิน',
       phone: generateThaiPhone(),
       email: 'superadmin@easycheck.com',
-      password: superadminNationalId, // ใช้เลขบัตรประชาชนเป็น password
+      password: superadminPassword, // Hash password with bcrypt
       avatarUrl: await getAvatarUrl('SA001', 0),
       branchId: null, // Superadmin ไม่มีสาขา
       role: Role.SUPERADMIN,
@@ -150,6 +131,7 @@ async function main() {
   // 3. สร้าง Admins แต่ละสาขา (แต่ละสาขา 1 คน)
   const admins = [];
   let employeeCounter = { BKK: 1, CNX: 1, HKT: 1 };
+  const defaultPassword = await bcrypt.hash('password123', 10);
   
   for (const branch of branches) {
     const name = getThaiName();
@@ -166,7 +148,7 @@ async function main() {
         emergent_relation: faker.helpers.arrayElement(relations),
         phone: generateThaiPhone(),
         email: `admin.${branch.code.toLowerCase()}@easycheck.com`,
-        password: nationalId,
+        password: defaultPassword,
         avatarUrl: await getAvatarUrl(`${branch.code}${String(employeeCounter[branch.code] - 1).padStart(4, '0')}`, admins.length + 1),
         branchId: branch.branchId,
         role: Role.ADMIN,
@@ -196,7 +178,7 @@ async function main() {
           emergent_relation: faker.helpers.arrayElement(relations),
           phone: generateThaiPhone(),
           email: `${name.firstName.toLowerCase()}.${branch.code.toLowerCase()}${i}@easycheck.com`,
-          password: nationalId,
+          password: defaultPassword,
           avatarUrl: await getAvatarUrl(employeeId, managers.length + admins.length + 2),
           branchId: branch.branchId,
           role: Role.MANAGER,
@@ -227,7 +209,7 @@ async function main() {
           emergent_relation: faker.helpers.arrayElement(relations),
           phone: generateThaiPhone(),
           email: `${employeeId.toLowerCase()}@easycheck.com`,
-          password: nationalId,
+          password: defaultPassword,
           avatarUrl: await getAvatarUrl(employeeId, users.length + managers.length + admins.length + 3),
           branchId: branch.branchId,
           role: Role.USER,
@@ -263,7 +245,6 @@ async function main() {
         longitude: locationData[i].lng,
         radius: locationData[i].radius,
         userId: admin.userId,
-        role: admin.role,
       },
     });
     locations.push(location);
@@ -273,9 +254,9 @@ async function main() {
   // 7. สร้าง Shifts (ตารางงาน)
   console.log('⏰ สร้าง Shifts...');
   const shiftTemplates = [
-    { name: 'กะเช้า', type: 'REGULAR', start: '08:00', end: '17:00', grace: 15, late: 30 },
-    { name: 'กะบ่าย', type: 'REGULAR', start: '13:00', end: '22:00', grace: 15, late: 30 },
-    { name: 'กะดึก', type: 'REGULAR', start: '22:00', end: '06:00', grace: 15, late: 30 },
+    { name: 'กะเช้า', start: '08:00', end: '17:00', grace: 15, late: 30 },
+    { name: 'กะบ่าย', start: '13:00', end: '22:00', grace: 15, late: 30 },
+    { name: 'กะดึก', start: '22:00', end: '06:00', grace: 15, late: 30 },
   ];
 
   let shiftCount = 0;
@@ -294,12 +275,12 @@ async function main() {
       await prisma.shift.create({
         data: {
           name: template.name,
-          shiftType: template.type as ShiftType,
+          shiftType: 'REGULAR' as ShiftType,
           startTime: template.start,
           endTime: template.end,
           gracePeriodMinutes: template.grace,
           lateThresholdMinutes: template.late,
-          specificDays: template.type === 'SPECIFIC_DAY' ? ['MONDAY', 'WEDNESDAY', 'FRIDAY'] as DayOfWeek[] : [],
+          specificDays: [],
           locationId: location.locationId,
           userId: user.userId,
         },
@@ -378,6 +359,94 @@ async function main() {
   await prisma.leaveRequest.createMany({ data: leaveData });
   console.log(`✅ สร้าง ${leaveCount} คำขอลา\n`);
 
+  // Late Requests
+  console.log('⏰ สร้าง Late Requests...');
+  const lateRequestCount = 20;
+  const lateRequestData = Array.from({ length: lateRequestCount }, () => {
+    const user = faker.helpers.arrayElement(allStaff);
+    const request_date = faker.date.recent({ days: 30 });
+    const status = faker.helpers.arrayElement(['PENDING', 'PENDING', 'APPROVED', 'REJECTED']);
+    const lateMinutes = faker.number.int({ min: 5, max: 120 });
+
+    return {
+      user_id: user.userId,
+      request_date,
+      scheduled_time: '08:30',
+      actual_time: `${String(8 + Math.floor(lateMinutes / 60)).padStart(2, '0')}:${String(30 + (lateMinutes % 60)).padStart(2, '0')}`,
+      late_minutes: lateMinutes,
+      reason: faker.helpers.arrayElement(['รถติด', 'ติดธุระส่วนตัว', 'พบแพทย์', 'สัญญาณไฟแดง']),
+      status,
+      approved_by_user_id: status !== 'PENDING' ? faker.helpers.arrayElement([...admins, ...managers, superadmin]).userId : null,
+      approved_at: status !== 'PENDING' ? new Date() : null,
+      admin_comment: status === 'REJECTED' ? 'ต้องลงเวลาถูกต้อง' : null,
+    };
+  });
+  
+  await prisma.late_requests.createMany({ data: lateRequestData });
+  console.log(`✅ สร้าง ${lateRequestCount} Late Requests\n`);
+
+  // Events
+  console.log('🎉 สร้าง Events...');
+  const eventCount = 15;
+  const eventData = Array.from({ length: eventCount }, (_, i) => {
+    const createdByUser = faker.helpers.arrayElement([superadmin, ...admins, ...managers]);
+    const start_date_time = faker.date.future({ years: 0.2 });
+    const end_date_time = new Date(start_date_time);
+    end_date_time.setDate(start_date_time.getDate() + faker.number.int({ min: 1, max: 3 }));
+    const location = faker.helpers.arrayElement(locations);
+
+    return {
+      event_name: faker.helpers.arrayElement([
+        'ประชุมประจำเดือน',
+        'การฝึกอบรมพนักงาน',
+        'กิจกรรมสร้างสัมพันธ์',
+        'เลิกงานตามปกติ',
+        'โครงการพัฒนาพนักงาน',
+        'สัมมนาศักยภาพ',
+        'วันหยุดพิเศษ',
+      ]),
+      description: faker.helpers.arrayElement([
+        'ประชุมทั่วไป',
+        'การปรับปรุงกระบวนการ',
+        'แบ่งปันประสบการณ์',
+        'ชำระบัญชีไตรมาส',
+        'ยุทธศาสตร์ปีหน้า',
+      ]),
+      start_date_time,
+      end_date_time,
+      location_id: location.locationId,
+      created_by_user_id: createdByUser.userId,
+      is_active: faker.datatype.boolean({ probability: 0.7 }),
+    };
+  });
+  
+  const events = await prisma.events.createMany({ data: eventData });
+  console.log(`✅ สร้าง ${eventCount} Events\n`);
+
+  // Event Participants
+  console.log('👥 สร้าง Event Participants...');
+  const allEvents = await prisma.events.findMany();
+  let participantCount = 0;
+  
+  for (const event of allEvents) {
+    // เลือก 5-20 คนสุ่ม ไปเป็น participant
+    const numParticipants = faker.number.int({ min: 5, max: 20 });
+    const selectedUsers = faker.helpers.shuffle(allStaff).slice(0, numParticipants);
+    
+    for (const selectedUser of selectedUsers) {
+      await prisma.event_participants.create({
+        data: {
+          event_id: event.event_id,
+          user_id: selectedUser.userId,
+          // role ต้องใช้ User role (SUPERADMIN, ADMIN, MANAGER, USER) ตามแล้ว
+          // ถ้าต้องการเก็บบทบาทในกิจกรรม ควรใช้ enum อื่น หรือ optional
+        },
+      });
+      participantCount++;
+    }
+  }
+  console.log(`✅ สร้าง ${participantCount} Event Participants\n`);
+
   // Notifications, Audit Logs, Download Logs (simplified)
   console.log('🔔 สร้างข้อมูลอื่นๆ...');
   
@@ -420,13 +489,19 @@ async function main() {
   console.log(`⏰ Shifts: ${shiftCount} กะงาน`);
   console.log(`📋 การเข้างาน: ${attendanceCount} รายการ`);
   console.log(`📝 คำขอลา: ${leaveCount} คำขอ`);
+  console.log(`⏰ Late Requests: ${lateRequestCount} คำขอ`);
+  console.log(`🎉 Events: ${eventCount} กิจกรรม`);
+  console.log(`👥 Event Participants: ${participantCount} คน`);
+  console.log(`🔔 Notifications: 50 รายการ`);
+  console.log(`📝 Audit Logs: 30 รายการ`);
+  console.log(`📥 Download Logs: 20 รายการ`);
   console.log('═══════════════════════════════════════\n');
 
-  console.log('🔑 ตัวอย่าง Login Credentials (login ด้วย employeeId, password = รหัสบัตรประชาชน):');
+  console.log('🔑 ตัวอย่าง Login Credentials (ทุกคนใช้ password เดียวกัน):');
   console.log('═══════════════════════════════════════');
-  console.log(`Superadmin: SA001 / ${superadminNationalId}`);
-  console.log(`Admin BKK: ${admins[0].employeeId} / ${admins[0].password}`);
-  console.log(`User: ${users[0].employeeId} / ${users[0].password}`);
+  console.log(`Superadmin: SA001 / password123`);
+  console.log(`Admin BKK: ${admins[0].employeeId} / password123`);
+  console.log(`User: ${users[0].employeeId} / password123`);
   console.log('═══════════════════════════════════════\n');
   
   console.log('✨ Seeding เสร็จสมบูรณ์!\n');

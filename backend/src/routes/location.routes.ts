@@ -28,16 +28,18 @@ router.post(
 
 // ทุกคนที่ login แล้วสามารถดูได้
 router.get('/', authenticate, getAllLocations); // ดูรายการสถานที่
-router.get('/nearby', authenticate, getNearbyLocations); // ค้นหาสถานที่ใกล้เคียง
-router.get('/:id', authenticate, getLocationById); // ดูสถานที่ตาม ID
 
-// Admin/SuperAdmin เท่านั้น
+// Special routes before ID routes
+router.get('/nearby', authenticate, getNearbyLocations); // ค้นหาสถานที่ใกล้เคียง
 router.get(
   '/admin/statistics',
   authenticate,
   requireRole(['ADMIN', 'SUPERADMIN']),
   getLocationStatistics
 ); // สถิติ
+
+// ID-based routes
+router.get('/:id', authenticate, getLocationById); // ดูสถานที่ตาม ID
 
 router.patch(
   '/:id',

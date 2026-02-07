@@ -249,8 +249,8 @@ async function getAllEvents(params: SearchEventParams): Promise<{
         },
         _count: {
           select: {
-            participants: true,
-            attendances: true,
+            event_participants: true,
+            attendance: true,
           },
         },
       },

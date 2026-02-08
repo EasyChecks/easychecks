@@ -60,6 +60,14 @@ model User {
   usersUpdated                                            User[]               @relation("UserUpdater")
   passwordResets                                          PasswordReset[]
   sessions                                                Session[]
+  
+  // Announcement Relations
+  createdAnnouncements                                    Announcement[]       @relation("AnnouncementCreator")
+  updatedAnnouncements                                    Announcement[]       @relation("AnnouncementUpdater")
+  sentAnnouncements                                       Announcement[]       @relation("AnnouncementSender")
+  approvedAnnouncements                                   Announcement[]       @relation("AnnouncementApprover")
+  deletedAnnouncements                                    Announcement[]       @relation("AnnouncementDeleter")
+  announcementRecipients                                  AnnouncementRecipient[]
 
   @@map("users")
 }
@@ -433,4 +441,65 @@ model Session {
   @@index([expiresAt])
   @@index([refreshTokenExpiresAt])
   @@map("sessions")
+}
+
+model Announcement {
+  announcementId        Int                    @id @default(autoincrement()) @map("announcement_id")
+  title                 String                 @map("title")
+  content               String                 @map("content")
+  targetAudience        AnnouncementAudience   @default(EVERYONE) @map("target_audience")
+  targetRoles           Role[]                 // บุคลากรประเภท (USER, MANAGER, ADMIN, SUPERADMIN)
+  targetBranchIds       Int[]                  @default([]) @map("target_branch_ids") // สาขาเฉพาะ
+  channel               String                 @default("GMAIL") @map("channel") // ช่องส่ง (GMAIL)
+  status                AnnouncementStatus     @default(DRAFT) @map("status")
+  createdByUserId       Int                    @map("created_by_user_id")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedByUserId       Int?                   @map("updated_by_user_id")
+  updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at")
+  sentAt                DateTime?              @map("sent_at")
+  sentByUserId          Int?                   @map("sent_by_user_id")
+  approvedByUserId      Int?                   @map("approved_by_user_id")
+  approvedAt            DateTime?              @map("approved_at")
+  rejectionReason       String?                @map("rejection_reason")
+  deletedAt             DateTime?              @map("deleted_at")
+  deletedByUserId       Int?                   @map("deleted_by_user_id")
+  deleteReason          String?                @map("delete_reason")
+
+  creator               User                   @relation("AnnouncementCreator", fields: [createdByUserId], references: [userId], onDelete: Cascade)
+  updatedBy             User?                  @relation("AnnouncementUpdater", fields: [updatedByUserId], references: [userId])
+  sentBy                User?                  @relation("AnnouncementSender", fields: [sentByUserId], references: [userId])
+  approvedBy            User?                  @relation("AnnouncementApprover", fields: [approvedByUserId], references: [userId])
+  deletedBy             User?                  @relation("AnnouncementDeleter", fields: [deletedByUserId], references: [userId])
+  recipients            AnnouncementRecipient[]
+
+  @@map("announcements")
+}
+
+model AnnouncementRecipient {
+  recipientId           Int                    @id @default(autoincrement()) @map("recipient_id")
+  announcementId        Int                    @map("announcement_id")
+  userId                Int                    @map("user_id")
+  sentAt                DateTime?              @map("sent_at")
+  readAt                DateTime?              @map("read_at")
+  createdAt             DateTime               @default(now()) @map("created_at")
+
+  announcement          Announcement           @relation(fields: [announcementId], references: [announcementId], onDelete: Cascade)
+  user                  User                   @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("announcement_recipients")
+}
+
+enum AnnouncementAudience {
+  EVERYONE
+  SPECIFIC_ROLE
+  SPECIFIC_BRANCH
+  SPECIFIC_GROUP
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  SENT
+  SUSPENDED
 }

@@ -15,11 +15,9 @@ export const createAnnouncement = async (req: Request, res: Response) => {
     const {
       title,
       content,
-      targetAudience,
       targetRoles,
       targetBranchIds,
       createdByUserId,
-      creatorRole,
     } = req.body;
 
     // ตรวจสอบข้อมูล
@@ -35,11 +33,9 @@ export const createAnnouncement = async (req: Request, res: Response) => {
     const announcement = await announcementService.createAnnouncement({
       title,
       content,
-      targetAudience: targetAudience || 'EVERYONE',
       targetRoles,
       targetBranchIds,
       createdByUserId: parseInt(createdByUserId),
-      creatorRole,
     });
 
     sendSuccess(res, announcement, 'สร้างประกาศเรียบร้อยแล้ว', 201);
@@ -95,7 +91,7 @@ export const getAnnouncementById = async (req: Request, res: Response) => {
 export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
-    const { title, content, targetAudience, targetRoles, targetBranchIds, updatedByUserId } = req.body;
+    const { title, content, targetRoles, targetBranchIds, updatedByUserId } = req.body;
 
     if (!announcementId || isNaN(announcementId)) {
       return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
@@ -110,7 +106,6 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
       {
         title,
         content,
-        targetAudience,
         targetRoles,
         targetBranchIds,
       },
@@ -123,66 +118,7 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * ✅ อนุมัติประกาศ
- * POST /api/announcements/:id/approve
- */
-export const approveAnnouncement = async (req: Request, res: Response) => {
-  try {
-    const announcementId = parseInt(req.params.id as string);
-    const { approvedByUserId } = req.body;
 
-    if (!announcementId || isNaN(announcementId)) {
-      return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
-    }
-
-    if (!approvedByUserId) {
-      return sendError(res, 'ต้องระบุ approvedByUserId', 400);
-    }
-
-    const approved = await announcementService.approveAnnouncement(
-      announcementId,
-      parseInt(approvedByUserId)
-    );
-
-    sendSuccess(res, approved, 'อนุมัติประกาศเรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการอนุมัติประกาศ');
-  }
-};
-
-/**
- * ❌ ปฏิเสธประกาศ
- * POST /api/announcements/:id/reject
- */
-export const rejectAnnouncement = async (req: Request, res: Response) => {
-  try {
-    const announcementId = parseInt(req.params.id as string);
-    const { rejectedByUserId, rejectionReason } = req.body;
-
-    if (!announcementId || isNaN(announcementId)) {
-      return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
-    }
-
-    if (!rejectedByUserId) {
-      return sendError(res, 'ต้องระบุ rejectedByUserId', 400);
-    }
-
-    if (!rejectionReason) {
-      return sendError(res, 'ต้องระบุ rejectionReason', 400);
-    }
-
-    const rejected = await announcementService.rejectAnnouncement(
-      announcementId,
-      parseInt(rejectedByUserId),
-      rejectionReason
-    );
-
-    sendSuccess(res, rejected, 'ปฏิเสธประกาศเรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการปฏิเสธประกาศ');
-  }
-};
 
 /**
  * 📤 ส่งประกาศ
@@ -227,14 +163,10 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
 export const deleteAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
-    const { deletedByUserId, deleteReason } = req.body;
+    const { deleteReason } = req.body;
 
     if (!announcementId || isNaN(announcementId)) {
       return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
-    }
-
-    if (!deletedByUserId) {
-      return sendError(res, 'ต้องระบุ deletedByUserId', 400);
     }
 
     if (!deleteReason) {
@@ -243,7 +175,6 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 
     const deleted = await announcementService.deleteAnnouncement(
       announcementId,
-      parseInt(deletedByUserId),
       deleteReason
     );
 
@@ -256,24 +187,17 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 /**
  * 🔄 ลบผู้รับประกาศ (ลบตัวรับ 1 คน)
  * DELETE /api/announcements/:announcementId/recipients/:recipientId
- * Body: { deletedByUserId }
  */
 export const deleteRecipient = async (req: Request, res: Response) => {
   try {
     const recipientId = parseInt(req.params.recipientId as string);
-    const { deletedByUserId } = req.body;
 
     if (!recipientId || isNaN(recipientId)) {
       return sendError(res, 'ต้องระบุ recipientId ที่ถูกต้อง', 400);
     }
 
-    if (!deletedByUserId) {
-      return sendError(res, 'ต้องระบุ deletedByUserId', 400);
-    }
-
     const result = await announcementService.deleteRecipient(
-      recipientId,
-      parseInt(deletedByUserId)
+      recipientId
     );
 
     sendSuccess(res, result, 'ลบผู้รับประกาศเรียบร้อยแล้ว');
@@ -283,25 +207,20 @@ export const deleteRecipient = async (req: Request, res: Response) => {
 };
 
 /**
- * 🔄 ล้างผู้รับประกาศทั้งหมด (สำหรับประกาศนี้ที่ผู้ใช้นี้ส่ง)
+ * 🔄 ล้างผู้รับประกาศทั้งหมด
  * DELETE /api/announcements/:announcementId/recipients
- * Body: { sentByUserId, clearedByUserId }
+ * Body: { sentByUserId }
  */
 export const clearAllRecipients = async (req: Request, res: Response) => {
   try {
-    const { sentByUserId, clearedByUserId } = req.body;
+    const { sentByUserId } = req.body;
 
     if (!sentByUserId) {
       return sendError(res, 'ต้องระบุ sentByUserId', 400);
     }
 
-    if (!clearedByUserId) {
-      return sendError(res, 'ต้องระบุ clearedByUserId', 400);
-    }
-
     const result = await announcementService.clearAllRecipients(
-      parseInt(sentByUserId),
-      parseInt(clearedByUserId)
+      parseInt(sentByUserId)
     );
 
     sendSuccess(res, result, `ล้างผู้รับประกาศเรียบร้อยแล้ว ลบ ${result.clearedCount} รายการ`);
@@ -315,8 +234,6 @@ export default {
   getAnnouncements,
   getAnnouncementById,
   updateAnnouncement,
-  approveAnnouncement,
-  rejectAnnouncement,
   sendAnnouncement,
   deleteAnnouncement,
   deleteRecipient,

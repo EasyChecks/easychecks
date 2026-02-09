@@ -11,23 +11,18 @@ import { createAuditLog, AuditAction } from './audit.service.js';
 // ============================================
 
 export interface CreateAnnouncementDTO {
-  title: string;                    // หัวข้อประกาศ (จำเป็น)
-  content: string;                  // เนื้อหาประกาศ (จำเป็น)
-  targetAudience: string;           // EVERYONE | SPECIFIC_ROLE | SPECIFIC_BRANCH | SPECIFIC_GROUP
-  targetRoles?: string[];           // บุคลากรประเภท (ถ้า SPECIFIC_ROLE)
-  targetBranchIds?: number[];       // สาขาเฉพาะ (ถ้า SPECIFIC_BRANCH)
-  channel?: string;                 // ช่องส่ง (default: GMAIL)
+  title: string;                    // หัวข้อประกาศ
+  content: string;                  // เนื้อหาประกาศ
+  targetRoles?: string[];           // บุคลากรประเภท (ว่าง = EVERYONE)
+  targetBranchIds?: number[];       // สาขาเฉพาะ (ว่าง = EVERYONE)
   createdByUserId: number;          // ผู้สร้าง
-  creatorRole: string;              // Role ของผู้สร้าง (SUPERADMIN/ADMIN)
 }
 
 export interface UpdateAnnouncementDTO {
   title?: string;
   content?: string;
-  targetAudience?: string;
   targetRoles?: string[];
   targetBranchIds?: number[];
-  status?: string;
 }
 
 // ============================================
@@ -48,10 +43,8 @@ export const createAnnouncement = async (data: CreateAnnouncementDTO) => {
     data: {
       title: data.title,
       content: data.content,
-      targetAudience: data.targetAudience || 'EVERYONE',
       targetRoles: data.targetRoles || [],
       targetBranchIds: data.targetBranchIds || [],
-      channel: data.channel || 'GMAIL',
       status: 'DRAFT',
       createdByUserId: data.createdByUserId,
     },
@@ -108,13 +101,6 @@ export const getAnnouncements = async (
           lastName: true,
         },
       },
-      approvedBy: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
     },
     orderBy: {
       createdAt: 'desc',
@@ -132,13 +118,6 @@ export const getAnnouncementById = async (announcementId: number) => {
     where: { announcementId },
     include: {
       creator: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      approvedBy: {
         select: {
           userId: true,
           firstName: true,
@@ -193,7 +172,6 @@ export const updateAnnouncement = async (
     data: {
       ...(data.title && { title: data.title }),
       ...(data.content && { content: data.content }),
-      ...(data.targetAudience && { targetAudience: data.targetAudience }),
       ...(data.targetRoles && { targetRoles: data.targetRoles }),
       ...(data.targetBranchIds && { targetBranchIds: data.targetBranchIds }),
       updatedByUserId,
@@ -222,90 +200,7 @@ export const updateAnnouncement = async (
   return updated;
 };
 
-/**
- * ✅ อนุมัติประกาศ
- */
-export const approveAnnouncement = async (
-  announcementId: number,
-  approvedByUserId: number
-) => {
-  const existing = await prisma.announcement.findUnique({
-    where: { announcementId },
-  });
 
-  if (!existing) {
-    throw new Error('ไม่พบประกาศที่ระบุ');
-  }
-
-  if (existing.status !== 'PENDING') {
-    throw new Error('ประกาศต้องอยู่ในสถานะ PENDING ถึงจะอนุมัติได้');
-  }
-
-  const updated = await prisma.announcement.update({
-    where: { announcementId },
-    data: {
-      status: 'APPROVED',
-      approvedByUserId,
-      approvedAt: new Date(),
-    },
-    include: {
-      approvedBy: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-  });
-
-  // บันทึก Audit Log
-  await createAuditLog({
-    userId: approvedByUserId,
-    action: AuditAction.APPROVE_ANNOUNCEMENT,
-    targetTable: 'announcements',
-    targetId: announcementId,
-    newValues: { status: 'APPROVED' },
-  });
-
-  return updated;
-};
-
-/**
- * ❌ ปฏิเสธประกาศ
- */
-export const rejectAnnouncement = async (
-  announcementId: number,
-  rejectedByUserId: number,
-  rejectionReason: string
-) => {
-  const existing = await prisma.announcement.findUnique({
-    where: { announcementId },
-  });
-
-  if (!existing) {
-    throw new Error('ไม่พบประกาศที่ระบุ');
-  }
-
-  const updated = await prisma.announcement.update({
-    where: { announcementId },
-    data: {
-      status: 'SUSPENDED',
-      rejectionReason,
-    },
-  });
-
-  // บันทึก Audit Log
-  await createAuditLog({
-    userId: rejectedByUserId,
-    action: AuditAction.REJECT_ANNOUNCEMENT,
-    targetTable: 'announcements',
-    targetId: announcementId,
-    newValues: { status: 'SUSPENDED', rejectionReason },
-  });
-
-  return updated;
-};
 
 /**
  * 📤 ส่งประกาศ
@@ -328,27 +223,20 @@ export const sendAnnouncement = async (
     throw new Error('ไม่พบประกาศที่ระบุ');
   }
 
-  if (announcement.status !== 'APPROVED') {
-    throw new Error('ประกาศต้องผ่านการอนุมัติเสียก่อน');
+  if (announcement.status !== 'DRAFT') {
+    throw new Error('ประกาศต้องอยู่ในสถานะ DRAFT เพื่อส่งได้');
   }
 
   // ดึงรายชื่อผู้รับตามเงื่อนไข
   let recipientIds: number[] = [];
   let recipientQuery: any = { status: 'ACTIVE' };
 
-  // Target Audience Filtering
-  if (announcement.targetAudience === 'EVERYONE') {
-    recipientQuery = { status: 'ACTIVE' };
-  } else if (announcement.targetAudience === 'SPECIFIC_ROLE') {
-    recipientQuery = {
-      status: 'ACTIVE',
-      role: { in: (announcement.targetRoles || []) as any },
-    };
-  } else if (announcement.targetAudience === 'SPECIFIC_BRANCH') {
-    recipientQuery = {
-      status: 'ACTIVE',
-      branchId: { in: announcement.targetBranchIds },
-    };
+  // Target Recipients Filtering
+  if (announcement.targetRoles && announcement.targetRoles.length > 0) {
+    recipientQuery.role = { in: (announcement.targetRoles || []) as any };
+  }
+  if (announcement.targetBranchIds && announcement.targetBranchIds.length > 0) {
+    recipientQuery.branchId = { in: announcement.targetBranchIds };
   }
 
   // Permission Check & Apply Restrictions
@@ -416,7 +304,6 @@ export const sendAnnouncement = async (
  */
 export const deleteAnnouncement = async (
   announcementId: number,
-  deletedByUserId: number,
   deleteReason: string
 ) => {
   const existing = await prisma.announcement.findUnique({
@@ -431,14 +318,12 @@ export const deleteAnnouncement = async (
     where: { announcementId },
     data: {
       deletedAt: new Date(),
-      deletedByUserId,
       deleteReason,
     },
   });
 
   // บันทึก Audit Log
   await createAuditLog({
-    userId: deletedByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcements',
     targetId: announcementId,
@@ -453,8 +338,7 @@ export const deleteAnnouncement = async (
  * 🗑️ ลบรายการที่ส่งไป (Delete Single Recipient)
  */
 export const deleteRecipient = async (
-  recipientId: number,
-  deletedByUserId: number
+  recipientId: number
 ) => {
   const recipient = await prisma.announcementRecipient.findUnique({
     where: { recipientId },
@@ -471,7 +355,6 @@ export const deleteRecipient = async (
 
   // บันทึก Audit Log
   await createAuditLog({
-    userId: deletedByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcement_recipients',
     targetId: recipientId,
@@ -487,8 +370,7 @@ export const deleteRecipient = async (
  * ลบทั้งหมดที่ user นั้นส่ง - ไม่ส่งผลต่อ user อื่น
  */
 export const clearAllRecipients = async (
-  sentByUserId: number,
-  clearedByUserId: number
+  sentByUserId: number
 ) => {
   // ดึงทั้งหมดที่ user นั้นส่ง
   const recipients = await prisma.announcementRecipient.findMany({
@@ -513,7 +395,6 @@ export const clearAllRecipients = async (
 
   // บันทึก Audit Log
   await createAuditLog({
-    userId: clearedByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcement_recipients',
     targetId: sentByUserId,
@@ -534,8 +415,6 @@ export const announcementService = {
   getAnnouncements,
   getAnnouncementById,
   updateAnnouncement,
-  approveAnnouncement,
-  rejectAnnouncement,
   sendAnnouncement,
   deleteAnnouncement,
   deleteRecipient,

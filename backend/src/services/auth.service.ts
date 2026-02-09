@@ -13,27 +13,27 @@ const REFRESH_TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days
 export const authService = {
   /**
    * 🔐 LOGIN - สร้าง access + refresh token
+   * Username: employeeId, Password: nationalId
    */
   async login(
     employeeId: string,
-    password: string,
+    password: string, // nationalId
     ipAddress?: string,
     userAgent?: string
   ) {
     try {
-      // 1. หา user
+      // 1. หา user ด้วย employeeId
       const user = await prisma.user.findUnique({
         where: { employeeId }
       });
 
       if (!user) {
-        throw new Error('ไม่พบพนักงาน');
+        throw new Error('ไม่พบพนักงาน (employeeId ไม่ถูกต้อง)');
       }
 
-      // 2. เช็ค password
-      const isPasswordValid = await bcrypt.compare(password, user.password);
-      if (!isPasswordValid) {
-        throw new Error('รหัสผ่านไม่ถูกต้อง');
+      // 2. เช็ค password = nationalId
+      if (password !== user.nationalId) {
+        throw new Error('รหัสผ่าน (nationalId) ไม่ถูกต้อง');
       }
 
       // 3. สร้าง tokens
@@ -51,15 +51,6 @@ export const authService = {
           ipAddress,
           userAgent
         }
-      });
-
-      console.log('✅ Session created with refresh token:', {
-        sessionId: session.id,
-        userId: user.userId,
-        accessToken: accessToken.substring(0, 20) + '...',
-        refreshToken: refreshToken.substring(0, 20) + '...',
-        expiresAt: session.expiresAt,
-        refreshExpiresAt: session.refreshTokenExpiresAt
       });
 
       return {

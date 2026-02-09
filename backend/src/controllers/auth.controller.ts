@@ -8,6 +8,7 @@ import { authService } from '../services/auth.service.js';
 export const authController = {
   /**
    * POST /api/auth/login
+   * Body: { employeeId, password (nationalId) }
    */
   async login(req: Request, res: Response) {
     try {
@@ -15,7 +16,7 @@ export const authController = {
 
       if (!employeeId || !password) {
         return res.status(400).json({
-          error: 'employeeId และ password จำเป็นต้องระบุ'
+          error: 'employeeId และ password (nationalId) จำเป็นต้องระบุ'
         });
       }
 

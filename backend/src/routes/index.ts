@@ -10,6 +10,7 @@ import eventRoutes from './event.routes.js';
 import lateRequestRoutes from './late-request.routes.js';
 import leaveRequestRoutes from './leave-request.routes.js';
 import locationRoutes from './location.routes.js';
+import announcementRoutes from './announcement.routes.js';
 
 const router = Router();
 
@@ -32,5 +33,6 @@ router.use('/events', eventRoutes);
 router.use('/late-requests', lateRequestRoutes);
 router.use('/leave-requests', leaveRequestRoutes);
 router.use('/locations', locationRoutes);
+router.use('/announcements', announcementRoutes);
 
 export default router;

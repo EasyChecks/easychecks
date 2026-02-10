@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import type { Role } from '@prisma/client';
 import { authService } from '../services/auth.service.js';
 
 /**
@@ -11,8 +12,9 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   email: string;
-  role: string;
+  role: Role;
   avatarUrl?: string;
+  branchId?: number;
 }
 
 declare global {
@@ -47,7 +49,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   }
 }
 
-export function authorizeRole(...roles: string[]) {
+export function authorizeRole(...roles: Role[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({

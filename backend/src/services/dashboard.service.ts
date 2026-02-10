@@ -10,7 +10,7 @@ export interface User {
   userId: number;
   employeeId: string;
   role: Role;
-  branchId: number | undefined;
+  branchId?: number;
 }
 
 /**

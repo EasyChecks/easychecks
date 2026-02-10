@@ -103,7 +103,8 @@ export const authService = {
         lastName: session.user.lastName,
         email: session.user.email,
         role: session.user.role,
-        avatarUrl: session.user.avatarUrl
+        avatarUrl: session.user.avatarUrl,
+        branchId: session.user.branchId ?? undefined
       };
     } catch (error) {
       throw error;

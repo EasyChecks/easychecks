@@ -544,8 +544,8 @@ export default function AdminManageUser() {
   const getFilteredAttendanceRecords = (): AttendanceRecord[] => {
     if (!selectedUser || !selectedUser.attendanceRecords) return [];
     
-    if (selectedDate) {
-      return selectedUser.attendanceRecords.filter(record => record.date === selectedDate);
+    if (ui.selectedDate) {
+      return selectedUser.attendanceRecords.filter(record => record.date === ui.selectedDate);
     }
     return selectedUser.attendanceRecords.slice(0, 3);
   };

@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { ReactNode } from 'react';
 import BottomNavigation from './BottomNavigation';
@@ -10,13 +9,7 @@ interface UserLayoutProps {
 }
 
 export default function UserLayout({ children }: UserLayoutProps) {
-  const router = useRouter();
-  const { user, logout } = useAuth();
-
-  const handleLogout = () => {
-    logout();
-    router.push('/login');
-  };
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
@@ -30,21 +23,23 @@ export default function UserLayout({ children }: UserLayoutProps) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <div>
+              <div className="hidden sm:block">
                 <h1 className="text-lg font-bold text-gray-800">EasyCheck</h1>
-                <p className="text-xs text-gray-500">{user?.name}</p>
+                <p className="text-xs text-gray-500">ระบบบริหารจัดการเวลา</p>
               </div>
             </div>
 
-            <button
-              onClick={handleLogout}
-              className="p-2 rounded-lg hover:bg-red-50 text-red-600 transition-colors"
-              title="ออกจากระบบ"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-bold text-gray-800">{user?.name || 'User'}</p>
+                <p className="text-xs text-gray-500">
+                  {user?.branch || user?.provinceCode || 'N/A'} • {user?.position || 'Employee'}
+                </p>
+              </div>
+              <div className="w-10 h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold shadow-md text-lg">
+                {user?.name?.charAt(0) || 'U'}
+              </div>
+            </div>
           </div>
         </div>
       </header>

@@ -1,0 +1,23 @@
+services:
+  # Backend API Service
+  - type: web
+    name: easycheck-backend
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: cd backend && npm install && npm run build
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false  # ตั้งค่าใน Render Dashboard
+      - key: PORT
+        value: 3000
+      - key: SUPABASE_URL
+        sync: false  # ตั้งค่าใน Render Dashboard
+      - key: SUPABASE_ANON_KEY
+        sync: false  # ตั้งค่าใน Render Dashboard
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false  # ตั้งค่าใน Render Dashboard
+    healthCheckPath: /api

@@ -157,7 +157,7 @@ export default function AdminManageUser() {
       setFilters(prev => ({ ...prev, debouncedSearch: prev.search }));
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchTerm]);
+  }, [filters.search]);
 
   // Filter and search users
   const filteredUsers = useMemo(() => {
@@ -165,10 +165,10 @@ export default function AdminManageUser() {
     
     // Branch filter for admin role
     if (currentUser?.role === 'admin') {
-      const adminBranch = currentUser.branch || currentUser.provinceCode || currentUser.employeeId?.substring(0, 3);
+      const adminBranch = currentUser.branch || currentUser.provinceCode;
       if (adminBranch) {
         filtered = filtered.filter(user => {
-          const userBranch = user.branch || user.provinceCode || user.employeeId?.substring(0, 3);
+          const userBranch = user.branch || user.provinceCode;
           return userBranch === adminBranch;
         });
       }
@@ -176,31 +176,31 @@ export default function AdminManageUser() {
     
     // Search filter
     filtered = filtered.filter(user => {
-      const matchesSearch = user.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-                           user.email.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-                           user.employeeId?.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
-      const matchesStatus = filterStatus === 'all' || user.status === filterStatus;
+      const matchesSearch = user.name.toLowerCase().includes(filters.debouncedSearch.toLowerCase()) ||
+                           user.email.toLowerCase().includes(filters.debouncedSearch.toLowerCase()) ||
+                           user.employeeId?.toLowerCase().includes(filters.debouncedSearch.toLowerCase());
+      const matchesStatus = filters.status === 'all' || user.status === filters.status;
       
       // Branch filter
       let matchesBranch = true;
-      if (filterBranch !== 'all') {
-        const userBranch = user.branch || user.provinceCode || user.employeeId?.substring(0, 3);
-        matchesBranch = userBranch === filterBranch;
+      if (filters.branch !== 'all') {
+        const userBranch = user.branch || user.provinceCode;
+        matchesBranch = userBranch === filters.branch;
       }
       
       return matchesSearch && matchesStatus && matchesBranch;
     });
     
     return filtered;
-  }, [users, debouncedSearchTerm, filterStatus, filterBranch, currentUser]);
+  }, [users, filters.debouncedSearch, filters.status, filters.branch, currentUser]);
 
   const openDetail = (user: User) => {
     setSelectedUser(user);
-    setShowDetail(true);
+    setModals(prev => ({ ...prev, detail: true }));
   };
 
   const closeDetail = () => {
-    setShowDetail(false);
+    setModals(prev => ({ ...prev, detail: false }));
     setSelectedUser(null);
   };
 
@@ -209,79 +209,85 @@ export default function AdminManageUser() {
     const userToEdit = user || selectedUser;
     if (!userToEdit) return;
     
-    setEditingUser(userToEdit);
-    setEditForm({
-      name: userToEdit.name || '',
-      email: userToEdit.email || '',
-      phone: userToEdit.phone || '',
-      department: userToEdit.department || '',
-      role: userToEdit.role || '',
-      birthDate: userToEdit.birthDate || '',
-      status: userToEdit.status || '',
-      address: userToEdit.address || '',
-      position: userToEdit.position || '',
-      nationalId: userToEdit.nationalId || '',
-      bloodType: userToEdit.bloodType || '',
-      password: userToEdit.password || '',
-      employeeId: userToEdit.employeeId || '',
-      emergencyContactName: userToEdit.emergencyContact?.name || '',
-      emergencyContactPhone: userToEdit.emergencyContact?.phone || '',
-      emergencyContactRelation: userToEdit.emergencyContact?.relation || ''
-    });
-    setShowEditUser(true);
+    setEditing(prev => ({
+      ...prev,
+      user: userToEdit,
+      form: {
+        name: userToEdit.name || '',
+        email: userToEdit.email || '',
+        phone: userToEdit.phone || '',
+        department: userToEdit.department || '',
+        role: userToEdit.role || '',
+        birthDate: userToEdit.birthDate || '',
+        status: userToEdit.status || '',
+        address: userToEdit.address || '',
+        position: userToEdit.position || '',
+        nationalId: userToEdit.nationalId || '',
+        bloodType: userToEdit.bloodType || '',
+        password: userToEdit.password || '',
+        employeeId: userToEdit.employeeId || '',
+        emergencyContactName: userToEdit.emergencyContact?.name || '',
+        emergencyContactPhone: userToEdit.emergencyContact?.phone || '',
+        emergencyContactRelation: userToEdit.emergencyContact?.relation || ''
+      }
+    }));
+    setModals(prev => ({ ...prev, editUser: true }));
   };
 
   const closeEditUser = () => {
-    setShowEditUser(false);
-    setEditingUser(null);
-    setEditForm({});
+    setModals(prev => ({ ...prev, editUser: false }));
+    setEditing(prev => ({ ...prev, user: null, form: {} }));
   };
 
   const saveEditUser = () => {
-    if (!editForm.name || !editForm.email || !editForm.phone) {
-      setAlertDialog({
-        isOpen: true,
-        type: 'error',
-        title: 'ข้อมูลไม่ครบ',
-        message: 'กรุณากรอกข้อมูลให้ครบถ้วน (ชื่อ, อีเมล, เบอร์โทร)',
-        autoClose: true
-      });
+    if (!editing.form.name || !editing.form.email || !editing.form.phone) {
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: 'ข้อมูลไม่ครบ',
+          message: 'กรุณากรอกข้อมูลให้ครบถ้วน (ชื่อ, อีเมล, เบอร์โทร)',
+          autoClose: true
+        }
+      }));
       return;
     }
 
-    if (!editingUser) return;
+    if (!editing.user) return;
 
+    const { emergencyContactName, emergencyContactPhone, emergencyContactRelation, ...restForm } = editing.form;
+    
     const updatedUserData = {
-      ...editForm,
+      ...restForm,
       emergencyContact: {
-        name: editForm.emergencyContactName,
-        phone: editForm.emergencyContactPhone,
-        relation: editForm.emergencyContactRelation
+        name: emergencyContactName,
+        phone: emergencyContactPhone,
+        relation: emergencyContactRelation
       }
     };
 
-    delete updatedUserData.emergencyContactName;
-    delete updatedUserData.emergencyContactPhone;
-    delete updatedUserData.emergencyContactRelation;
-
     const updatedUsers = users.map(user => 
-      user.id === editingUser.id ? { ...user, ...updatedUserData } : user
+      user.id === editing.user!.id ? { ...user, ...updatedUserData } : user
     );
 
     setUsers(updatedUsers);
     
-    if (selectedUser && selectedUser.id === editingUser.id) {
-      const updatedUser = updatedUsers.find(u => u.id === editingUser.id);
+    if (selectedUser && selectedUser.id === editing.user!.id) {
+      const updatedUser = updatedUsers.find(u => u.id === editing.user!.id);
       setSelectedUser(updatedUser || null);
     }
 
-    setAlertDialog({
-      isOpen: true,
-      type: 'success',
-      title: 'บันทึกสำเร็จ',
-      message: 'แก้ไขข้อมูลผู้ใช้เรียบร้อยแล้ว',
-      autoClose: true
-    });
+    setUi(prev => ({
+      ...prev,
+      alertDialog: {
+        isOpen: true,
+        type: 'success',
+        title: 'บันทึกสำเร็จ',
+        message: 'แก้ไขข้อมูลผู้ใช้เรียบร้อยแล้ว',
+        autoClose: true
+      }
+    }));
 
     closeEditUser();
   };
@@ -289,46 +295,51 @@ export default function AdminManageUser() {
   // Delete user
   const handleDeleteUser = (userToDelete: User) => {
     if (currentUser?.role === 'admin' && userToDelete.role === 'superadmin') {
-      setAlertDialog({
-        isOpen: true,
-        type: 'error',
-        title: 'ไม่มีสิทธิ์',
-        message: 'Admin ไม่สามารถลบ Super Admin ได้',
-        autoClose: true
-      });
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: 'ไม่มีสิทธิ์',
+          message: 'Admin ไม่สามารถลบ Super Admin ได้',
+          autoClose: true
+        }
+      }));
       return;
     }
 
     closeDetail();
-    setDeleteCandidate(userToDelete);
+    setUi(prev => ({ ...prev, deleteCandidate: userToDelete }));
   };
 
   const cancelDelete = () => {
-    setDeleteCandidate(null);
+    setUi(prev => ({ ...prev, deleteCandidate: null }));
     if (selectedUser) {
-      setShowDetail(true);
+      setModals(prev => ({ ...prev, detail: true }));
     }
   };
 
   const confirmDeleteUser = () => {
-    if (!deleteCandidate) return;
+    if (!ui.deleteCandidate) return;
     
-    const updatedUsers = users.filter(u => u.id !== deleteCandidate.id);
+    const updatedUsers = users.filter(u => u.id !== ui.deleteCandidate!.id);
     setUsers(updatedUsers);
     
-    if (selectedUser && selectedUser.id === deleteCandidate.id) {
+    if (selectedUser && selectedUser.id === ui.deleteCandidate.id) {
       closeDetail();
     }
 
-    setAlertDialog({
-      isOpen: true,
-      type: 'success',
-      title: 'ลบสำเร็จ',
-      message: `ลบ ${deleteCandidate.name} เรียบร้อยแล้ว`,
-      autoClose: true
-    });
-
-    setDeleteCandidate(null);
+    setUi(prev => ({
+      ...prev,
+      alertDialog: {
+        isOpen: true,
+        type: 'success',
+        title: 'ลบสำเร็จ',
+        message: `ลบ ${prev.deleteCandidate?.name} เรียบร้อยแล้ว`,
+        autoClose: true
+      },
+      deleteCandidate: null
+    }));
   };
 
   const getStatusBadge = (status: string): string => {
@@ -345,31 +356,40 @@ export default function AdminManageUser() {
     if (!selectedUser) return;
 
     try {
-      setAlertDialog({
-        isOpen: true,
-        type: 'info',
-        title: 'กำลังสร้าง PDF',
-        message: 'กรุณารอสักครู่...',
-        autoClose: false
-      });
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'info',
+          title: 'กำลังสร้าง PDF',
+          message: 'กรุณารอสักครู่...',
+          autoClose: false
+        }
+      }));
 
       await generateUserPDF(selectedUser);
       
-      setAlertDialog({
-        isOpen: true,
-        type: 'success',
-        title: 'สำเร็จ',
-        message: 'ดาวน์โหลด PDF เรียบร้อยแล้ว',
-        autoClose: true
-      });
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'success',
+          title: 'สำเร็จ',
+          message: 'ดาวน์โหลด PDF เรียบร้อยแล้ว',
+          autoClose: true
+        }
+      }));
     } catch (error: any) {
-      setAlertDialog({
-        isOpen: true,
-        type: 'error',
-        title: 'เกิดข้อผิดพลาด',
-        message: `ไม่สามารถสร้าง PDF ได้: ${error.message}`,
-        autoClose: true
-      });
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: 'เกิดข้อผิดพลาด',
+          message: `ไม่สามารถสร้าง PDF ได้: ${error.message}`,
+          autoClose: true
+        }
+      }));
     }
   };
 
@@ -378,13 +398,16 @@ export default function AdminManageUser() {
     const updatedUsers = [...users, newUser];
     setUsers(updatedUsers);
     
-    setAlertDialog({
-      isOpen: true,
-      type: 'success',
-      title: 'เพิ่มผู้ใช้สำเร็จ',
-      message: `เพิ่ม ${newUser.name} เข้าระบบเรียบร้อยแล้ว\n\nรหัสพนักงาน: ${newUser.employeeId}\nรหัสผ่าน: ${newUser.password}`,
-      autoClose: false
-    });
+    setUi(prev => ({
+      ...prev,
+      alertDialog: {
+        isOpen: true,
+        type: 'success',
+        title: 'เพิ่มผู้ใช้สำเร็จ',
+        message: `เพิ่ม ${newUser.name} เข้าระบบเรียบร้อยแล้ว\n\nรหัสพนักงาน: ${newUser.employeeId}\nรหัสผ่าน: ${newUser.password}`,
+        autoClose: false
+      }
+    }));
   };
 
   // CSV Import
@@ -393,12 +416,15 @@ export default function AdminManageUser() {
     if (!file) return;
 
     if (!file.name.endsWith('.csv')) {
-      setAlertDialog({
-        isOpen: true,
-        type: 'error',
-        title: 'ไฟล์ไม่ถูกต้อง',
-        message: 'กรุณาเลือกไฟล์ .csv เท่านั้น'
-      });
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: 'ไฟล์ไม่ถูกต้อง',
+          message: 'กรุณาเลือกไฟล์ .csv เท่านั้น'
+        }
+      }));
       e.target.value = '';
       return;
     }
@@ -417,24 +443,30 @@ export default function AdminManageUser() {
       const data = parseCsvData(csvText);
       
       if (data.length === 0) {
-        setAlertDialog({
-          isOpen: true,
-          type: 'error',
-          title: 'ไฟล์ว่างเปล่า',
-          message: 'ไม่พบข้อมูลในไฟล์ CSV'
-        });
+        setUi(prev => ({
+          ...prev,
+          alertDialog: {
+            isOpen: true,
+            type: 'error',
+            title: 'ไฟล์ว่างเปล่า',
+            message: 'ไม่พบข้อมูลในไฟล์ CSV'
+          }
+        }));
         return;
       }
 
       setCsvData(data);
-      setShowCsvModal(true);
+      setModals(prev => ({ ...prev, csv: true }));
     } catch (error) {
-      setAlertDialog({
-        isOpen: true,
-        type: 'error',
-        title: 'เกิดข้อผิดพลาด',
-        message: 'ไม่สามารถอ่านไฟล์ CSV ได้ กรุณาตรวจสอบรูปแบบไฟล์'
-      });
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: 'เกิดข้อผิดพลาด',
+          message: 'ไม่สามารถอ่านไฟล์ CSV ได้ กรุณาตรวจสอบรูปแบบไฟล์'
+        }
+      }));
     }
   };
 
@@ -443,59 +475,70 @@ export default function AdminManageUser() {
     const validationErrors = validateUserData(processedUsers, users);
     
     if (validationErrors.length > 0) {
-      setAlertDialog({
-        isOpen: true,
-        type: 'error',
-        title: `พบข้อมูลซ้ำ (${validationErrors.length} รายการ)`,
-        message: validationErrors.slice(0, 5).join('\n')
-      });
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: `พบข้อมูลซ้ำ (${validationErrors.length} รายการ)`,
+          message: validationErrors.slice(0, 5).join('\n')
+        }
+      }));
       return;
     }
 
     const updatedUsers = [...users, ...processedUsers];
     setUsers(updatedUsers);
     
-    setShowCsvModal(false);
+    setModals(prev => ({ ...prev, csv: false }));
     setCsvData([]);
 
-    setAlertDialog({
-      isOpen: true,
-      type: 'success',
-      title: 'นำเข้าสำเร็จ',
-      message: `นำเข้าข้อมูลพนักงาน ${processedUsers.length} บัญชี เรียบร้อยแล้ว`,
-      autoClose: true
-    });
+    setUi(prev => ({
+      ...prev,
+      alertDialog: {
+        isOpen: true,
+        type: 'success',
+        title: 'นำเข้าสำเร็จ',
+        message: `นำเข้าข้อมูลพนักงาน ${processedUsers.length} บัญชี เรียบร้อยแล้ว`,
+        autoClose: true
+      }
+    }));
   };
 
   const closeCsvModal = () => {
-    setShowCsvModal(false);
+    setModals(prev => ({ ...prev, csv: false }));
     setCsvData([]);
   };
 
   const handleAttendanceEdit = (editData: AttendanceEditData | null) => {
-    setEditingAttendance(editData);
-    if (editData) {
-      setAttendanceForm(editData.data || {});
-    } else {
-      setAttendanceForm({});
-    }
+    setEditing(prev => ({
+      ...prev,
+      attendance: editData,
+      attendanceForm: editData ? (editData.data || {}) : {}
+    }));
   };
 
   const saveAttendanceEdit = () => {
     // Mock implementation
-    setAlertDialog({
-      isOpen: true,
-      type: 'success',
-      title: 'บันทึกสำเร็จ!',
-      message: 'บันทึกการแก้ไขข้อมูลการเข้า-ออกงานเรียบร้อยแล้ว',
-      autoClose: true
-    });
-    setEditingAttendance(null);
-    setAttendanceForm({});
+    setUi(prev => ({
+      ...prev,
+      alertDialog: {
+        isOpen: true,
+        type: 'success',
+        title: 'บันทึกสำเร็จ!',
+        message: 'บันทึกการแก้ไขข้อมูลการเข้า-ออกงานเรียบร้อยแล้ว',
+        autoClose: true
+      }
+    }));
+    setEditing(prev => ({
+      ...prev,
+      attendance: null,
+      attendanceForm: {}
+    }));
   };
 
   const closeAlertDialog = () => {
-    setAlertDialog({ ...alertDialog, isOpen: false });
+    setUi(prev => ({ ...prev, alertDialog: { ...prev.alertDialog, isOpen: false } }));
   };
 
   const getFilteredAttendanceRecords = (): AttendanceRecord[] => {
@@ -537,7 +580,7 @@ export default function AdminManageUser() {
               />
             </label>
             <Button 
-              onClick={() => setShowCreateUser(true)}
+              onClick={() => setModals(prev => ({ ...prev, createUser: true }))}
               className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -557,14 +600,14 @@ export default function AdminManageUser() {
             <input
               type="text"
               placeholder="ค้นหาชื่อหรืออีเมล..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={filters.search}
+              onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
               className="w-full pl-10 pr-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none transition-colors"
             />
           </div>
           <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+            value={filters.status}
+            onChange={(e) => setFilters(prev => ({ ...prev, status: e.target.value }))}
             className="cursor-pointer px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none transition-colors bg-white"
           >
             <option value="all">สถานะ: ทั้งหมด</option>
@@ -576,8 +619,8 @@ export default function AdminManageUser() {
           
           {currentUser?.role === 'superadmin' && (
             <select
-              value={filterBranch}
-              onChange={(e) => setFilterBranch(e.target.value)}
+              value={filters.branch}
+              onChange={(e) => setFilters(prev => ({ ...prev, branch: e.target.value }))}
               className="cursor-pointer px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none transition-colors bg-white"
             >
               {branchOptions.map(option => (
@@ -597,9 +640,9 @@ export default function AdminManageUser() {
           currentUser={currentUser}
           onAttendanceEdit={handleAttendanceEdit}
           onSaveAttendanceEdit={saveAttendanceEdit}
-          editingAttendance={editingAttendance}
-          attendanceForm={attendanceForm}
-          onAttendanceFormChange={setAttendanceForm}
+          editingAttendance={editing.attendance}
+          attendanceForm={editing.attendanceForm}
+          onAttendanceFormChange={(form) => setEditing(prev => ({ ...prev, attendanceForm: form }))}
         />
 
         {/* Footer legend */}
@@ -641,39 +684,39 @@ export default function AdminManageUser() {
 
       {/* Lazy-loaded Modals */}
       <Suspense fallback={<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20"><div className="w-12 h-12 border-b-2 border-orange-600 rounded-full animate-spin"></div></div>}>
-        {showDetail && selectedUser && (
+        {modals.detail && selectedUser && (
           <UserDetailModal
             user={selectedUser}
-            showDetail={showDetail}
-            showAttendance={showAttendance}
-            selectedDate={selectedDate}
+            showDetail={modals.detail}
+            showAttendance={modals.attendance}
+            selectedDate={ui.selectedDate}
             currentUser={currentUser}
             onClose={closeDetail}
             onEdit={openEditUser}
             onDownloadPDF={downloadPDF}
             onDelete={handleDeleteUser}
-            onToggleAttendance={() => setShowAttendance(!showAttendance)}
+            onToggleAttendance={() => setModals(prev => ({ ...prev, attendance: !prev.attendance }))}
             getStatusBadge={getStatusBadge}
             getFilteredAttendanceRecords={getFilteredAttendanceRecords}
-            onSetSelectedDate={setSelectedDate}
+            onSetSelectedDate={(date) => setUi(prev => ({ ...prev, selectedDate: date }))}
           />
         )}
 
-        {showEditUser && editingUser && (
+        {modals.editUser && editing.user && (
           <UserEditModal
-            show={showEditUser}
-            editingUser={editingUser}
-            editForm={editForm}
+            show={modals.editUser}
+            editingUser={editing.user}
+            editForm={editing.form}
             currentUser={currentUser}
             onClose={closeEditUser}
             onSave={saveEditUser}
-            onChange={setEditForm}
+            onChange={(form) => setEditing(prev => ({ ...prev, form }))}
           />
         )}
 
-        {showCsvModal && (
+        {modals.csv && (
           <CsvImportModal
-            isOpen={showCsvModal}
+            isOpen={modals.csv}
             csvData={csvData}
             generateEmployeeId={(provinceCode, branchCode) => generateEmployeeId(provinceCode, branchCode, users)}
             onConfirm={confirmCsvImport}
@@ -681,10 +724,10 @@ export default function AdminManageUser() {
           />
         )}
 
-        {showCreateUser && (
+        {modals.createUser && (
           <UserCreateModal
-            isOpen={showCreateUser}
-            onClose={() => setShowCreateUser(false)}
+            isOpen={modals.createUser}
+            onClose={() => setModals(prev => ({ ...prev, createUser: false }))}
             onSubmit={handleCreateUser}
             generateEmployeeId={(provinceCode, branchCode) => generateEmployeeId(provinceCode, branchCode, users)}
             users={users}
@@ -694,22 +737,22 @@ export default function AdminManageUser() {
 
       {/* Alert Dialog */}
       <AlertDialog
-        isOpen={alertDialog.isOpen}
+        isOpen={ui.alertDialog.isOpen}
         onClose={closeAlertDialog}
-        type={alertDialog.type}
-        title={alertDialog.title}
-        message={alertDialog.message}
-        autoClose={alertDialog.autoClose}
+        type={ui.alertDialog.type}
+        title={ui.alertDialog.title}
+        message={ui.alertDialog.message}
+        autoClose={ui.alertDialog.autoClose}
       />
 
       {/* Delete confirmation modal */}
-      {deleteCandidate && (
+      {ui.deleteCandidate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={cancelDelete}></div>
           <Card className="relative z-10 w-full max-w-lg p-6 mx-4 shadow-2xl">
             <h3 className="mb-2 text-lg font-semibold">ยืนยันการลบ</h3>
             <p className="text-sm text-gray-700">
-              คุณแน่ใจหรือไม่ที่จะลบ "{deleteCandidate.name}"? การดำเนินการนี้ไม่สามารถย้อนกลับได้
+              คุณแน่ใจหรือไม่ที่จะลบ "{ui.deleteCandidate.name}"? การดำเนินการนี้ไม่สามารถย้อนกลับได้
             </p>
             <div className="flex justify-end gap-3 mt-4">
               <Button variant="outline" onClick={cancelDelete}>

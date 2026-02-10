@@ -69,7 +69,7 @@ export default function EventMap({ events, locations, onMapClick, selectedPositi
         <MapClickHandler onMapClick={onMapClick} isActive={!!onMapClick} />
 
         {/* Event Markers & Circles */}
-        {events.map((event) => (
+        {events?.map((event) => (
           <div key={event.id}>
             <Marker position={[event.latitude, event.longitude]}>
               <Popup>
@@ -97,7 +97,7 @@ export default function EventMap({ events, locations, onMapClick, selectedPositi
         ))}
 
         {/* Location Markers */}
-        {locations.map((location) => (
+        {locations?.map((location) => (
           <div key={location.id}>
             <Marker 
               position={[location.latitude, location.longitude]}

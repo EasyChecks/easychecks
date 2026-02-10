@@ -98,7 +98,7 @@ export default function AdminDashboard() {
   const { getFilteredEvents } = useEvents();
   
   // States
-  const [selectedBranch, setSelectedBranch] = useState("all");
+  const [selectedBranch, setSelectedBranch] = useState(user?.role === 'admin' ? (user?.branch || user?.provinceCode || 'all') : "all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
   const [expandedLocationIds, setExpandedLocationIds] = useState<string[]>([]);
   const locationRefs = useRef<Record<string, HTMLDivElement | null>>({});

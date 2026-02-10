@@ -82,18 +82,33 @@ const EventContext = createContext<EventContextType | undefined>(undefined);
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
-    // Mock user for development
+    // Mock user for development - สลับ role ตามต้องการ
+    
+    // SUPERADMIN MODE (เห็นทุกสาขา + มี dropdown ฟิลเตอร์)
     return {
       user: {
         id: 1,
-        name: "Admin User",
-        email: "admin@example.com",
+        name: "สมโครง ยวนตุม",
+        email: "superadmin@example.com",
         role: "superadmin" as const,
         provinceCode: "BKK",
         branch: "BKK",
         branchCode: "101",
       },
     };
+    
+    // ADMIN MODE (เห็นแค่สาขาตัวเอง + ไม่มี dropdown ฟิลเตอร์)
+    // return {
+    //   user: {
+    //     id: 2,
+    //     name: "Admin User",
+    //     email: "admin@example.com",
+    //     role: "admin" as const,
+    //     provinceCode: "BKK",
+    //     branch: "BKK",
+    //     branchCode: "101",
+    //   },
+    // };
   }
   return context;
 }

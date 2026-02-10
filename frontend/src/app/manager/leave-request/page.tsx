@@ -3,8 +3,6 @@
 import { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const leaveTypes = [
   { id: 'sick', name: 'ลาป่วย', color: 'bg-red-100 text-red-700', icon: '🤒' },
@@ -22,13 +20,6 @@ export default function ManagerLeaveRequestPage() {
   });
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Pending approval requests
-  const pendingRequests = [
-    { id: 1, name: 'สมชาย ใจดี', type: 'ลาป่วย', date: '10-11 ก.พ. 68', reason: 'ไข้หวัด', avatar: '👨' },
-    { id: 2, name: 'สมหญิง รักงาน', type: 'ลากิจ', date: '12 ก.พ. 68', reason: 'ธุระส่วนตัว', avatar: '👩' },
-    { id: 3, name: 'ประยุทธ จริงใจ', type: 'ลาพักร้อน', date: '15-17 ก.พ. 68', reason: 'พักผ่อน', avatar: '👨‍💼' },
-  ];
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.selectedType || !formData.startDate || !formData.endDate || !formData.reason) {
@@ -43,14 +34,6 @@ export default function ManagerLeaveRequestPage() {
     }, 2000);
   };
 
-  const handleApprove = (id: number) => {
-    alert(`อนุมัติคำขอ ID: ${id}`);
-  };
-
-  const handleReject = (id: number) => {
-    alert(`ไม่อนุมัติคำขอ ID: ${id}`);
-  };
-
   return (
     <div className="space-y-4">
       <Card className="p-4 bg-gradient-to-r from-purple-500 to-purple-600 text-white">
@@ -58,22 +41,9 @@ export default function ManagerLeaveRequestPage() {
         <p className="text-sm text-white/90">ยื่นคำขอและพิจารณาใบลา</p>
       </Card>
 
-      <Tabs defaultValue="request" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="request">ขอลา</TabsTrigger>
-          <TabsTrigger value="approve">
-            อนุมัติ
-            {pendingRequests.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-red-500 text-white text-xs rounded-full">
-                {pendingRequests.length}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="request" className="space-y-4 mt-4">
-          <Card className="p-4">
-            <h3 className="font-semibold text-gray-800 mb-3">โควต้าการลา</h3>
+      <div className="space-y-4">
+        <Card className="p-4">
+          <h3 className="font-semibold text-gray-800 mb-3">โควต้าการลา</h3>
             <div className="grid grid-cols-2 gap-3">
               <div className="p-3 bg-green-50 rounded-lg">
                 <div className="text-sm text-gray-600">ลาป่วย</div>
@@ -161,60 +131,7 @@ export default function ManagerLeaveRequestPage() {
               ส่งคำขอลา
             </Button>
           </form>
-        </TabsContent>
-
-        <TabsContent value="approve" className="space-y-4 mt-4">
-          <Card className="p-4">
-            <h3 className="font-semibold text-gray-800 mb-3">
-              รอการอนุมัติ ({pendingRequests.length})
-            </h3>
-          </Card>
-
-          {pendingRequests.length === 0 ? (
-            <Card className="p-8 text-center">
-              <div className="text-gray-400 text-5xl mb-3">📋</div>
-              <p className="text-gray-500">ไม่มีคำขอรออนุมัติ</p>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {pendingRequests.map((request) => (
-                <Card key={request.id} className="p-4">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center text-2xl flex-shrink-0">
-                      {request.avatar}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900">{request.name}</div>
-                      <div className="text-sm text-gray-600">{request.type}</div>
-                      <div className="text-sm text-gray-500">{request.date}</div>
-                    </div>
-                    <Badge variant="default">รอพิจารณา</Badge>
-                  </div>
-                  <div className="bg-gray-50 p-3 rounded-lg mb-3">
-                    <div className="text-sm text-gray-600">เหตุผล:</div>
-                    <div className="text-sm text-gray-900">{request.reason}</div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => handleReject(request.id)}
-                      variant="outline"
-                      className="flex-1"
-                    >
-                      ไม่อนุมัติ
-                    </Button>
-                    <Button
-                      onClick={() => handleApprove(request.id)}
-                      className="flex-1 bg-green-500 hover:bg-green-600"
-                    >
-                      อนุมัติ
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+        </div>
 
       {showSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">

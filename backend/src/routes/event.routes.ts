@@ -9,8 +9,7 @@ import {
   deleteEvent,
   restoreEvent,
 } from '../controllers/event.controller.js';
-import { authenticate } from '../middleware/auth.middleware.js';
-import { requireRole } from '../middleware/role.middleware.js';
+import { authenticate, authorizeRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
@@ -22,30 +21,23 @@ const router = Router();
  * ทุกคน: ดูรายการ, ดูกิจกรรมตัวเอง
  */
 
-// ต้อง authenticate ทุก route
-router.use(authenticate);
-
 /**
  * POST /api/events
  * สร้างกิจกรรมใหม่ (Admin/SuperAdmin only)
  */
-router.post('/', requireRole(['ADMIN', 'SUPERADMIN']), createEvent);
+router.post('/', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), createEvent);
 
 /**
  * GET /api/events/my
  * ดึงกิจกรรมที่ผู้ใช้เข้าร่วม
  */
-router.get('/my', getMyEvents);
+router.get('/my', authenticate, getMyEvents);
 
 /**
  * GET /api/events/statistics
  * ดึงสถิติกิจกรรม (Admin only)
  */
-router.get(
-  '/statistics',
-  requireRole(['ADMIN', 'SUPERADMIN']),
-  getEventStatistics
-);
+router.get('/statistics', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), getEventStatistics);
 
 /**
  * GET /api/events
@@ -59,34 +51,30 @@ router.get(
  * - skip: จำนวนที่ข้าม (pagination)
  * - take: จำนวนที่ดึง (pagination)
  */
-router.get('/', getAllEvents);
+router.get('/', authenticate, getAllEvents);
 
 /**
  * GET /api/events/:id
  * ดึงกิจกรรมด้วย ID
  */
-router.get('/:id', getEventById);
+router.get('/:id', authenticate, getEventById);
 
 /**
  * PATCH /api/events/:id
  * แก้ไขกิจกรรม (Admin/SuperAdmin only)
  */
-router.patch('/:id', requireRole(['ADMIN', 'SUPERADMIN']), updateEvent);
+router.patch('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), updateEvent);
 
 /**
  * DELETE /api/events/:id
  * ลบกิจกรรม (Soft Delete) (Admin/SuperAdmin only)
  */
-router.delete('/:id', requireRole(['ADMIN', 'SUPERADMIN']), deleteEvent);
+router.delete('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), deleteEvent);
 
 /**
  * POST /api/events/:id/restore
  * กู้คืนกิจกรรมที่ถูกลบ (Admin/SuperAdmin only)
  */
-router.post(
-  '/:id/restore',
-  requireRole(['ADMIN', 'SUPERADMIN']),
-  restoreEvent
-);
+router.post('/:id/restore', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), restoreEvent);
 
 export default router;

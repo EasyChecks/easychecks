@@ -16,7 +16,8 @@ model User {
   gender                                                  Gender               @default(MALE)
   nationalId                                              String               @unique @map("national_id")
   emergent_tel                                            String               @map("emergent_tel")
-  emergent_name                                           String               @map("emergent_name")
+  emergent_first_name                                     String               @map("emergent_first_name")
+  emergent_last_name                                      String               @map("emergent_last_name")
   emergent_relation                                       String               @map("emergent_relation")
   phone                                                   String               @map("phone")
   email                                                   String               @unique

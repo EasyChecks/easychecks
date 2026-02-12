@@ -32,7 +32,8 @@ import { parse } from 'csv-parse/sync';
  *   gender: string,            // (จำเป็น) MALE หรือ FEMALE
  *   nationalId: string,        // (จำเป็น) เลขบัตรประชาชน
  *   emergent_tel: string,      // (จำเป็น) เบอร์ติดต่อฉุกเฉิน
- *   emergent_name: string,     // (จำเป็น) ชื่อผู้ติดต่อฉุกเฉิน
+ *   emergent_first_name: string,     // (จำเป็น) ชื่อจริงผู้ติดต่อคือกเฉิน
+ *   emergent_last_name: string,     // (จำเป็น) นามสกุลผู้ติดต่อคือกเฉิน
  *   emergent_relation: string, // (จำเป็น) ความสัมพันธ์
  *   phone: string,             // (จำเป็น) เบอร์โทร
  *   email: string,             // (จำเป็น) อีเมล
@@ -67,7 +68,7 @@ export const createUser = async (req: Request, res: Response) => {
 
     // Validate required fields (ไม่มี employeeId แล้ว เพราะ auto-generate)
     const requiredFields = ['title', 'firstName', 'lastName', 'gender', 'nationalId', 
-                           'emergent_tel', 'emergent_name', 'emergent_relation',
+                           'emergent_tel', 'emergent_first_name', 'emergent_last_name', 'emergent_relation',
                            'phone', 'email', 'password', 'birthDate', 'branchId'];
     for (const field of requiredFields) {
       if (!userData[field]) {
@@ -214,7 +215,7 @@ export const getUserById = async (req: Request, res: Response) => {
  *   updaterRole: string,       // (จำเป็น) Role ของผู้แก้ไข
  *   updaterBranchId?: number,  // (ถ้าเป็น ADMIN) สาขาของผู้แก้ไข
  *   firstName?, lastName?, nickname?, nationalId?,
- *   emergent_tel?, emergent_name?, emergent_relation?,
+ *   emergent_tel?, emergent_first_name?, emergent_last_name?, emergent_relation?,
  *   phone?, email?, password?, birthDate?,
  *   branchId?, role?, status?, avatarGender?
  * }
@@ -326,7 +327,7 @@ export const deleteUser = async (req: Request, res: Response) => {
  * }
  * 
  * CSV Format (employeeId ไม่ต้องใส่ จะ auto-generate):
- * title,firstName,lastName,nickname,gender,nationalId,emergent_tel,emergent_name,emergent_relation,phone,email,password,birthDate,branchId,role
+ * title,firstName,lastName,nickname,gender,nationalId,emergent_tel,emergent_first_name,emergent_last_name,emergent_relation,phone,email,password,birthDate,branchId,role
  * 
  * Title: MR (นาย), MRS (นาง), MISS (นางสาว)
  * 
@@ -446,9 +447,9 @@ export const getUserAvatar = async (req: Request, res: Response) => {
  */
 export const getCsvTemplate = async (_req: Request, res: Response) => {
   try {
-    const template = `employeeId,firstName,lastName,nickname,nationalId,emergent_tel,emergent_name,emergent_relation,phone,email,password,birthDate,branchId,role,avatarGender
-EMP001,สมชาย,ใจดี,ชาย,1234567890123,0812345678,สมหญิง ใจดี,ภรรยา,0898765432,somchai@example.com,password123,1990-01-15,1,USER,male
-EMP002,สมหญิง,รักดี,หญิง,1234567890124,0812345679,สมชาย รักดี,สามี,0898765433,somying@example.com,password456,1992-05-20,1,USER,female`;
+    const template = `employeeId,firstName,lastName,nickname,nationalId,emergent_tel,emergent_first_name,emergent_last_name,emergent_relation,phone,email,password,birthDate,branchId,role,avatarGender
+EMP001,สมชาย,ใจดี,ชาย,1234567890123,0812345678,สมหญิง,ใจดี,ภรรยา,0898765432,somchai@example.com,password123,1990-01-15,1,USER,male
+EMP002,สมหญิง,รักดี,หญิง,1234567890124,0812345679,สมชาย,รักดี,สามี,0898765433,somying@example.com,password456,1992-05-20,1,USER,female`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=users_import_template.csv');

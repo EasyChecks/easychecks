@@ -46,7 +46,7 @@ export default function AttendancePage() {
         videoRef.current.srcObject = stream;
       }
       setUi(prev => ({ ...prev, isCameraActive: true, permissionGranted: true, loading: false }));
-    } catch (error: any) {
+    } catch (error) {
       console.error('Camera error:', error);
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
         alert('กรุณาอนุญาตการเข้าถึงกล้องเพื่อบันทึกเวลาเข้างาน');

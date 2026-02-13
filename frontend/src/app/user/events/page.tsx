@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
 import api from '@/services/api';
@@ -19,7 +19,7 @@ interface Event {
 }
 
 export default function UserEventsPage() {
-  const { user } = useAuth();
+  const { } = useAuth();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
 

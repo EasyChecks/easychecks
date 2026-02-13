@@ -127,7 +127,7 @@ export default function AdminManageUser() {
   // Grouped: Editing states (4 → 1)
   const [editing, setEditing] = useState<{
     user: User | null;
-    form: Record<string, any>;
+    form: Record<string, string | number | boolean | null>;
     attendance: AttendanceEditData | null;
     attendanceForm: Partial<AttendanceCheckData>;
   }>({
@@ -379,14 +379,15 @@ export default function AdminManageUser() {
           autoClose: true
         }
       }));
-    } catch (error: any) {
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setUi(prev => ({
         ...prev,
         alertDialog: {
           isOpen: true,
           type: 'error',
           title: 'เกิดข้อผิดพลาด',
-          message: `ไม่สามารถสร้าง PDF ได้: ${error.message}`,
+          message: `ไม่สามารถสร้าง PDF ได้: ${errorMessage}`,
           autoClose: true
         }
       }));
@@ -457,7 +458,7 @@ export default function AdminManageUser() {
 
       setCsvData(data);
       setModals(prev => ({ ...prev, csv: true }));
-    } catch (error) {
+    } catch {
       setUi(prev => ({
         ...prev,
         alertDialog: {
@@ -752,7 +753,7 @@ export default function AdminManageUser() {
           <Card className="relative z-10 w-full max-w-lg p-6 mx-4 shadow-2xl">
             <h3 className="mb-2 text-lg font-semibold">ยืนยันการลบ</h3>
             <p className="text-sm text-gray-700">
-              คุณแน่ใจหรือไม่ที่จะลบ "{ui.deleteCandidate.name}"? การดำเนินการนี้ไม่สามารถย้อนกลับได้
+              คุณแน่ใจหรือไม่ที่จะลบ &quot;{ui.deleteCandidate.name}&quot;? การดำเนินการนี้ไม่สามารถย้อนกลับได้
             </p>
             <div className="flex justify-end gap-3 mt-4">
               <Button variant="outline" onClick={cancelDelete}>

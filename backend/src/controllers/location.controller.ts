@@ -3,7 +3,9 @@ import {
   LocationUserActions,
   LocationAdminActions,
 } from '../services/location.service.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess } from '../utils/response.js';
+import { asyncHandler } from '../utils/async-handler.js';
+import { UnauthorizedError, BadRequestError, NotFoundError } from '../utils/custom-errors.js';
 
 /**
  * Location Controller - จัดการ API สถานที่/แผนที่
@@ -13,268 +15,228 @@ import { sendSuccess, sendError } from '../utils/response.js';
  * POST /api/locations
  * สร้างสถานที่ใหม่
  */
-export const createLocation = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.userId;
+export const createLocation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
 
-    if (!userId) {
-      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
-    }
-
-    const {
-      locationName,
-      address,
-      locationType,
-      latitude,
-      longitude,
-      radius,
-      description,
-      isActive,
-    } = req.body;
-
-    if (!locationName || !locationType || latitude === undefined || longitude === undefined) {
-      return sendError(
-        res,
-        'กรุณาระบุ locationName, locationType, latitude, longitude',
-        400
-      );
-    }
-
-    const validTypes = ['OFFICE', 'BRANCH', 'EVENT', 'SITE', 'MEETING', 'OTHER'];
-    if (!validTypes.includes(locationType)) {
-      return sendError(
-        res,
-        `locationType ต้องเป็น ${validTypes.join(', ')}`,
-        400
-      );
-    }
-
-    const location = await LocationUserActions.createLocation({
-      userId,
-      locationName,
-      address,
-      locationType,
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-      radius: radius ? parseFloat(radius) : undefined,
-      description,
-      isActive,
-    });
-
-    sendSuccess(res, location, 'สร้างสถานที่เรียบร้อยแล้ว', 201);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้างสถานที่');
+  if (!userId) {
+    throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
   }
-};
+
+  const {
+    locationName,
+    address,
+    locationType,
+    latitude,
+    longitude,
+    radius,
+    description,
+    isActive,
+  } = req.body;
+
+  if (!locationName || !locationType || latitude === undefined || longitude === undefined) {
+    throw new BadRequestError('กรุณาระบุ locationName, locationType, latitude, longitude');
+  }
+
+  const validTypes = ['OFFICE', 'BRANCH', 'EVENT', 'SITE', 'MEETING', 'OTHER'];
+  if (!validTypes.includes(locationType)) {
+    throw new BadRequestError(`locationType ต้องเป็น ${validTypes.join(', ')}`);
+  }
+
+  const location = await LocationUserActions.createLocation({
+    userId,
+    locationName,
+    address,
+    locationType,
+    latitude: parseFloat(latitude),
+    longitude: parseFloat(longitude),
+    radius: radius ? parseFloat(radius) : undefined,
+    description,
+    isActive,
+  });
+
+  sendSuccess(res, location, 'สร้างสถานที่เรียบร้อยแล้ว', 201);
+});
 
 /**
  * GET /api/locations
  * ดึงสถานที่ทั้งหมด
  */
-export const getAllLocations = async (req: Request, res: Response) => {
-  try {
-    const search = req.query.search as string | undefined;
-    const locationType = req.query.locationType as any;
-    const isActive =
-      req.query.isActive !== undefined
-        ? req.query.isActive === 'true'
-        : undefined;
-    const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
-    const take = req.query.take ? parseInt(req.query.take as string) : 20;
+export const getAllLocations = asyncHandler(async (req: Request, res: Response) => {
+  const search = req.query.search as string | undefined;
+  const locationType = req.query.locationType as any;
+  const isActive =
+    req.query.isActive !== undefined
+      ? req.query.isActive === 'true'
+      : undefined;
+  const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
+  const take = req.query.take ? parseInt(req.query.take as string) : 20;
 
-    const result = await LocationUserActions.getAllLocations({
-      search,
-      locationType,
-      isActive,
-      skip,
-      take,
-    });
+  const result = await LocationUserActions.getAllLocations({
+    search,
+    locationType,
+    isActive,
+    skip,
+    take,
+  });
 
-    sendSuccess(res, result, 'ดึงรายการสถานที่สำเร็จ');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงรายการสถานที่');
-  }
-};
+  sendSuccess(res, result, 'ดึงรายการสถานที่สำเร็จ');
+});
 
 /**
  * GET /api/locations/nearby
  * ค้นหาสถานที่ใกล้เคียง
  */
-export const getNearbyLocations = async (req: Request, res: Response) => {
-  try {
-    const latitude = req.query.latitude as string;
-    const longitude = req.query.longitude as string;
-    const radiusKm = req.query.radiusKm
-      ? parseFloat(req.query.radiusKm as string)
-      : 5;
+export const getNearbyLocations = asyncHandler(async (req: Request, res: Response) => {
+  const latitude = req.query.latitude as string;
+  const longitude = req.query.longitude as string;
+  const radiusKm = req.query.radiusKm
+    ? parseFloat(req.query.radiusKm as string)
+    : 5;
 
-    if (!latitude || !longitude) {
-      return sendError(res, 'กรุณาระบุ latitude และ longitude', 400);
-    }
-
-    const locations = await LocationUserActions.getNearbyLocations(
-      parseFloat(latitude),
-      parseFloat(longitude),
-      radiusKm
-    );
-
-    sendSuccess(res, locations, 'ค้นหาสถานที่ใกล้เคียงสำเร็จ');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการค้นหาสถานที่');
+  if (!latitude || !longitude) {
+    throw new BadRequestError('กรุณาระบุ latitude และ longitude');
   }
-};
+
+  const locations = await LocationUserActions.getNearbyLocations(
+    parseFloat(latitude),
+    parseFloat(longitude),
+    radiusKm
+  );
+
+  sendSuccess(res, locations, 'ค้นหาสถานที่ใกล้เคียงสำเร็จ');
+});
 
 /**
  * GET /api/locations/statistics
  * ดึงสถิติการใช้งานสถานที่ (Admin only)
  */
-export const getLocationStatistics = async (req: Request, res: Response) => {
-  try {
-    const statistics = await LocationAdminActions.getLocationStatistics();
+export const getLocationStatistics = asyncHandler(async (req: Request, res: Response) => {
+  const statistics = await LocationAdminActions.getLocationStatistics();
 
-    sendSuccess(res, statistics, 'ดึงสถิติสถานที่สำเร็จ');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงสถิติ');
-  }
-};
+  sendSuccess(res, statistics, 'ดึงสถิติสถานที่สำเร็จ');
+});
 
 /**
  * GET /api/locations/:id
  * ดึงสถานที่ด้วย ID
  */
-export const getLocationById = async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const locationId = parseInt(id);
+export const getLocationById = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const locationId = parseInt(id);
 
-    if (!locationId) {
-      return sendError(res, 'ID สถานที่ไม่ถูกต้อง', 400);
-    }
-
-    const location = await LocationUserActions.getLocationById(locationId);
-
-    if (!location) {
-      return sendError(res, 'ไม่พบสถานที่', 404);
-    }
-
-    sendSuccess(res, location);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงสถานที่');
+  if (!locationId) {
+    throw new BadRequestError('ID สถานที่ไม่ถูกต้อง');
   }
-};
+
+  const location = await LocationUserActions.getLocationById(locationId);
+
+  if (!location) {
+    throw new NotFoundError('ไม่พบสถานที่');
+  }
+
+  sendSuccess(res, location);
+});
 
 /**
  * PATCH /api/locations/:id
  * แก้ไขสถานที่ (Admin only)
  */
-export const updateLocation = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    const { id } = req.params;
-    const locationId = parseInt(id);
+export const updateLocation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const { id } = req.params;
+  const locationId = parseInt(id);
 
-    if (!userId) {
-      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
-    }
-
-    if (!locationId) {
-      return sendError(res, 'ID สถานที่ไม่ถูกต้อง', 400);
-    }
-
-    const location = await LocationUserActions.getLocationById(locationId);
-
-    if (!location) {
-      return sendError(res, 'ไม่พบสถานที่', 404);
-    }
-
-    const {
-      locationName,
-      address,
-      locationType,
-      latitude,
-      longitude,
-      radius,
-      description,
-      isActive,
-    } = req.body;
-
-    const updatedLocation = await LocationAdminActions.updateLocation(locationId, {
-      locationName,
-      address,
-      locationType,
-      latitude: latitude !== undefined ? parseFloat(latitude) : undefined,
-      longitude: longitude !== undefined ? parseFloat(longitude) : undefined,
-      radius: radius !== undefined ? parseFloat(radius) : undefined,
-      description,
-      isActive,
-      updatedByUserId: userId,
-    });
-
-    sendSuccess(res, updatedLocation, 'แก้ไขสถานที่เรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการแก้ไขสถานที่');
+  if (!userId) {
+    throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
   }
-};
+
+  if (!locationId) {
+    throw new BadRequestError('ID สถานที่ไม่ถูกต้อง');
+  }
+
+  const location = await LocationUserActions.getLocationById(locationId);
+
+  if (!location) {
+    throw new NotFoundError('ไม่พบสถานที่');
+  }
+
+  const {
+    locationName,
+    address,
+    locationType,
+    latitude,
+    longitude,
+    radius,
+    description,
+    isActive,
+  } = req.body;
+
+  const updatedLocation = await LocationAdminActions.updateLocation(locationId, {
+    locationName,
+    address,
+    locationType,
+    latitude: latitude !== undefined ? parseFloat(latitude) : undefined,
+    longitude: longitude !== undefined ? parseFloat(longitude) : undefined,
+    radius: radius !== undefined ? parseFloat(radius) : undefined,
+    description,
+    isActive,
+    updatedByUserId: userId,
+  });
+
+  sendSuccess(res, updatedLocation, 'แก้ไขสถานที่เรียบร้อยแล้ว');
+});
 
 /**
  * DELETE /api/locations/:id
  * ลบสถานที่ (Admin only - Soft Delete)
  */
-export const deleteLocation = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.userId;
-    const { id } = req.params;
-    const locationId = parseInt(id);
-    const { deleteReason } = req.body;
+export const deleteLocation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const { id } = req.params;
+  const locationId = parseInt(id);
+  const { deleteReason } = req.body;
 
-    if (!userId) {
-      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
-    }
-
-    if (!locationId) {
-      return sendError(res, 'ID สถานที่ไม่ถูกต้อง', 400);
-    }
-
-    const location = await LocationUserActions.getLocationById(locationId);
-
-    if (!location) {
-      return sendError(res, 'ไม่พบสถานที่', 404);
-    }
-
-    const deletedLocation = await LocationAdminActions.deleteLocation(locationId, {
-      deletedByUserId: userId,
-      deleteReason,
-    });
-
-    sendSuccess(res, deletedLocation, 'ลบสถานที่เรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการลบสถานที่');
+  if (!userId) {
+    throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
   }
-};
+
+  if (!locationId) {
+    throw new BadRequestError('ID สถานที่ไม่ถูกต้อง');
+  }
+
+  const location = await LocationUserActions.getLocationById(locationId);
+
+  if (!location) {
+    throw new NotFoundError('ไม่พบสถานที่');
+  }
+
+  const deletedLocation = await LocationAdminActions.deleteLocation(locationId, {
+    deletedByUserId: userId,
+    deleteReason,
+  });
+
+  sendSuccess(res, deletedLocation, 'ลบสถานที่เรียบร้อยแล้ว');
+});
 
 /**
  * POST /api/locations/:id/restore
  * กู้คืนสถานที่ที่ถูกลบ (Admin only)
  */
-export const restoreLocation = async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const locationId = parseInt(id);
+export const restoreLocation = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const locationId = parseInt(id);
 
-    if (!locationId) {
-      return sendError(res, 'ID สถานที่ไม่ถูกต้อง', 400);
-    }
-
-    const location = await LocationUserActions.getLocationById(locationId);
-
-    if (!location) {
-      return sendError(res, 'ไม่พบสถานที่', 404);
-    }
-
-    const restoredLocation = await LocationAdminActions.restoreLocation(locationId);
-
-    sendSuccess(res, restoredLocation, 'กู้คืนสถานที่เรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการกู้คืนสถานที่');
+  if (!locationId) {
+    throw new BadRequestError('ID สถานที่ไม่ถูกต้อง');
   }
-};
+
+  const location = await LocationUserActions.getLocationById(locationId);
+
+  if (!location) {
+    throw new NotFoundError('ไม่พบสถานที่');
+  }
+
+  const restoredLocation = await LocationAdminActions.restoreLocation(locationId);
+
+  sendSuccess(res, restoredLocation, 'กู้คืนสถานที่เรียบร้อยแล้ว');
+});

@@ -8,6 +8,7 @@ import { EventData, LocationData } from '@/types/event';
 
 // Fix Leaflet default marker icon issue
 if (typeof window !== 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (L.Icon.Default.prototype as any)._getIconUrl;
   L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -24,7 +25,7 @@ interface EventMapProps {
 }
 
 // Component to handle map clicks
-function MapClickHandler({ onMapClick, isActive }: { onMapClick?: (latlng: any) => void; isActive: boolean }) {
+function MapClickHandler({ onMapClick, isActive }: { onMapClick?: (latlng: { lat: number; lng: number }) => void; isActive: boolean }) {
   useMapEvents({
     click: (e) => {
       if (isActive && onMapClick) {

@@ -45,7 +45,8 @@ export interface CreateUserDTO {
   gender: Gender;
   nationalId: string;
   emergent_tel: string;
-  emergent_name: string;
+  emergent_first_name: string;
+  emergent_last_name: string;
   emergent_relation: string;
   phone: string;
   email: string;
@@ -68,7 +69,8 @@ export interface UpdateUserDTO {
   gender?: Gender;
   nationalId?: string;
   emergent_tel?: string;
-  emergent_name?: string;
+  emergent_first_name?: string;
+  emergent_last_name?: string;
   emergent_relation?: string;
   phone?: string;
   email?: string;
@@ -89,7 +91,8 @@ export interface BulkCreateUserDTO {
   gender: string; // MALE หรือ FEMALE
   nationalId: string;
   emergent_tel: string;
-  emergent_name: string;
+  emergent_first_name: string;
+  emergent_last_name: string;
   emergent_relation: string;
   phone: string;
   email: string;
@@ -137,7 +140,33 @@ function canAccessBranch(
 }
 
 /**
- * 🔢 Generate Employee ID from branch code + running number
+ * � Split full name into first name and last name
+ * For emergency contact names or any full names
+ */
+export function splitName(fullName: string): { firstName: string; lastName: string } {
+  if (!fullName) {
+    return { firstName: '', lastName: '' };
+  }
+
+  const parts = fullName.trim().split(/\s+/);
+  
+  if (parts.length === 0) {
+    return { firstName: '', lastName: '' };
+  }
+  
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: '' };
+  }
+  
+  // Take first part as first name, rest as last name
+  const firstName = parts[0];
+  const lastName = parts.slice(1).join(' ');
+  
+  return { firstName, lastName };
+}
+
+/**
+ * �🔢 Generate Employee ID from branch code + running number
  * Format: {branchCode}{3-digit running number}
  * เช่น BKK001, CNX002, HKT003
  */
@@ -334,7 +363,8 @@ export const createUser = async (data: CreateUserDTO) => {
       gender: data.gender,
       nationalId: data.nationalId,
       emergent_tel: data.emergent_tel,
-      emergent_name: data.emergent_name,
+      emergent_first_name: data.emergent_first_name,
+      emergent_last_name: data.emergent_last_name,
       emergent_relation: data.emergent_relation,
       phone: data.phone,
       email: data.email,
@@ -438,7 +468,8 @@ export const getUsers = async (
       nickname: true,
       nationalId: true,
       emergent_tel: true,
-      emergent_name: true,
+      emergent_first_name: true,
+      emergent_last_name: true,
       emergent_relation: true,
       phone: true,
       email: true,
@@ -495,7 +526,8 @@ export const getUserById = async (
       nickname: true,
       nationalId: true,
       emergent_tel: true,
-      emergent_name: true,
+      emergent_first_name: true,
+      emergent_last_name: true,
       emergent_relation: true,
       phone: true,
       email: true,
@@ -600,7 +632,8 @@ export const updateUser = async (
   if (data.nickname !== undefined) updateData.nickname = data.nickname;
   if (data.nationalId !== undefined) updateData.nationalId = data.nationalId;
   if (data.emergent_tel !== undefined) updateData.emergent_tel = data.emergent_tel;
-  if (data.emergent_name !== undefined) updateData.emergent_name = data.emergent_name;
+  if (data.emergent_first_name !== undefined) updateData.emergent_first_name = data.emergent_first_name;
+  if (data.emergent_last_name !== undefined) updateData.emergent_last_name = data.emergent_last_name;
   if (data.emergent_relation !== undefined) updateData.emergent_relation = data.emergent_relation;
   if (data.phone !== undefined) updateData.phone = data.phone;
   if (data.email !== undefined) updateData.email = data.email;
@@ -645,7 +678,8 @@ export const updateUser = async (
       nickname: true,
       nationalId: true,
       emergent_tel: true,
-      emergent_name: true,
+      emergent_first_name: true,
+      emergent_last_name: true,
       emergent_relation: true,
       phone: true,
       email: true,
@@ -812,12 +846,12 @@ export const bulkCreateUsers = async (
       // Validate required fields (ไม่ต้องมี employeeId แล้ว เพราะ auto-generate)
       if (!userData.title || !userData.firstName || !userData.lastName ||
           !userData.email || !userData.password || !userData.nationalId ||
-          !userData.phone || !userData.emergent_tel || !userData.emergent_name ||
-          !userData.emergent_relation || !userData.branchId || !userData.gender) {
+          !userData.phone || !userData.emergent_tel || !userData.emergent_first_name ||
+          !userData.emergent_last_name || !userData.emergent_relation || !userData.branchId || !userData.gender) {
         result.failed++;
         result.errors.push({
           row: rowNumber,
-          error: 'ข้อมูลไม่ครบ (ต้องมี: title, firstName, lastName, email, password, nationalId, phone, emergent_tel, emergent_name, emergent_relation, branchId, gender)',
+          error: 'ข้อมูลไม่ครบ (ต้องมี: title, firstName, lastName, email, password, nationalId, phone, emergent_tel, emergent_first_name, emergent_last_name, emergent_relation, branchId, gender)',
         });
         continue;
       }
@@ -960,7 +994,8 @@ export const bulkCreateUsers = async (
           gender,
           nationalId: userData.nationalId,
           emergent_tel: userData.emergent_tel,
-          emergent_name: userData.emergent_name,
+          emergent_first_name: userData.emergent_first_name,
+          emergent_last_name: userData.emergent_last_name,
           emergent_relation: userData.emergent_relation,
           phone: userData.phone,
           email: userData.email,

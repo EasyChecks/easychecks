@@ -3,7 +3,6 @@
 import { useState, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { MOCK_BRANCHES, MOCK_REPORTS, DATA_OPTIONS, DataOption, Statistics } from '@/types/download';
 
@@ -12,7 +11,7 @@ const PreviewModal = lazy(() => import('@/components/admin/ReportPreviewModal'))
 const AlertDialog = lazy(() => import('@/components/common/AlertDialog'));
 
 // Mock data generator
-const generateMockData = (options: Record<string, boolean>, branches: string[]) => {
+const generateMockData = (options: Record<string, boolean>) => {
   const data: Array<Record<string, string | number>> = [];
   
   for (let i = 0; i < 20; i++) {

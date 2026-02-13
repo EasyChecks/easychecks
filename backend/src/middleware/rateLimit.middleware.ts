@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from '../types/express.js';
 
 /**
  * 🛡️ RATE LIMIT MIDDLEWARE - ป้องกันการเจาะรหัส Brute Force Attack

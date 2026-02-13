@@ -69,7 +69,8 @@ router.post('/bulk', userController.bulkCreateUsers);
  *            nickname?: string,
  *            nationalId: string,
  *            emergent_tel: string,
- *            emergent_name: string,
+ *            emergent_first_name: string,
+ *            emergent_last_name: string,
  *            emergent_relation: string,
  *            phone: string,
  *            email: string,
@@ -132,7 +133,7 @@ router.get('/:id/avatar', userController.getUserAvatar);
  *            updaterRole: string,
  *            updaterBranchId?: number,
  *            firstName?, lastName?, nickname?, nationalId?,
- *            emergent_tel?, emergent_name?, emergent_relation?,
+ *            emergent_tel?, emergent_first_name?, emergent_last_name?, emergent_relation?,
  *            phone?, email?, password?, birthDate?,
  *            branchId?, role?, status?, avatarGender?
  *          }

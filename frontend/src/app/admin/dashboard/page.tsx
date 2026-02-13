@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,13 +11,11 @@ import {
   Calendar, 
   Clock,
   X,
-  ChevronDown,
   Search,
-  Check,
   Map as MapIcon,
   Satellite
 } from "lucide-react";
-import { useAuth, useLocations, useEvents, usersData, type User, type Location, type Event } from "@/contexts/mock-contexts";
+import { useAuth, useLocations, useEvents, usersData, type User, type Location } from "@/contexts/mock-contexts";
 import "leaflet/dist/leaflet.css";
 
 // Dynamic import for Map components (client-side only)
@@ -101,9 +99,7 @@ export default function AdminDashboard() {
   const [selectedBranch, setSelectedBranch] = useState(user?.role === 'admin' ? (user?.branch || user?.provinceCode || 'all') : "all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
   const [expandedLocationIds, setExpandedLocationIds] = useState<string[]>([]);
-  const locationRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const scrollPositions = useRef<Record<string, number>>({});
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<L.Map | null>(null);
   
   // Modal states
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -162,7 +158,7 @@ export default function AdminDashboard() {
     const today = new Date();
     const todayStr = `${today.getDate().toString().padStart(2, "0")}/${(today.getMonth() + 1).toString().padStart(2, "0")}/${today.getFullYear() + 543}`;
     
-    let users = [...usersData];
+    const users = [...usersData];
     
     const branchPrefix = branchFilter === "BKK" ? "1" : 
                         branchFilter === "CNX" ? "2" : 
@@ -227,7 +223,7 @@ export default function AdminDashboard() {
     const todayEvents = events.filter(e => e.date === todayStr || e.startDate === todayStr);
     const completedEvents = events.filter(e => e.status === "completed");
     
-    let users = [...usersData];
+    const users = [...usersData];
     const branchPrefix = branchFilter === "BKK" ? "1" : 
                         branchFilter === "CNX" ? "2" : 
                         branchFilter === "PKT" ? "3" : null;

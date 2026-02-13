@@ -132,7 +132,7 @@ export default function UserCreateModal({
               <label className="block mb-2 text-sm font-semibold text-gray-700">บทบาท *</label>
               <select
                 value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'user' | 'manager' | 'admin' | 'superadmin' })}
                 className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none"
                 required
               >

@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from '../types/express.js';
 import type { Role } from '@prisma/client';
 import { authService } from '../services/auth.service.js';
 

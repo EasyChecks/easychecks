@@ -1,0 +1,83 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: easycheck-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-easycheck}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - easycheck-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API with Hot Reload
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: easycheck-backend:dev
+    container_name: easycheck-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL}
+      DIRECT_URL: ${DIRECT_URL}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      # Use anonymous volume to prevent node_modules from showing red in VS Code
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - easycheck-network
+    command: npm run dev
+
+  # Frontend with Hot Reload  
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: easycheck-frontend:dev
+    container_name: easycheck-frontend
+    restart: unless-stopped
+    ports:
+      - "80:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+    volumes:
+      # Mount source code for hot reload
+      - ./frontend:/app
+      # Use anonymous volume to prevent node_modules from showing red in VS Code
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    networks:
+      - easycheck-network
+    command: npm run dev
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  easycheck-network:
+    driver: bridge

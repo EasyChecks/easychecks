@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,18 +19,9 @@ export default function UserDashboard() {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [attendanceMode, setAttendanceMode] = useState<'checkIn' | 'checkOut'>('checkIn');
   const [todayAttendance, setTodayAttendance] = useState<{ checkIn: string | null; checkOut: string | null }>({
-    checkIn: null,
+    checkIn: '08:05',
     checkOut: null
   });
-
-  useEffect(() => {
-    // โหลดข้อมูลการเข้างานวันนี้
-    // TODO: เรียก API
-    setTodayAttendance({
-      checkIn: '08:05',
-      checkOut: null
-    });
-  }, []);
 
   const handleCheckIn = () => {
     setAttendanceMode('checkIn');
@@ -257,14 +248,7 @@ function AttendanceModal({ mode, onClose, onSuccess }: AttendanceModalProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  useEffect(() => {
-    requestCameraAndLocation();
-    return () => {
-      stopCamera();
-    };
-  }, []);
-
-  const requestCameraPermission = async () => {
+  const requestCameraPermission = useCallback(async () => {
     try {
       const result = await navigator.permissions.query({ name: 'camera' as PermissionName });
       if (result.state === 'denied') {
@@ -272,12 +256,12 @@ function AttendanceModal({ mode, onClose, onSuccess }: AttendanceModalProps) {
         return false;
       }
       return true;
-    } catch (error) {
+    } catch {
       return true;
     }
-  };
+  }, []);
 
-  const startCamera = async () => {
+  const startCamera = useCallback(async () => {
     try {
       const hasPermission = await requestCameraPermission();
       if (!hasPermission) return;
@@ -290,15 +274,16 @@ function AttendanceModal({ mode, onClose, onSuccess }: AttendanceModalProps) {
         videoRef.current.srcObject = stream;
       }
 setUi(prev => ({ ...prev, isCameraActive: true }));
-    } catch (error: any) {
+    } catch (error) {
       console.error('Camera error:', error);
-      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+      const err = error as { name?: string };
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         alert('กรุณาอนุญาตการเข้าถึงกล้องเพื่อบันทึกเวลาเข้างาน');
       } else {
         alert('ไม่สามารถเปิดกล้องได้ กรุณาลองอีกครั้ง');
       }
     }
-  };
+  }, [requestCameraPermission]);
 
   const stopCamera = () => {
     if (streamRef.current) {
@@ -308,7 +293,7 @@ setUi(prev => ({ ...prev, isCameraActive: true }));
     setUi(prev => ({ ...prev, isCameraActive: false }));
   };
 
-  const getLocation = () => {
+  const getLocation = useCallback(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -323,12 +308,20 @@ setUi(prev => ({ ...prev, isCameraActive: true }));
         }
       );
     }
-  };
+  }, []);
 
-  const requestCameraAndLocation = () => {
-    startCamera();
+  const requestCameraAndLocation = useCallback(() => {
+    void startCamera();
     getLocation();
-  };
+  }, [startCamera, getLocation]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    requestCameraAndLocation();
+    return () => {
+      stopCamera();
+    };
+  }, [requestCameraAndLocation]);
 
   const takePhoto = () => {
     if (videoRef.current && canvasRef.current) {

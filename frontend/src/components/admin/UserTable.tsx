@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 
 interface UserTableProps {
   users: User[];
+  currentUser: User | null;
   onSelectUser: (user: User) => void;
   getStatusBadge: (status: string) => string;
   currentUser: User | null;

@@ -1,0 +1,21 @@
+{
+  "name": "EasyCheck Development",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "frontend",
+  "workspaceFolder": "/app",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "prisma.prisma"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postCreateCommand": "npm install --legacy-peer-deps",
+  "forwardPorts": [3000]
+}

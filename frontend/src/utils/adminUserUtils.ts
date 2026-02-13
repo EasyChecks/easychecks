@@ -90,7 +90,7 @@ export function processCsvUsers(csvData: CsvUserData[], existingUsers: User[]): 
       phone: row.phone || '',
       department: row.department,
       position: row.position,
-      role: (row.role as any) || 'user',
+      role: (row.role as 'user' | 'manager' | 'admin' | 'superadmin') || 'user',
       employeeId,
       username: employeeId,
       password,

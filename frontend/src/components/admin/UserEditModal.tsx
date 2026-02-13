@@ -7,11 +7,11 @@ import { Card } from '@/components/ui/card';
 interface UserEditModalProps {
   show: boolean;
   editingUser: User;
-  editForm: Record<string, any>;
+  editForm: Record<string, string | number | boolean | null>;
   currentUser: User | null;
   onClose: () => void;
   onSave: () => void;
-  onChange: (form: Record<string, any>) => void;
+  onChange: (form: Record<string, string | number | boolean | null>) => void;
 }
 
 export default function UserEditModal({
@@ -28,7 +28,7 @@ export default function UserEditModal({
   const canEditRole = currentUser?.role === 'superadmin' || 
     (currentUser?.role === 'admin' && editingUser.role !== 'superadmin');
 
-  const handleFieldChange = (field: string, value: any) => {
+  const handleFieldChange = (field: string, value: string | number | boolean | null) => {
     onChange({ ...editForm, [field]: value });
   };
 

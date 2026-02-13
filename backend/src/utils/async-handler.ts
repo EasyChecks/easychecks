@@ -3,7 +3,7 @@
  * ลด try-catch ซ้ำซ้อนใน Controllers
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from '../types/express.js';
 
 type AsyncFunction = (
   req: Request,

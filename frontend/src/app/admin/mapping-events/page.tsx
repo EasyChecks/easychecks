@@ -24,7 +24,7 @@ export default function MappingAndEventsPage() {
         </div>
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="w-full">
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'locations' | 'events')} className="w-full">
           <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
             <TabsTrigger value="locations">
               <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">

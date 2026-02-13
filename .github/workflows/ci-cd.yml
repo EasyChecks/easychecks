@@ -5,6 +5,11 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  push:
+    branches: [ dev, develop ]
+  pull_request:
+    branches: [ dev, develop ]
+
 
 env:
   DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

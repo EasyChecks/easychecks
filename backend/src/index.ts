@@ -6,7 +6,7 @@ import { setupAttendanceWebSocket } from './websocket/attendance.websocket.js';
 import { setupSwagger } from './config/swagger.js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Middleware
 app.use(cors());
@@ -67,6 +67,7 @@ const server = createServer(app);
 // Setup WebSocket สำหรับ real-time attendance
 setupAttendanceWebSocket(server);
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
+server.listen(PORT, () => {
+  console.log(`🚀 Server is running on port ${PORT}`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });

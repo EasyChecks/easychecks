@@ -122,7 +122,7 @@ export const getLocationStatistics = asyncHandler(async (req: Request, res: Resp
  */
 export const getLocationById = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const locationId = parseInt(id);
+  const locationId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!locationId) {
     throw new BadRequestError('ID สถานที่ไม่ถูกต้อง');
@@ -144,7 +144,7 @@ export const getLocationById = asyncHandler(async (req: Request, res: Response) 
 export const updateLocation = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const locationId = parseInt(id);
+  const locationId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!userId) {
     throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
@@ -193,7 +193,7 @@ export const updateLocation = asyncHandler(async (req: Request, res: Response) =
 export const deleteLocation = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const locationId = parseInt(id);
+  const locationId = parseInt(Array.isArray(id) ? id[0] : id);
   const { deleteReason } = req.body;
 
   if (!userId) {
@@ -224,7 +224,7 @@ export const deleteLocation = asyncHandler(async (req: Request, res: Response) =
  */
 export const restoreLocation = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const locationId = parseInt(id);
+  const locationId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!locationId) {
     throw new BadRequestError('ID สถานที่ไม่ถูกต้อง');

@@ -12,7 +12,7 @@ export interface User {
   userId: number;
   employeeId: string;
   role: Role;
-  branchId: number | undefined;
+  branchId?: number;  // เปลี่ยนจาก number | undefined เป็น optional property
 }
 
 export interface DownloadQuery {

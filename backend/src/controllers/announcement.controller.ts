@@ -17,7 +17,6 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       content,
       targetRoles,
       targetBranchIds,
-      createdByUserId,
     } = req.body;
 
     // ตรวจสอบข้อมูล
@@ -25,8 +24,8 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       return sendError(res, 'ต้องระบุ title และ content', 400);
     }
 
-    if (!createdByUserId) {
-      return sendError(res, 'ต้องระบุ createdByUserId', 400);
+    if (!req.user) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
     // สร้างประกาศ
@@ -35,7 +34,7 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       content,
       targetRoles,
       targetBranchIds,
-      createdByUserId: parseInt(createdByUserId),
+      createdByUserId: req.user.userId,
     });
 
     sendSuccess(res, announcement, 'สร้างประกาศเรียบร้อยแล้ว', 201);
@@ -91,14 +90,14 @@ export const getAnnouncementById = async (req: Request, res: Response) => {
 export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
-    const { title, content, targetRoles, targetBranchIds, updatedByUserId } = req.body;
+    const { title, content, targetRoles, targetBranchIds } = req.body;
 
     if (!announcementId || isNaN(announcementId)) {
       return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
     }
 
-    if (!updatedByUserId) {
-      return sendError(res, 'ต้องระบุ updatedByUserId', 400);
+    if (!req.user) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
     const updated = await announcementService.updateAnnouncement(
@@ -109,7 +108,7 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
         targetRoles,
         targetBranchIds,
       },
-      parseInt(updatedByUserId)
+      req.user.userId
     );
 
     sendSuccess(res, updated, 'อัปเดตประกาศเรียบร้อยแล้ว');
@@ -123,31 +122,24 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
 /**
  * 📤 ส่งประกาศ
  * POST /api/announcements/:id/send
- * 
- * Body: { sentByUserId, sentByUserRole, sentByUserBranchId? }
  */
 export const sendAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
-    const { sentByUserId, sentByUserRole, sentByUserBranchId } = req.body;
 
     if (!announcementId || isNaN(announcementId)) {
       return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
     }
 
-    if (!sentByUserId) {
-      return sendError(res, 'ต้องระบุ sentByUserId', 400);
-    }
-
-    if (!sentByUserRole) {
-      return sendError(res, 'ต้องระบุ sentByUserRole', 400);
+    if (!req.user) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
     const result = await announcementService.sendAnnouncement(
       announcementId,
-      parseInt(sentByUserId),
-      sentByUserRole,
-      sentByUserBranchId ? parseInt(sentByUserBranchId) : undefined
+      req.user.userId,
+      req.user.role,
+      req.user.branchId
     );
 
     sendSuccess(res, result, `ส่งประกาศเรียบร้อยแล้ว ส่งให้ ${result.recipientCount} คน`);
@@ -173,9 +165,14 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
       return sendError(res, 'ต้องระบุ deleteReason', 400);
     }
 
+    if (!req.user) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
+    }
+
     const deleted = await announcementService.deleteAnnouncement(
       announcementId,
-      deleteReason
+      deleteReason,
+      req.user.userId
     );
 
     sendSuccess(res, deleted, 'ลบประกาศเรียบร้อยแล้ว (Soft Delete)');
@@ -196,8 +193,13 @@ export const deleteRecipient = async (req: Request, res: Response) => {
       return sendError(res, 'ต้องระบุ recipientId ที่ถูกต้อง', 400);
     }
 
+    if (!req.user) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
+    }
+
     const result = await announcementService.deleteRecipient(
-      recipientId
+      recipientId,
+      req.user.userId
     );
 
     sendSuccess(res, result, 'ลบผู้รับประกาศเรียบร้อยแล้ว');
@@ -209,18 +211,15 @@ export const deleteRecipient = async (req: Request, res: Response) => {
 /**
  * 🔄 ล้างผู้รับประกาศทั้งหมด
  * DELETE /api/announcements/:announcementId/recipients
- * Body: { sentByUserId }
  */
 export const clearAllRecipients = async (req: Request, res: Response) => {
   try {
-    const { sentByUserId } = req.body;
-
-    if (!sentByUserId) {
-      return sendError(res, 'ต้องระบุ sentByUserId', 400);
+    if (!req.user) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
     const result = await announcementService.clearAllRecipients(
-      parseInt(sentByUserId)
+      req.user.userId
     );
 
     sendSuccess(res, result, `ล้างผู้รับประกาศเรียบร้อยแล้ว ลบ ${result.clearedCount} รายการ`);

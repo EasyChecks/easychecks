@@ -162,8 +162,13 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
  */
 export const deleteAnnouncement = async (req: Request, res: Response) => {
   try {
+    const userId = req.user?.userId;
     const announcementId = parseInt(req.params.id as string);
     const { deleteReason } = req.body;
+
+    if (!userId) {
+      return sendError(res, 'ต้องเข้าสู่ระบบก่อน', 401);
+    }
 
     if (!announcementId || isNaN(announcementId)) {
       return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
@@ -175,7 +180,8 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 
     const deleted = await announcementService.deleteAnnouncement(
       announcementId,
-      deleteReason
+      deleteReason,
+      userId
     );
 
     sendSuccess(res, deleted, 'ลบประกาศเรียบร้อยแล้ว (Soft Delete)');
@@ -190,14 +196,20 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
  */
 export const deleteRecipient = async (req: Request, res: Response) => {
   try {
+    const userId = req.user?.userId;
     const recipientId = parseInt(req.params.recipientId as string);
+
+    if (!userId) {
+      return sendError(res, 'ต้องเข้าสู่ระบบก่อน', 401);
+    }
 
     if (!recipientId || isNaN(recipientId)) {
       return sendError(res, 'ต้องระบุ recipientId ที่ถูกต้อง', 400);
     }
 
     const result = await announcementService.deleteRecipient(
-      recipientId
+      recipientId,
+      userId
     );
 
     sendSuccess(res, result, 'ลบผู้รับประกาศเรียบร้อยแล้ว');

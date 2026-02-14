@@ -304,7 +304,8 @@ export const sendAnnouncement = async (
  */
 export const deleteAnnouncement = async (
   announcementId: number,
-  deleteReason: string
+  deleteReason: string,
+  deletedByUserId: number
 ) => {
   const existing = await prisma.announcement.findUnique({
     where: { announcementId },
@@ -324,6 +325,7 @@ export const deleteAnnouncement = async (
 
   // บันทึก Audit Log
   await createAuditLog({
+    userId: deletedByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcements',
     targetId: announcementId,
@@ -338,7 +340,8 @@ export const deleteAnnouncement = async (
  * 🗑️ ลบรายการที่ส่งไป (Delete Single Recipient)
  */
 export const deleteRecipient = async (
-  recipientId: number
+  recipientId: number,
+  deletedByUserId: number
 ) => {
   const recipient = await prisma.announcementRecipient.findUnique({
     where: { recipientId },
@@ -355,6 +358,7 @@ export const deleteRecipient = async (
 
   // บันทึก Audit Log
   await createAuditLog({
+    userId: deletedByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcement_recipients',
     targetId: recipientId,
@@ -395,6 +399,7 @@ export const clearAllRecipients = async (
 
   // บันทึก Audit Log
   await createAuditLog({
+    userId: sentByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcement_recipients',
     targetId: sentByUserId,

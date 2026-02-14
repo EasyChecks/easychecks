@@ -102,7 +102,7 @@ export const getAllLateRequests = asyncHandler(async (req: Request, res: Respons
  */
 export const getLateRequestById = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const lateRequestId = parseInt(id);
+  const lateRequestId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!lateRequestId) {
     throw new BadRequestError('ID คำขอมาสายไม่ถูกต้อง');
@@ -124,7 +124,7 @@ export const getLateRequestById = asyncHandler(async (req: Request, res: Respons
 export const updateLateRequest = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const lateRequestId = parseInt(id);
+  const lateRequestId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!userId) {
     throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
@@ -165,7 +165,7 @@ export const updateLateRequest = asyncHandler(async (req: Request, res: Response
 export const approveLateRequest = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const lateRequestId = parseInt(id);
+  const lateRequestId = parseInt(Array.isArray(id) ? id[0] : id);
   const { adminComment } = req.body;
 
   if (!userId) {
@@ -197,7 +197,7 @@ export const approveLateRequest = asyncHandler(async (req: Request, res: Respons
 export const rejectLateRequest = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const lateRequestId = parseInt(id);
+  const lateRequestId = parseInt(Array.isArray(id) ? id[0] : id);
   const { rejectionReason } = req.body;
 
   if (!userId) {
@@ -233,7 +233,7 @@ export const rejectLateRequest = asyncHandler(async (req: Request, res: Response
 export const deleteLateRequest = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const lateRequestId = parseInt(id);
+  const lateRequestId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!userId) {
     throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');

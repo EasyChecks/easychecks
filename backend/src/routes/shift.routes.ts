@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import * as shiftController from '../controllers/shift.controller';
-import { authenticate, authorizeRole } from '../middleware/auth.middleware';
+import * as shiftController from '../controllers/shift.controller.js';
+import { authenticate, authorizeRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
 

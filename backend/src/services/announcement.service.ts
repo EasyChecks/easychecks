@@ -374,13 +374,13 @@ export const deleteRecipient = async (
  * ลบทั้งหมดที่ user นั้นส่ง - ไม่ส่งผลต่อ user อื่น
  */
 export const clearAllRecipients = async (
-  sentByUserId: number
+  clearedByUserId: number
 ) => {
   // ดึงทั้งหมดที่ user นั้นส่ง
   const recipients = await prisma.announcementRecipient.findMany({
     where: {
       announcement: {
-        sentByUserId,
+        sentByUserId: clearedByUserId,
       },
     },
     select: { recipientId: true },
@@ -399,10 +399,10 @@ export const clearAllRecipients = async (
 
   // บันทึก Audit Log
   await createAuditLog({
-    userId: sentByUserId,
+    userId: clearedByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcement_recipients',
-    targetId: sentByUserId,
+    targetId: clearedByUserId,
     newValues: { action: 'CLEAR_ALL', count: recipientIds.length },
   });
 

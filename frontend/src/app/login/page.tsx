@@ -31,12 +31,16 @@ export default function LoginPage() {
         cred => cred.username === username
       )?.role;
 
-      if (role === 'user') {
-        router.push('/user/dashboard');
+      if (role === 'superadmin') {
+        router.push('/superadmin/dashboard');
+      } else if (role === 'admin') {
+        router.push('/admin/dashboard');
       } else if (role === 'manager') {
         router.push('/manager/dashboard');
-      } else if (role === 'admin' || role === 'superadmin') {
-        router.push('/admin/dashboard');
+      } else if (role === 'user') {
+        router.push('/user/dashboard');
+      } else {
+        router.push('/');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');

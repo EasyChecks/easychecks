@@ -10,15 +10,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load user from localStorage on mount
+  // Load user from sessionStorage on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem('authUser');
+    const storedUser = sessionStorage.getItem('authUser');
     if (storedUser) {
       try {
         setUser(JSON.parse(storedUser));
       } catch (err) {
         console.error('Failed to parse stored user:', err);
-        localStorage.removeItem('authUser');
+        sessionStorage.removeItem('authUser');
+        sessionStorage.removeItem('token');
       }
     }
     setIsLoading(false);
@@ -57,15 +58,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('บัญชีของคุณอยู่ในสถานะลาออก');
       }
 
-      // Save to state and localStorage
+      // Save to state and sessionStorage
       setUser(userData);
-      localStorage.setItem('authUser', JSON.stringify(userData));
+      sessionStorage.setItem('authUser', JSON.stringify(userData));
+      
+      // Create mock token based on role
+      const mockToken = `mock-token-${mockCred.role}-${Date.now()}`;
+      sessionStorage.setItem('token', mockToken);
 
       // Handle remember me
       if (credentials.rememberMe) {
-        localStorage.setItem('rememberedUsername', credentials.username);
+        sessionStorage.setItem('rememberedUsername', credentials.username);
       } else {
-        localStorage.removeItem('rememberedUsername');
+        sessionStorage.removeItem('rememberedUsername');
       }
 
     } catch (err) {
@@ -79,7 +84,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('authUser');
+    sessionStorage.removeItem('authUser');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('rememberedUsername');
     setError(null);
   };
 

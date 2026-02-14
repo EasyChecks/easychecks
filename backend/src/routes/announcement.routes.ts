@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as announcementController from '../controllers/announcement.controller.js';
+import { authenticate, authorizeRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
@@ -19,7 +20,7 @@ const router = Router();
  *            createdByUserId: number,    // ID ผู้สร้าง (จำเป็น)
  *          }
  */
-router.post('/', announcementController.createAnnouncement);
+router.post('/', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.createAnnouncement);
 
 /**
  * @route   GET /api/announcements
@@ -30,14 +31,14 @@ router.post('/', announcementController.createAnnouncement);
  *            createdByUserId?: number
  *          }
  */
-router.get('/', announcementController.getAnnouncements);
+router.get('/', authenticate, announcementController.getAnnouncements);
 
 /**
  * @route   GET /api/announcements/:id
  * @desc    ดึงประกาศตาม ID
  * @access  Authenticated users
  */
-router.get('/:id', announcementController.getAnnouncementById);
+router.get('/:id', authenticate, announcementController.getAnnouncementById);
 
 /**
  * @route   PUT /api/announcements/:id
@@ -51,7 +52,7 @@ router.get('/:id', announcementController.getAnnouncementById);
  *            updatedByUserId: number     // ID ผู้แก้ไข (จำเป็น)
  *          }
  */
-router.put('/:id', announcementController.updateAnnouncement);
+router.put('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.updateAnnouncement);
 
 /**
  * @route   POST /api/announcements/:id/send
@@ -63,7 +64,7 @@ router.put('/:id', announcementController.updateAnnouncement);
  *            sentByUserBranchId?: number // Branch ID (สำหรับ ADMIN เท่านั้น)
  *          }
  */
-router.post('/:id/send', announcementController.sendAnnouncement);
+router.post('/:id/send', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.sendAnnouncement);
 
 /**
  * @route   DELETE /api/announcements/:id
@@ -73,14 +74,14 @@ router.post('/:id/send', announcementController.sendAnnouncement);
  *            deleteReason: string        // เหตุผล (จำเป็น)
  *          }
  */
-router.delete('/:id', announcementController.deleteAnnouncement);
+router.delete('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.deleteAnnouncement);
 
 /**
  * @route   DELETE /api/announcements/:announcementId/recipients/:recipientId
  * @desc    ลบผู้รับประกาศเพียงคนเดียว
  * @access  Admin/SuperAdmin only
  */
-router.delete('/:announcementId/recipients/:recipientId', announcementController.deleteRecipient);
+router.delete('/:announcementId/recipients/:recipientId', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.deleteRecipient);
 
 /**
  * @route   DELETE /api/announcements/:announcementId/recipients
@@ -90,6 +91,6 @@ router.delete('/:announcementId/recipients/:recipientId', announcementController
  *            sentByUserId: number        // ID ผู้ส่ง (จำเป็น)
  *          }
  */
-router.delete('/:announcementId/recipients', announcementController.clearAllRecipients);
+router.delete('/:announcementId/recipients', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.clearAllRecipients);
 
 export default router;

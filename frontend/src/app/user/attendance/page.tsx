@@ -1,19 +1,84 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { attendanceService } from '@/services/attendance';
+import { shiftService } from '@/services/shift';
+import { Shift, Attendance } from '@/types/attendance';
 
 export default function AttendancePage() {
   const [mode, setMode] = useState<'checkIn' | 'checkOut' | null>(null);
   const [photo, setPhoto] = useState<{ taken: boolean; data: string | null }>({ taken: false, data: null });
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [ui, setUi] = useState({ loading: false, showSuccess: false, isCameraActive: false, permissionGranted: false });
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [selectedShift, setSelectedShift] = useState<number | null>(null);
+  const [todayStatus, setTodayStatus] = useState<{
+    hasCheckedIn: boolean;
+    hasCheckedOut: boolean;
+    attendance?: Attendance;
+  }>({ hasCheckedIn: false, hasCheckedOut: false });
+  const [monthlyStats, setMonthlyStats] = useState({
+    total: 0,
+    onTime: 0,
+    late: 0,
+  });
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Load initial data
+  useEffect(() => {
+    loadTodayStatus();
+    loadMonthlyStats();
+    loadShifts();
+  }, []);
+
+  const loadTodayStatus = async () => {
+    try {
+      const status = await attendanceService.getTodayStatus();
+      setTodayStatus(status);
+    } catch (error) {
+      console.error('Error loading today status:', error);
+    }
+  };
+
+  const loadMonthlyStats = async () => {
+    try {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+      
+      const history = await attendanceService.getMyHistory({
+        startDate: startOfMonth,
+        endDate: endOfMonth,
+      });
+
+      const stats = {
+        total: history.length,
+        onTime: history.filter((a) => a.status === 'ON_TIME').length,
+        late: history.filter((a) => a.status === 'LATE').length,
+      };
+      setMonthlyStats(stats);
+    } catch (error) {
+      console.error('Error loading monthly stats:', error);
+    }
+  };
+
+  const loadShifts = async () => {
+    try {
+      const todayShifts = await shiftService.getToday();
+      setShifts(todayShifts);
+      if (todayShifts.length === 1) {
+        setSelectedShift(todayShifts[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading shifts:', error);
+    }
+  };
 
   const requestCameraPermission = useCallback(async () => {
     try {
@@ -119,24 +184,55 @@ export default function AttendancePage() {
     startCamera();
   }, [getLocation, startCamera]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (!photo.data || !location) {
       alert('กรุณาถ่ายรูปและระบุตำแหน่ง');
       return;
     }
 
+    if (!selectedShift) {
+      alert('กรุณาเลือกกะทำงาน');
+      return;
+    }
+
     setUi(prev => ({ ...prev, loading: true }));
-    // Simulate API call
-    setTimeout(() => {
-      setUi({ loading: false, showSuccess: true, isCameraActive: false });
+    
+    try {
+      if (mode === 'checkIn') {
+        await attendanceService.checkIn({
+          shiftId: selectedShift,
+          photo: photo.data,
+          latitude: location.lat,
+          longitude: location.lng,
+        });
+      } else if (mode === 'checkOut') {
+        await attendanceService.checkOut({
+          shiftId: selectedShift,
+          photo: photo.data,
+          latitude: location.lat,
+          longitude: location.lng,
+        });
+      }
+
+      setUi({ loading: false, showSuccess: true, isCameraActive: false, permissionGranted: false });
+      
+      // Reload data
+      await loadTodayStatus();
+      await loadMonthlyStats();
+
       setTimeout(() => {
-        setUi({ loading: false, showSuccess: false, isCameraActive: false });
+        setUi({ loading: false, showSuccess: false, isCameraActive: false, permissionGranted: false });
         setMode(null);
         setPhoto({ taken: false, data: null });
         setLocation(null);
+        setSelectedShift(null);
       }, 2000);
-    }, 1000);
-  }, [photo.data, location]);
+    } catch (error: any) {
+      console.error('Error submitting attendance:', error);
+      alert(error.response?.data?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+      setUi(prev => ({ ...prev, loading: false }));
+    }
+  }, [photo.data, location, selectedShift, mode]);
 
   const handleCancel = useCallback(() => {
     stopCamera();
@@ -219,6 +315,45 @@ export default function AttendancePage() {
             <canvas ref={canvasRef} className="hidden" />
           </Card>
 
+          {/* Shift Selection */}
+          {shifts.length > 1 && (
+            <Card className="p-4">
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                เลือกกะทำงาน
+              </h3>
+              <div className="space-y-2">
+                {shifts.map((shift) => (
+                  <button
+                    key={shift.id}
+                    onClick={() => setSelectedShift(shift.id)}
+                    className={`w-full p-3 rounded-lg border-2 transition-colors ${
+                      selectedShift === shift.id
+                        ? 'border-orange-500 bg-orange-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="text-left">
+                        <div className="font-semibold text-gray-900">{shift.name}</div>
+                        <div className="text-sm text-gray-500">
+                          {shift.startTime} - {shift.endTime}
+                        </div>
+                      </div>
+                      {selectedShift === shift.id && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
+
           {/* Location Section */}
           <Card className="p-4">
             <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
@@ -258,7 +393,7 @@ export default function AttendancePage() {
             <Button
               onClick={handleSubmit}
               className="flex-1 bg-orange-500 hover:bg-orange-600"
-              disabled={!photo.data || !location || ui.loading}
+              disabled={!photo.data || !location || !selectedShift || ui.loading}
             >
               {ui.loading ? 'กำลังบันทึก...' : 'ยืนยัน'}
             </Button>
@@ -311,22 +446,53 @@ export default function AttendancePage() {
       <Card className="p-4">
         <h3 className="font-semibold text-gray-800 mb-3">สถานะวันนี้</h3>
         <div className="grid grid-cols-2 gap-3">
-          <div className="p-4 bg-green-50 rounded-xl">
+          <div className={`p-4 rounded-xl ${todayStatus.hasCheckedIn ? 'bg-green-50' : 'bg-gray-50'}`}>
             <div className="text-sm text-gray-600 mb-1">เข้างาน</div>
-            <div className="text-xl font-bold text-gray-900">08:30</div>
-            <Badge variant="active" className="mt-2">ตรงเวลา</Badge>
+            <div className={`text-xl font-bold ${todayStatus.hasCheckedIn ? 'text-gray-900' : 'text-gray-400'}`}>
+              {todayStatus.attendance?.checkIn 
+                ? new Date(todayStatus.attendance.checkIn).toLocaleTimeString('th-TH', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })
+                : '--:--'}
+            </div>
+            {todayStatus.attendance?.status && (
+              <Badge 
+                variant={todayStatus.attendance.status === 'ON_TIME' ? 'active' : 'late'}
+                className="mt-2"
+              >
+                {todayStatus.attendance.status === 'ON_TIME' ? 'ตรงเวลา' : 
+                 todayStatus.attendance.status === 'LATE' ? 'มาสาย' : 'ขาดงาน'}
+              </Badge>
+            )}
           </div>
-          <div className="p-4 bg-gray-50 rounded-xl">
+          <div className={`p-4 rounded-xl ${todayStatus.hasCheckedOut ? 'bg-green-50' : 'bg-gray-50'}`}>
             <div className="text-sm text-gray-600 mb-1">ออกงาน</div>
-            <div className="text-xl font-bold text-gray-400">--:--</div>
-            <Badge variant="default" className="mt-2">ยังไม่ออก</Badge>
+            <div className={`text-xl font-bold ${todayStatus.hasCheckedOut ? 'text-gray-900' : 'text-gray-400'}`}>
+              {todayStatus.attendance?.checkOut 
+                ? new Date(todayStatus.attendance.checkOut).toLocaleTimeString('th-TH', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })
+                : '--:--'}
+            </div>
+            <Badge variant={todayStatus.hasCheckedOut ? 'active' : 'default'} className="mt-2">
+              {todayStatus.hasCheckedOut ? 'ออกแล้ว' : 'ยังไม่ออก'}
+            </Badge>
           </div>
         </div>
       </Card>
 
       {/* Action Buttons */}
       <div className="grid grid-cols-2 gap-4">
-        <Card className="p-6 cursor-pointer hover:shadow-lg transition-shadow" onClick={handleStartCheckIn}>
+        <Card 
+          className={`p-6 transition-shadow ${
+            !todayStatus.hasCheckedIn 
+              ? 'cursor-pointer hover:shadow-lg' 
+              : 'opacity-50 cursor-not-allowed'
+          }`}
+          onClick={!todayStatus.hasCheckedIn ? handleStartCheckIn : undefined}
+        >
           <div className="text-center">
             <div className="w-16 h-16 mx-auto mb-3 bg-green-100 rounded-full flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -335,10 +501,20 @@ export default function AttendancePage() {
             </div>
             <h3 className="font-bold text-gray-900">เข้างาน</h3>
             <p className="text-xs text-gray-500 mt-1">Check In</p>
+            {todayStatus.hasCheckedIn && (
+              <p className="text-xs text-orange-500 mt-2">เช็คอินแล้ววันนี้</p>
+            )}
           </div>
         </Card>
 
-        <Card className="p-6 cursor-pointer hover:shadow-lg transition-shadow" onClick={handleStartCheckOut}>
+        <Card 
+          className={`p-6 transition-shadow ${
+            todayStatus.hasCheckedIn && !todayStatus.hasCheckedOut
+              ? 'cursor-pointer hover:shadow-lg' 
+              : 'opacity-50 cursor-not-allowed'
+          }`}
+          onClick={todayStatus.hasCheckedIn && !todayStatus.hasCheckedOut ? handleStartCheckOut : undefined}
+        >
           <div className="text-center">
             <div className="w-16 h-16 mx-auto mb-3 bg-orange-100 rounded-full flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -347,6 +523,12 @@ export default function AttendancePage() {
             </div>
             <h3 className="font-bold text-gray-900">ออกงาน</h3>
             <p className="text-xs text-gray-500 mt-1">Check Out</p>
+            {!todayStatus.hasCheckedIn && (
+              <p className="text-xs text-orange-500 mt-2">กรุณาเช็คอินก่อน</p>
+            )}
+            {todayStatus.hasCheckedOut && (
+              <p className="text-xs text-orange-500 mt-2">เช็คเอาต์แล้ววันนี้</p>
+            )}
           </div>
         </Card>
       </div>
@@ -356,15 +538,15 @@ export default function AttendancePage() {
         <h3 className="font-semibold text-gray-800 mb-3">สรุปเดือนนี้</h3>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
-            <div className="text-2xl font-bold text-gray-900">22</div>
+            <div className="text-2xl font-bold text-gray-900">{monthlyStats.total}</div>
             <div className="text-xs text-gray-500">วันทำงาน</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-green-600">20</div>
+            <div className="text-2xl font-bold text-green-600">{monthlyStats.onTime}</div>
             <div className="text-xs text-gray-500">ตรงเวลา</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-orange-600">2</div>
+            <div className="text-2xl font-bold text-orange-600">{monthlyStats.late}</div>
             <div className="text-xs text-gray-500">มาสาย</div>
           </div>
         </div>

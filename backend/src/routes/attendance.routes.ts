@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as attendanceController from '../controllers/attendance.controller.js';
-import { authenticate, authorizeRole } from '../middleware/auth.middleware';
+import { authenticate, authorizeRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
 

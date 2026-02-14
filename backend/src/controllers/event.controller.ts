@@ -127,7 +127,7 @@ export const getEventStatistics = asyncHandler(async (req: Request, res: Respons
  */
 export const getEventById = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const eventId = parseInt(id);
+  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!eventId) {
     throw new BadRequestError('ID กิจกรรมไม่ถูกต้อง');
@@ -149,7 +149,7 @@ export const getEventById = asyncHandler(async (req: Request, res: Response) => 
 export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const eventId = parseInt(id);
+  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!userId) {
     throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
@@ -196,7 +196,7 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
 export const deleteEvent = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
-  const eventId = parseInt(id);
+  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
   const { deleteReason } = req.body;
 
   if (!userId) {
@@ -227,7 +227,7 @@ export const deleteEvent = asyncHandler(async (req: Request, res: Response) => {
  */
 export const restoreEvent = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const eventId = parseInt(id);
+  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
 
   if (!eventId) {
     throw new BadRequestError('ID กิจกรรมไม่ถูกต้อง');

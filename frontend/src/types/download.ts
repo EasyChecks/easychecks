@@ -37,22 +37,6 @@ export interface ReportData {
   [key: string]: string | number;
 }
 
-export const MOCK_BRANCHES: Branch[] = [
-  { id: 'BKK', name: 'กรุงเทพมหานคร' },
-  { id: 'CNX', name: 'เชียงใหม่' },
-  { id: 'PKT', name: 'ภูเก็ต' }
-];
-
-export const MOCK_REPORTS: Report[] = [
-  {
-    id: 1,
-    title: 'รายงานพนักงานทั้งหมด',
-    subtitle: 'ข้อมูลครบถ้วน',
-    description: 'ข้อมูลพนักงาน, การเข้างาน, และสถิติต่างๆ แบบครบถ้วน',
-    color: 'bg-gradient-to-r from-orange-500 to-orange-600'
-  }
-];
-
 export const DATA_OPTIONS: DataOption[] = [
   {
     id: 'attendanceData',

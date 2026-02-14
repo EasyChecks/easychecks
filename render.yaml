@@ -20,4 +20,4 @@ services:
         sync: false  # ตั้งค่าใน Render Dashboard
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false  # ตั้งค่าใน Render Dashboard
-    healthCheckPath: /api
+    healthCheckPath: /api/health

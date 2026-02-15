@@ -182,6 +182,24 @@ export const checkIn = async (data: CheckInDTO) => {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
+  // ===== 1.1. ตรวจสอบว่ามีใบลาที่อนุมัติในวันนี้หรือไม่ =====
+  const approvedLeave = await prisma.leaveRequest.findFirst({
+    where: {
+      userId,
+      status: 'APPROVED',
+      deletedAt: null,
+      startDate: {
+        lte: today,
+      },
+      endDate: {
+        gte: today,
+      },
+    },
+  });
+
+  // ถ้ามีใบลาที่อนุมัติ จะบันทึกเป็น LEAVE_APPROVED แทนการบล็อก
+  let hasApprovedLeave = !!approvedLeave;
+
   const existingAttendance = await prisma.attendance.findFirst({
     where: {
       userId,
@@ -265,8 +283,14 @@ export const checkIn = async (data: CheckInDTO) => {
   let lateMinutes = 0;
   let message = 'เข้างาน';
 
+  // ถ้ามีใบลาที่อนุมัติ บันทึกเป็น LEAVE_APPROVED (ถือว่า on-time)
+  if (hasApprovedLeave) {
+    status = 'LEAVE_APPROVED';
+    lateMinutes = 0;
+    message = 'เข้างานในวันที่มีใบลาอนุมัติ (ถือว่า on-time)';
+  } 
   // ถ้ามี shift ให้คำนวณสถานะ
-  if (shift) {
+  else if (shift) {
     const result = calculateAttendanceStatus(checkInTime, shift);
     status = result.status;
     lateMinutes = result.lateMinutes;

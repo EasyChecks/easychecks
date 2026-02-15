@@ -359,6 +359,7 @@ enum AttendanceStatus {
   ON_TIME
   LATE
   ABSENT
+  LEAVE_APPROVED  // ลาได้รับอนุมัติแล้ว แต่มาเข้างานจริง (ถือว่า on-time)
 }
 
 enum LeaveType {

@@ -4,27 +4,39 @@ import { generateExcel } from '../utils/excel.generator.js';
 import { generatePDF } from '../utils/pdf.generator.js';
 
 /**
- * 📥 Download Service
- * จัดการ Logic ดาวน์โหลดเอกสาร
+ * 📥 DownloadService - บริหารจัดการดาวน์โหลดเอกสาร
+ * 
+ * ทำไมมีไฟล์นี้?
+ * - เพื่อรวมลอจิกดาวน์โหลด (อาจดาวน์โหลด attendance หรือ shift)
+ * - เพื่อตรวจสอบสิทธิ์ก่อนให้ดาวน์โหลด (ADMIN ดูแค่สาขาตัวเอง, SUPERADMIN ดูหมด)
+ * - เพื่อบันทึก audit log ว่าใครดาวน์โหลดเมื่อไร
  */
 
 export interface User {
   userId: number;
   employeeId: string;
   role: Role;
-  branchId?: number;  // เปลี่ยนจาก number | undefined เป็น optional property
+  branchId?: number;
 }
 
 export interface DownloadQuery {
-  type: 'attendance' | 'shift'; // ประเภทรายงาน
-  format: 'excel' | 'pdf'; // รูปแบบไฟล์
+  type: 'attendance' | 'shift';
+  format: 'excel' | 'pdf';
   startDate?: Date;
   endDate?: Date;
-  branchId?: number; // สำหรับ admin (filter by branch)
+  branchId?: number;
 }
 
 /**
- * ดาวน์โหลดรายงาน (พิจารณา Role)
+ * ดาวน์โหลดรายงาน (ตรวจสิทธิ์ตามบทบาท)
+ * 
+ * ทำไมต้องตรวจสิทธิ์?
+ * - Admin ต้องดูแค่สาขาตัวเอง (ความเป็นส่วนตัว/ความปลอดภัย)
+ * - SuperAdmin ดูได้ทั้งองค์กร
+ * 
+ * SQL ที่ใช้:
+ * - SELECT * FROM attendance WHERE branchId = ? AND checkIn >= ? AND checkIn <= ?
+ * - SELECT * FROM shift WHERE branchId = ? AND ...
  */
 export async function downloadReport(
   user: User,
@@ -36,9 +48,10 @@ export async function downloadReport(
 }> {
   const { type, format, startDate, endDate } = query;
 
-  // ตรวจสอบสิทธิ์ตามบทบาท
+  // เลือก branchId ตามสิทธิ์ (SuperAdmin สามารถเลือก branch อื่นได้)
   const branchId = user.role === 'SUPERADMIN' ? query.branchId : user.branchId;
 
+  // ป้องกันไม่ให้ Admin ลองเข้าถึง branch อื่น
   if (user.role === 'ADMIN' && query.branchId && query.branchId !== user.branchId) {
     throw new Error('Unauthorized: Admin can only download their own branch data');
   }
@@ -85,7 +98,20 @@ export async function downloadReport(
 }
 
 /**
- * ดาวน์โหลดรายงาน Attendance
+ * ดาวน์โหลดรายงาน Attendance (ประวัติเข้า-ออกงาน)
+ * 
+ * ทำไมต้องมีฟังก์ชันนี้?
+ * - เนื่องจากข้อมูล attendance อาจมีหลากหลายสถานะ (ON_TIME, LATE, ABSENT)
+ * - ต้องจัดรูปแบบข้อมูลให้อ่านง่ายสำหรับ Excel/PDF
+ * - ต้องตรวจสอบบทบาทก่อนดึงข้อมูล
+ * 
+ * SQL ที่ใช้ (Prisma.findMany):
+ * SELECT a.*, u.employeeId, u.firstName, u.lastName
+ * FROM attendance a
+ * JOIN user u ON a.userId = u.userId
+ * WHERE u.branchId = ? AND a.checkIn >= ? AND a.checkIn <= ?
+ * ORDER BY a.checkIn DESC
+ * LIMIT 100;
  */
 async function downloadAttendanceReport(
   user: User,
@@ -97,7 +123,7 @@ async function downloadAttendanceReport(
   console.log('📊 Fetching attendance data...');
   
   try {
-    // Query data - simplified without unnecessary relations
+    // ดึงข้อมูล attendance จะรวมข้อมูล user (employeeId, firstName, lastName)
     const attendances = await prisma.attendance.findMany({
       where: {
         user: branchId
@@ -120,12 +146,12 @@ async function downloadAttendanceReport(
         },
       },
       orderBy: { checkIn: 'desc' },
-      take: 100, // Reduce limit for faster query
+      take: 100, // จำกัดเพื่อป้องกันข้อมูลจำนวนมากทำให้ระบบช้า
     });
 
     console.log(`✓ Found ${attendances.length} attendance records`);
 
-    // แปลงข้อมูลให้พร้อม export
+    // จัดรูปแบบข้อมูลให้เป็นตารางที่เม่าเอกสาร (Excel/PDF)
     const data = attendances.map((att: any) => ({
       'Employee ID': att.user.employeeId,
       'Name': `${att.user.firstName} ${att.user.lastName}`,

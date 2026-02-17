@@ -47,10 +47,20 @@ export interface SearchLocationParams {
 // ========================================================================================
 
 /**
- * สร้างสถานที่ใหม่
+ * ✨ ฟังก์ชันสร้างสถานที่ใหม่
+ * 
+ * 🎯 เป้าหมาย: สร้างสถานที่พร้อมพิกัด GPS และรัศมี
+ * 
+ * 💡 เหตุผล: ตรวจสอบความถูกต้องของ latitude/longitude และ radius ก่อนบันทึก
+ *            เพื่อป้องกันข้อมูลที่ไม่ถูกต้องในการตรวจสอบตำแหน่ง GPS
+ *            ตั้ง radius default = 100 เมตร ถ้าไม่ระบุ
+ *            ตั้ง isActive default = true เพื่อให้สถานที่พร้อมใช้งานทันที
+ *
+ * SQL: INSERT INTO Location (...) VALUES (...) RETURNING *
  */
 async function createLocation(data: CreateLocationDTO): Promise<Location> {
-  // ตรวจสอบว่า user มีอยู่จริง
+  // 🔍 ตรวจสอบว่า user มีอยู่จริงเพื่อป้องกัน invalid userId
+  // SQL: SELECT * FROM User WHERE userId = ?
   const user = await prisma.user.findUnique({
     where: { userId: data.userId },
   });
@@ -59,7 +69,8 @@ async function createLocation(data: CreateLocationDTO): Promise<Location> {
     throw new Error('ไม่พบผู้ใช้');
   }
 
-  // Validate ละติจูด/ลองจิจูด
+  // ✅ Validate ละติจูด (-90 ถึง 90 องศา)
+  // เพื่อป้องกันค่าที่อยู่นอกขอบเขตที่ถูกต้อง
   if (data.latitude < -90 || data.latitude > 90) {
     throw new Error('ละติจูดต้องอยู่ระหว่าง -90 ถึง 90');
   }
@@ -68,7 +79,8 @@ async function createLocation(data: CreateLocationDTO): Promise<Location> {
     throw new Error('ลองจิจูดต้องอยู่ระหว่าง -180 ถึง 180');
   }
 
-  // Validate รัศมี
+  // ✅ Validate รัศมี (ต้อง > 0 เมตร)
+  // เพื่อให้การตรวจสอบ GPS check-in/out ทำงานได้ถูกต้อง
   if (data.radius && data.radius <= 0) {
     throw new Error('รัศมีต้องมากกว่า 0 เมตร');
   }

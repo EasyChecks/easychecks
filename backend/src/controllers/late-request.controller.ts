@@ -12,8 +12,12 @@ import { UnauthorizedError, BadRequestError, NotFoundError, ForbiddenError } fro
  */
 
 /**
- * POST /api/late-requests
- * สร้างคำขอมาสายใหม่
+ * POST /api/late-requests - สร้างคำขอมาสายใหม่
+ * 
+ * เหตุผลการตรวจสอบ:
+ *    - userId: เพื่อระบุว่าใครสร้างคำขอมาสาย
+ *    - รูปแบบเวลา: validate ก่อน calculate นาทีสาย
+ *    - duplicate: ตรวจสอบใน service layer เพื่อป้องกันคำขอซ้ำในวันเดียวกัน
  */
 export const createLateRequest = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;

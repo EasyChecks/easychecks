@@ -36,7 +36,12 @@ export interface RejectLateRequestDTO {
 }
 
 /**
- * คำนวณจำนวนนาทีที่มาสาย
+ * 📊 ฟังก์ชันคำนวณจำนวนนาทีที่มาสาย
+ * 
+ * 🎯 เป้าหมาย: คำนวณความต่างของเวลามาถึงจริงกับเวลาที่กำหนด
+ * 
+ * 💡 เหตุผล: ใช้ date-fns เพื่อคำนวณความต่างของเวลาอย่างถูกต้อง
+ *            ตั้ง baseDate เป็นวันเดียวกันเพราะต้องการเปรียบเทียบเฉพาะเวลา (ไม่สนใจวันที่)
  */
 function calculateLateMinutes(scheduledTime: string, actualTime: string): number {
   try {
@@ -56,25 +61,34 @@ function calculateLateMinutes(scheduledTime: string, actualTime: string): number
 // ========================================================================================
 
 /**
- * สร้างคำขอมาสายใหม่
+ * ✨ ฟังก์ชันสร้างคำขอมาสายใหม่
+ * 
+ * 🎯 เป้าหมาย: สร้างคำขอมาสายและคำนวณนาทีที่มาสาย
+ * 
+ * 💡 เหตุผล: ต้อง validate รูปแบบเวลาและตรวจสอบ duplicate ก่อนบันทึก
+ *            เพื่อป้องกันการสร้างคำขอซ้ำในวันเดียวกัน
+ *            ตรวจสอบ status != REJECTED เพราะคำขอที่ถูกปฏิเสธสามารถขอใหม่ได้
  */
 async function createLateRequest(
   data: CreateLateRequestDTO
 ): Promise<LateRequest> {
-  // Validate time format
+  // ✅ Validate รูปแบบเวลา HH:MM (00:00 - 23:59)
+  // เพื่อป้องกัน invalid format ก่อนที่จะคำนวณ
   const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
   if (!timeRegex.test(data.scheduledTime) || !timeRegex.test(data.actualTime)) {
     throw new Error('รูปแบบเวลาไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM (เช่น 08:30)');
   }
 
-  // Calculate late minutes
+  // 📊 คำนวณนาทีที่มาสายจากความต่างของเวลา
   const lateMinutes = calculateLateMinutes(data.scheduledTime, data.actualTime);
 
+  // ⚠️ ต้องมาสายจริง (เวลามาถึงต้องมากกว่าเวลาที่กำหนด)
   if (lateMinutes <= 0) {
     throw new Error('เวลามาถึงต้องมากกว่าเวลาที่กำหนด');
   }
 
-  // Check if user exists
+  // 🔍 ตรวจสอบว่า user มีอยู่จริงเพื่อป้องกัน invalid userId
+  // SQL: SELECT * FROM User WHERE userId = ?
   const user = await prisma.user.findUnique({
     where: { userId: data.userId },
   });
@@ -83,7 +97,12 @@ async function createLateRequest(
     throw new Error('ไม่พบผู้ใช้');
   }
 
-  // Check for duplicate request on the same date
+  // 🚫 ตรวจสอบคำขอซ้ำในวันเดียวกัน
+  // เพื่อป้องกันการขอมาสายหลายครั้งในวันเดียวกัน
+  // ยกเว้น status = REJECTED เพราะสามารถขอใหม่ได้ถ้าถูกปฏิเสธ
+  // SQL: SELECT * FROM LateRequest 
+  //      WHERE userId = ? AND requestDate = ? AND status != 'REJECTED'
+  //      LIMIT 1
   const existingRequest = await prisma.lateRequest.findFirst({
     where: {
       userId: data.userId,
@@ -96,6 +115,8 @@ async function createLateRequest(
     throw new Error('มีคำขอมาสายในวันนี้อยู่แล้ว');
   }
 
+  // 📝 บันทึกคำขอมาสายลงฐานข้อมูล สถานะเริ่มต้นเป็น PENDING
+  // SQL: INSERT INTO LateRequest (...) VALUES (...)
   return prisma.lateRequest.create({
     data: {
       userId: data.userId,

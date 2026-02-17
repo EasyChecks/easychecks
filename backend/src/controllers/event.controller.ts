@@ -9,10 +9,18 @@ import { UnauthorizedError, BadRequestError, NotFoundError } from '../utils/cust
  */
 
 /**
- * POST /api/events
- * สร้างกิจกรรมใหม่ (Admin/SuperAdmin only)
+ * POST /api/events - สร้างกิจกรรมใหม่
+ * 
+ * สิทธิ์: Admin/SuperAdmin เท่านั้น
+ * 
+ * เหตุผลการตรวจสอบ:
+ *    - userId: ตรวจสอบจาก JWT token เพื่อระบุว่าใครเป็นผู้สร้างกิจกรรม
+ *    - participantType: ตรวจสอบความถูกต้องของประเภทเพื่อกำหนดโครงสร้าง EventParticipant
+ *    - ฟิลด์ที่จำเป็น: เพื่อป้องกัน missing data ก่อนบันทึกลง DB
  */
 export const createEvent = asyncHandler(async (req: Request, res: Response) => {
+  // ดึง userId จาก JWT token ที่ middleware แนบมาใน req.user
+  // จำเป็นเพราะได้ผ่าน middleware authentication แล้ว
   const userId = req.user?.userId;
 
   if (!userId) {

@@ -12,8 +12,12 @@ import { UnauthorizedError, BadRequestError, NotFoundError, ForbiddenError } fro
  */
 
 /**
- * POST /api/leave-requests
- * สร้างใบลาใหม่
+ * POST /api/leave-requests - สร้างใบลาใหม่
+ * 
+ * เหตุผลการตรวจสอบ:
+ *    - leaveType: validate ตาม LEAVE_RULES เพื่อตรวจเพศ/วันลาคงเหลือ/ใบแพทย์
+ *    - overlapping: ตรวจสอบใบลาซ้อนทับใน service layer
+ *    - นับวันทำงาน: คำนวณโดย date-fns เพื่อไม่นับเสาร์-อาทิตย์
  */
 export const createLeaveRequest = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;

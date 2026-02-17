@@ -12,8 +12,12 @@ import { UnauthorizedError, BadRequestError, NotFoundError } from '../utils/cust
  */
 
 /**
- * POST /api/locations
- * สร้างสถานที่ใหม่
+ * POST /api/locations - สร้างสถานที่ใหม่
+ * 
+ * เหตุผลการตรวจสอบ:
+ *    - GPS coordinates: validate ขอบเขต latitude/longitude เพื่อป้องกัน invalid location
+ *    - radius: ต้อง > 0 เพื่อให้ GPS check-in/out ทำงานถูกต้อง
+ *    - locationType: validate เป็น enum ที่กำหนดไว้
  */
 export const createLocation = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;

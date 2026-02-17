@@ -91,7 +91,11 @@ export interface RejectLeaveRequestDTO {
 }
 
 /**
- * คำนวณจำนวนวันทำงาน (ไม่นับเสาร์-อาทิตย์)
+ * ฟังก์ชันคำนวณจำนวนวันทำงาน (ไม่นับเสาร์-อาทิตย์)
+ * 
+ * เป้าหมาย: หาวันทำงานจริง (ไม่รวมวันหยุด)เพื่อคำนวณวันลาที่ใช้
+ * 
+ * เหตุผล: +1 เพราะวันเริ่มต้นนับด้วย (ถ้าลา 1 วันต้องนับวันเริ่มต้น)
  */
 function calculateBusinessDays(startDate: Date, endDate: Date): number {
   const days = differenceInBusinessDays(endDate, startDate) + 1; // +1 เพราะนับวันเริ่มต้นด้วย
@@ -99,7 +103,12 @@ function calculateBusinessDays(startDate: Date, endDate: Date): number {
 }
 
 /**
- * คำนวณจำนวนวันที่ได้รับค่าจ้างตามประเภทการลา
+ * ฟังก์ชันคำนวณวันที่ได้รับค่าจ้างตามประเภทการลา
+ * 
+ * เป้าหมาย: คำนวณว่าวันลาที่ขอได้รับค่าจ้างกี่วัน (ตามกฎของแต่ละประเภท)
+ * 
+ * เหตุผล: แต่ละประเภทลามีกฎต่างกัน (SICK: 30 วัน, VACATION: 6 วัน, ฯลฯ)
+ *            บางประเภทไม่ได้รับค่าจ้างเลย (PERSONAL, TRAINING)
  */
 function calculatePaidDays(leaveType: LeaveType, numberOfDays: number): number {
   const rules = LEAVE_RULES[leaveType];
@@ -117,7 +126,17 @@ function calculatePaidDays(leaveType: LeaveType, numberOfDays: number): number {
 }
 
 /**
- * ตรวจสอบจำนวนวันลาที่ใช้ไปในปีนี้
+ * ตรวจสอบจำนวนวันลาที่ใช้ไปในปีนี้ (ตามประเภท)
+ * 
+ * เป้าหมาย: นับจำนวนวันลาที่ APPROVED ในปีนี้ตามประเภท
+ * 
+ * เหตุผล: เพื่อตรวจสอบว่าความเหลือ (quota) ก่อนอนุมัติใบลาใหม่
+ *            กรองเฉพาะ APPROVED และไม่ถูก soft delete
+ *            กรองวันที่ในปีปัจจุบัน (startOfYear - endOfYear)
+ * 
+ * SQL: SELECT SUM(numberOfDays) FROM LeaveRequest
+ *      WHERE userId = ? AND leaveType = ? AND status = 'APPROVED' 
+ *      AND deletedAt IS NULL AND startDate BETWEEN ? AND ?
  */
 async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): Promise<number> {
   const yearStart = startOfYear(new Date());

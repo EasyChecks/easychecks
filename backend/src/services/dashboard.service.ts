@@ -2,8 +2,12 @@ import { prisma } from '../lib/prisma.js';
 import type { Role } from '@prisma/client';
 
 /**
- * 📊 Dashboard Service
- * จัดการ Logic สำหรับ Dashboard Admin/SuperAdmin
+ * 📊 DashboardService - บริหารข้อมูลสำหรับหน้า Admin Dashboard
+ * 
+ * ทำไมมีไฟล์นี้?
+ * - เพื่อรวบรวมข้อมูลหลากหลาย (attendance, employees, branches, events) ไว้ที่เดียว
+ * - เพื่อตรวจสอบสิทธิ์ ADMIN/SUPERADMIN ก่อนแสดง
+ * - เพื่อจัดรูปแบบข้อมูลให้สามารถ render ตัวแผนภูมิได้
  */
 
 export interface User {
@@ -14,9 +18,19 @@ export interface User {
 }
 
 /**
- * 1️⃣ ดึง Attendance Summary (Donut Chart)
- * Admin: สาขาตัวเอง
- * SuperAdmin: ทั้งหมดหรือสาขาที่ระบุ
+ * ดึง Attendance Summary (สำหรับแสดง Donut Chart)
+ * 
+ * ทำไมต้องแยก function นี้?
+ * - Graph ต้องการเพียง 4 ตัวเลข (On-Time, Late, Absent, Total) ไม่ต้องข้อมูลรายละเอียด
+ * - การจัด query ที่กำหนดเป้าหมายทำให้ db ทำงานเร็วกว่า
+ * 
+ * SQL ที่ใช้:
+ * SELECT 
+ *   status,
+ *   COUNT(*) as count
+ * FROM attendance
+ * WHERE branchId = ? AND DATE(checkIn) = TODAY()
+ * GROUP BY status;
  */
 export async function getAttendanceSummary(user: User, branchId?: number) {
   const today = new Date();
@@ -24,7 +38,7 @@ export async function getAttendanceSummary(user: User, branchId?: number) {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  // ตรวจสอบ branch
+  // เลือก branch ตามสิทธิ์ (SUPERADMIN สามารถเลือก branch อื่นได้)
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
   const attendances = await prisma.attendance.findMany({
@@ -46,6 +60,7 @@ export async function getAttendanceSummary(user: User, branchId?: number) {
     },
   });
 
+  // นับจำนวนตามสถานะ (เพื่อให้ Donut chart มี component แต่ละส่วน)
   const summary = {
     onTime: 0,
     late: 0,
@@ -63,7 +78,21 @@ export async function getAttendanceSummary(user: User, branchId?: number) {
 }
 
 /**
- * 2️⃣ ดึงพนักงานวันนี้ พร้อม Status
+ * ดึงข้อมูลพนักงานวันนี้ (พร้อมสถานะ Check-in/Check-out)
+ * 
+ * ทำไมต้องแยก function นี้?
+ * - Admin ต้องเห็นรายชื่อพนักงานและสถานะ (มาแล้วไหม, มาสาย, ขาด) แบบรายบุคคล
+ * - ต้องดึงข้อมูลที่นำเสนอง่ายต่อการอ่าน (ชื่อ, เวลาเข้า-ออก, สถานะ)
+ * 
+ * SQL ที่ใช้:
+ * SELECT 
+ *   employeeId, firstName, lastName, branchName, 
+ *   status, checkIn, checkOut, lateMinutes
+ * FROM attendance a
+ * JOIN user u ON a.userId = u.userId
+ * JOIN branch b ON u.branchId = b.branchId
+ * WHERE u.branchId = ? AND DATE(a.checkIn) = TODAY()
+ * ORDER BY a.checkIn DESC;
  */
 export async function getEmployeesToday(user: User, branchId?: number) {
   const today = new Date();
@@ -126,13 +155,27 @@ export async function getEmployeesToday(user: User, branchId?: number) {
 }
 
 /**
- * 3️⃣ ดึง Branches สำหรับ Map (Pins)
+ * ดึงข้อมูลสาขาสำหรับแสดง Map Pins
+ * 
+ * ทำไมต้องแยก function นี้?
+ * - Admin ต้องเห็นเฉพาะสาขาตัวเอง (ความเป็นส่วนตัว)
+ * - SuperAdmin ต้องเห็นทุกสาขาของบริษัท
+ * - ต้องนับจำนวนพนักงานในแต่ละสาขา (แสดงในแผนที่ว่ามีคนกี่คน)
+ * 
+ * SQL ที่ใช้ (SUPERADMIN):
+ * SELECT b.branchId, b.name, b.latitude, b.longitude, COUNT(u.userId) as totalEmployees
+ * FROM branch b
+ * LEFT JOIN user u ON b.branchId = u.branchId
+ * GROUP BY b.branchId;
+ * 
+ * SQL ที่ใช้ (ADMIN):
+ * SELECT ... WHERE b.branchId = ?;
  */
 export async function getBranchesMap(user: User) {
   let branches;
 
   if (user.role === 'SUPERADMIN') {
-    // SuperAdmin: เห็นทุกสาขา
+    // SuperAdmin เห็นทุกสาขา
     branches = await prisma.branch.findMany({
       include: {
         _count: {
@@ -165,8 +208,21 @@ export async function getBranchesMap(user: User) {
 }
 
 /**
- * 4️⃣ ดึง Location Events (Check-in Outside Locations)
- * แสดงพนักงานที่ check-in นอกพื้นที่
+ * ดึงเหตุการณ์ที่ Check-in นอกพื้นที่ (Location Events)
+ * 
+ * ทำไมต้องแยก function นี้?
+ * - Admin ต้องเห็นพนักงานที่ check-in นอกพื้นที่ (ตรวจสอบความผิดปกติ/ความปลอดภัย)
+ * - ต้องและนวนอพนักงานที่มี locationId และระยะห่างจากพื้นที่กำหนด
+ * 
+ * SQL ที่ใช้:
+ * SELECT 
+ *   a.attendanceId, u.firstName, u.lastName, a.checkIn, 
+ *   l.locationName, a.checkInDistance, l.radius
+ * FROM attendance a
+ * WHERE a.locationId IS NOT NULL 
+ *   AND a.checkInDistance > l.radius 
+ *   AND u.branchId = ?
+ *   AND DATE(a.checkIn) = TODAY();
  */
 export async function getLocationEvents(user: User, branchId?: number) {
   const today = new Date();
@@ -176,7 +232,7 @@ export async function getLocationEvents(user: User, branchId?: number) {
 
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
-  // ดึง attendances ที่มี locationId แต่ checkInDistance > radius
+  // ดึง attendance ที่มี location assigned และนำมา filter check distance
   const attendances = await prisma.attendance.findMany({
     where: {
       user: {
@@ -202,7 +258,7 @@ export async function getLocationEvents(user: User, branchId?: number) {
     },
   });
 
-  // Filter เฉพาะที่อยู่นอกพื้นที่
+  // กรอง เหลือเพียงพนักงานที่ check-in นอកพื้นที่ (ระยะห่าง > radius)
   const outsideEvents = attendances
     .filter((att) => att.checkInDistance! > (att.location?.radius || 0))
     .map((att) => ({
@@ -223,7 +279,25 @@ export async function getLocationEvents(user: User, branchId?: number) {
 }
 
 /**
- * 5️⃣ ดึง Branch Statistics
+ * ดึงสถิติสาขา (Branch Statistics)
+ * 
+ * ทำไมต้องแยก function นี้?
+ * - Admin ต้องเห็นอัตราการมาของพนักงาน (Overall) ในสาขาตัวเอง
+ * - ต้อง focus ที่จำนวนคนมาแล้ว vs ทั้งหมด (เป็น percentage)
+ * 
+ * SQL ที่ใช้:
+ * SELECT 
+ *   b.branchId, b.name, 
+ *   COUNT(DISTINCT u.userId) as totalEmployees,
+ *   SUM(CASE WHEN a.status = 'ON_TIME' THEN 1 ELSE 0 END) as presentToday,
+ *   SUM(CASE WHEN a.status = 'LATE' THEN 1 ELSE 0 END) as lateToday,
+ *   SUM(CASE WHEN a.status = 'ABSENT' THEN 1 ELSE 0 END) as absentToday,
+ *   (presentToday / totalEmployees * 100) as attendanceRate
+ * FROM branch b
+ * LEFT JOIN user u ON b.branchId = u.branchId
+ * LEFT JOIN attendance a ON u.userId = a.userId AND DATE(a.checkIn) = TODAY()
+ * WHERE b.branchId = ?
+ * GROUP BY b.branchId;
  */
 export async function getBranchStats(user: User, branchId?: number) {
   const today = new Date();
@@ -233,7 +307,7 @@ export async function getBranchStats(user: User, branchId?: number) {
 
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
-  // ดึงข้อมูล branch
+  // ดึงข้อมูลเฉพาะของ branch (ชื่อ, ที่อยู่, จำนวนพนักงาน)
   const branch = await prisma.branch.findUnique({
     where: { branchId: queryBranchId },
     include: {

@@ -5,15 +5,15 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc || true",
+    "build": "tsc",
     "start": "node dist/index.js",
     "postinstall": "prisma generate",
-    "seed": "tsx prisma/seed-updated.ts",
-    "test:policies": "tsx prisma/test-policies.ts",
+    "seed": "tsx prisma/seed.ts",
+    "test:policies": "echo 'test-policies.ts removed — use integration tests instead'",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "lint": "tsc --noEmit || true"
+    "lint": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",

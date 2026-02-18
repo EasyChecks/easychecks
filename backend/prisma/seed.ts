@@ -73,8 +73,37 @@ async function main() {
   // await ensureBucketExists();
   // console.log('');
 
-  // ✅ เก็บข้อมูลเก่าไว้ - เพิ่มข้อมูลใหม่เท่านั้น (ไม่ลบ)
-  console.log('📦 Append Mode: เพิ่มข้อมูลใหม่โดยเก็บข้อมูลเก่า\n');
+  // ✅ ลบข้อมูลเก่าทั้งหมด เพื่อเริ่ม id จาก 1 ใหม่
+  console.log('🗑️  ลบข้อมูลเก่าทั้งหมด...');
+  await prisma.attendance.deleteMany();
+  await prisma.leaveRequest.deleteMany();
+  await prisma.lateRequest.deleteMany();
+  await prisma.eventParticipant.deleteMany();
+  await prisma.event.deleteMany();
+  await prisma.shift.deleteMany();
+  await prisma.location.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.downloadLog.deleteMany();
+  await prisma.session.deleteMany();
+  await prisma.passwordReset.deleteMany();
+  await prisma.announcementRecipient.deleteMany();
+  await prisma.announcement.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.branch.deleteMany();
+  
+  // Reset sequences เพื่อให้ id เริ่มจาก 1
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE users_user_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE branches_branch_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE locations_location_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE shifts_shift_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE attendance_attendance_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE leave_requests_leave_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE late_requests_late_request_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE events_event_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE notifications_notification_id_seq RESTART WITH 1');
+  await prisma.$executeRawUnsafe('ALTER SEQUENCE announcements_announcement_id_seq RESTART WITH 1');
+  console.log('✅ ลบข้อมูลเก่าและ reset sequences เรียบร้อย\n');
 
   // 1. สร้างสาขา (เริ่มจาก 1)
   console.log('🏢 สร้างสาขา...');
@@ -129,12 +158,13 @@ async function main() {
   });
   console.log(`✅ สร้าง SUPERADMIN: ${superadmin.firstName} ${superadmin.lastName} (userId: ${superadmin.userId})`);
 
-  // 3. สร้าง Admins แต่ละสาขา (แต่ละสาขา 1 คน)
+  // 3. สร้าง Admins (2 คน)
   const admins = [];
   let employeeCounter = { BKK: 1, CNX: 1, HKT: 1 };
   const defaultPassword = await bcrypt.hash('password123', 10);
   
-  for (const branch of branches) {
+  for (let i = 0; i < 2; i++) {
+    const branch = branches[i % branches.length];
     const name = getThaiName();
     const nationalId = generateNationalId();
     const admin = await prisma.user.create({
@@ -149,85 +179,77 @@ async function main() {
         emergent_tel: generateThaiPhone(),
         emergent_relation: faker.helpers.arrayElement(relations),
         phone: generateThaiPhone(),
-        email: `admin.${branch.code.toLowerCase()}@easycheck.com`,
+        email: `admin${i + 1}@easycheck.com`,
         password: defaultPassword,
-        avatarUrl: await getAvatarUrl(`${branch.code}${String(employeeCounter[branch.code] - 1).padStart(4, '0')}`, admins.length + 1),
+        avatarUrl: await getAvatarUrl(`${branch.code}${String(employeeCounter[branch.code] - 1).padStart(4, '0')}`, admins.length + 2),
         branchId: branch.branchId,
         role: Role.ADMIN,
         status: UserStatus.ACTIVE,
       },
     });
     admins.push(admin);
-    console.log(`✅ สร้าง ADMIN (${branch.code}): ${admin.firstName} ${admin.lastName} (${admin.employeeId})`);
+    console.log(`✅ สร้าง ADMIN: ${admin.firstName} ${admin.lastName} (${admin.employeeId})`);
   }
 
-  // 4. สร้าง Managers (แต่ละสาขา 2 คน)
+  // 4. สร้าง Managers (7 คน)
   const managers = [];
-  for (const branch of branches) {
-    for (let i = 0; i < 2; i++) {
-      const name = getThaiName();
-      const nationalId = generateNationalId();
-      const employeeId = `${branch.code}${String(employeeCounter[branch.code]++).padStart(4, '0')}`;
-      const manager = await prisma.user.create({
-        data: {
-          employeeId,
-          firstName: name.firstName,
-          lastName: name.lastName,
-          nickname: name.nickname,
-          nationalId,
-          emergent_first_name: faker.helpers.arrayElement(thaiFirstNames),
-          emergent_last_name: faker.helpers.arrayElement(thaiLastNames),
-          emergent_tel: generateThaiPhone(),
-          emergent_relation: faker.helpers.arrayElement(relations),
-          phone: generateThaiPhone(),
-          email: `${name.firstName.toLowerCase()}.${branch.code.toLowerCase()}${i}@easycheck.com`,
-          password: defaultPassword,
-          avatarUrl: await getAvatarUrl(employeeId, managers.length + admins.length + 2),
-          branchId: branch.branchId,
-          role: Role.MANAGER,
-          status: UserStatus.ACTIVE,
-        },
-      });
-      managers.push(manager);
-    }
+  for (let i = 0; i < 7; i++) {
+    const branch = branches[i % branches.length];
+    const name = getThaiName();
+    const nationalId = generateNationalId();
+    const employeeId = `${branch.code}${String(employeeCounter[branch.code]++).padStart(4, '0')}`;
+    const manager = await prisma.user.create({
+      data: {
+        employeeId,
+        firstName: name.firstName,
+        lastName: name.lastName,
+        nickname: name.nickname,
+        nationalId,
+        emergent_first_name: faker.helpers.arrayElement(thaiFirstNames),
+        emergent_last_name: faker.helpers.arrayElement(thaiLastNames),
+        emergent_tel: generateThaiPhone(),
+        emergent_relation: faker.helpers.arrayElement(relations),
+        phone: generateThaiPhone(),
+        email: `manager${i + 1}@easycheck.com`,
+        password: defaultPassword,
+        avatarUrl: await getAvatarUrl(employeeId, managers.length + admins.length + 3),
+        branchId: branch.branchId,
+        role: Role.MANAGER,
+        status: UserStatus.ACTIVE,
+      },
+    });
+    managers.push(manager);
   }
   console.log(`✅ สร้าง ${managers.length} MANAGER แล้ว\n`);
 
-  // 5. สร้าง Users (แต่ละสาขา 10 คน)
+  // 5. สร้าง Users (20 คน)
   const users = [];
-  for (const branch of branches) {
-    for (let i = 0; i < 10; i++) {
-      const name = getThaiName();
-      const nationalId = generateNationalId();
-      const employeeId = `${branch.code}${String(employeeCounter[branch.code]++).padStart(4, '0')}`;
-      const user = await prisma.user.create({
-        data: {
-          employeeId,
-          firstName: name.firstName,
-          lastName: name.lastName,
-          nickname: name.nickname,
-          nationalId,
-          emergent_first_name: faker.helpers.arrayElement(thaiFirstNames),
-          emergent_last_name: faker.helpers.arrayElement(thaiLastNames),
-          emergent_tel: generateThaiPhone(),
-          emergent_relation: faker.helpers.arrayElement(relations),
-          phone: generateThaiPhone(),
-          email: `${employeeId.toLowerCase()}@easycheck.com`,
-          password: defaultPassword,
-          avatarUrl: await getAvatarUrl(employeeId, users.length + managers.length + admins.length + 3),
-          branchId: branch.branchId,
-          role: Role.USER,
-          status: faker.helpers.arrayElement([
-            UserStatus.ACTIVE,
-            UserStatus.ACTIVE,
-            UserStatus.ACTIVE,
-            UserStatus.ACTIVE,
-            UserStatus.SUSPENDED,
-          ]),
-        },
-      });
-      users.push(user);
-    }
+  for (let i = 0; i < 20; i++) {
+    const branch = branches[i % branches.length];
+    const name = getThaiName();
+    const nationalId = generateNationalId();
+    const employeeId = `${branch.code}${String(employeeCounter[branch.code]++).padStart(4, '0')}`;
+    const user = await prisma.user.create({
+      data: {
+        employeeId,
+        firstName: name.firstName,
+        lastName: name.lastName,
+        nickname: name.nickname,
+        nationalId,
+        emergent_first_name: faker.helpers.arrayElement(thaiFirstNames),
+        emergent_last_name: faker.helpers.arrayElement(thaiLastNames),
+        emergent_tel: generateThaiPhone(),
+        emergent_relation: faker.helpers.arrayElement(relations),
+        phone: generateThaiPhone(),
+        email: `user${i + 1}@easycheck.com`,
+        password: defaultPassword,
+        avatarUrl: await getAvatarUrl(employeeId, users.length + managers.length + admins.length + 4),
+        branchId: branch.branchId,
+        role: Role.USER,
+        status: UserStatus.ACTIVE,
+      },
+    });
+    users.push(user);
   }
   console.log(`✅ สร้าง ${users.length} USER แล้ว\n`);
 
@@ -368,25 +390,32 @@ async function main() {
   const lateRequestCount = 20;
   const lateRequestData = Array.from({ length: lateRequestCount }, () => {
     const user = faker.helpers.arrayElement(allStaff);
-    const request_date = faker.date.recent({ days: 30 });
+    const requestDate = faker.date.recent({ days: 30 });
     const status = faker.helpers.arrayElement(['PENDING', 'PENDING', 'APPROVED', 'REJECTED']);
     const lateMinutes = faker.number.int({ min: 5, max: 120 });
+    
+    // คำนวณเวลาจริงจาก scheduled_time + lateMinutes
+    const scheduledHour = 8;
+    const scheduledMinute = 30;
+    const totalMinutes = scheduledHour * 60 + scheduledMinute + lateMinutes;
+    const actualHour = Math.floor(totalMinutes / 60);
+    const actualMinute = totalMinutes % 60;
 
     return {
-      user_id: user.userId,
-      request_date,
-      scheduled_time: '08:30',
-      actual_time: `${String(8 + Math.floor(lateMinutes / 60)).padStart(2, '0')}:${String(30 + (lateMinutes % 60)).padStart(2, '0')}`,
-      late_minutes: lateMinutes,
+      userId: user.userId,
+      requestDate,
+      scheduledTime: '08:30',
+      actualTime: `${String(actualHour).padStart(2, '0')}:${String(actualMinute).padStart(2, '0')}`,
+      lateMinutes: lateMinutes,
       reason: faker.helpers.arrayElement(['รถติด', 'ติดธุระส่วนตัว', 'พบแพทย์', 'สัญญาณไฟแดง']),
       status,
-      approved_by_user_id: status !== 'PENDING' ? faker.helpers.arrayElement([...admins, ...managers, superadmin]).userId : null,
-      approved_at: status !== 'PENDING' ? new Date() : null,
-      admin_comment: status === 'REJECTED' ? 'ต้องลงเวลาถูกต้อง' : null,
+      approvedByUserId: status !== 'PENDING' ? faker.helpers.arrayElement([...admins, ...managers, superadmin]).userId : null,
+      approvedAt: status !== 'PENDING' ? new Date() : null,
+      adminComment: status === 'REJECTED' ? 'ต้องลงเวลาถูกต้อง' : null,
     };
   });
   
-  await prisma.late_requests.createMany({ data: lateRequestData });
+  await prisma.lateRequest.createMany({ data: lateRequestData });
   console.log(`✅ สร้าง ${lateRequestCount} Late Requests\n`);
 
   // Events
@@ -394,13 +423,13 @@ async function main() {
   const eventCount = 15;
   const eventData = Array.from({ length: eventCount }, (_, i) => {
     const createdByUser = faker.helpers.arrayElement([superadmin, ...admins, ...managers]);
-    const start_date_time = faker.date.future({ years: 0.2 });
-    const end_date_time = new Date(start_date_time);
-    end_date_time.setDate(start_date_time.getDate() + faker.number.int({ min: 1, max: 3 }));
+    const startDateTime = faker.date.future({ years: 0.2 });
+    const endDateTime = new Date(startDateTime);
+    endDateTime.setDate(startDateTime.getDate() + faker.number.int({ min: 1, max: 3 }));
     const location = faker.helpers.arrayElement(locations);
 
     return {
-      event_name: faker.helpers.arrayElement([
+      eventName: faker.helpers.arrayElement([
         'ประชุมประจำเดือน',
         'การฝึกอบรมพนักงาน',
         'กิจกรรมสร้างสัมพันธ์',
@@ -416,39 +445,37 @@ async function main() {
         'ชำระบัญชีไตรมาส',
         'ยุทธศาสตร์ปีหน้า',
       ]),
-      start_date_time,
-      end_date_time,
-      location_id: location.locationId,
-      created_by_user_id: createdByUser.userId,
-      is_active: faker.datatype.boolean({ probability: 0.7 }),
+      startDateTime,
+      endDateTime,
+      locationId: location.locationId,
+      createdByUserId: createdByUser.userId,
+      isActive: faker.datatype.boolean({ probability: 0.7 }),
     };
   });
   
-  const events = await prisma.events.createMany({ data: eventData });
+  const events = await prisma.event.createMany({ data: eventData });
   console.log(`✅ สร้าง ${eventCount} Events\n`);
 
   // Event Participants
   console.log('👥 สร้าง Event Participants...');
-  const allEvents = await prisma.events.findMany();
-  let participantCount = 0;
+  const allEvents = await prisma.event.findMany();
+  let participantData = [];
   
   for (const event of allEvents) {
-    // เลือก 5-20 คนสุ่ม ไปเป็น participant
-    const numParticipants = faker.number.int({ min: 5, max: 20 });
+    // เลือก 5-10 คนสุ่ม ไปเป็น participant (ลดจำนวนลง)
+    const numParticipants = faker.number.int({ min: 5, max: 10 });
     const selectedUsers = faker.helpers.shuffle(allStaff).slice(0, numParticipants);
     
     for (const selectedUser of selectedUsers) {
-      await prisma.event_participants.create({
-        data: {
-          event_id: event.event_id,
-          user_id: selectedUser.userId,
-          // role ต้องใช้ User role (SUPERADMIN, ADMIN, MANAGER, USER) ตามแล้ว
-          // ถ้าต้องการเก็บบทบาทในกิจกรรม ควรใช้ enum อื่น หรือ optional
-        },
+      participantData.push({
+        eventId: event.eventId,
+        userId: selectedUser.userId,
       });
-      participantCount++;
     }
   }
+  
+  await prisma.eventParticipant.createMany({ data: participantData });
+  const participantCount = participantData.length;
   console.log(`✅ สร้าง ${participantCount} Event Participants\n`);
 
   // Notifications, Audit Logs, Download Logs (simplified)

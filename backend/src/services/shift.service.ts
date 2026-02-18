@@ -1,14 +1,14 @@
-import { PrismaClient, ShiftType, DayOfWeek, Role } from '@prisma/client';
+import { ShiftType, DayOfWeek, Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
- * 📋 Shift Service - จัดการตารางงาน/กะ
- * 
- * 🔴 หมายเหตุ: ตอนนี้ยังไม่มี Auth
- * - รับ userId, role, branchId จาก parameter แทน
- * - รอเพื่อนทำ Auth เสร็จค่อยเปลี่ยน
- * 
+ * 📋 Shift Service — บริการจัดการตารางงาน/กะ
+ *
+ * ทำไมต้องมี gracePeriodMinutes และ lateThresholdMinutes ต่อกะ?
+ * แต่ละสาขา/ทีมมีนโยบายเวลาต่างกัน บางที่ยืดหยุ่น 30 นาที บางที่เคร่ง 0 นาที
+ * การเก็บไว้ใน Shift record ทำให้เปลี่ยน policy ต่อกะได้โดยไม่ต้อง deploy ใหม่
+ *
  * สิทธิ์การเข้าถึง:
  * - SuperAdmin: ดู/สร้าง/แก้/ลบ ได้ทุกสาขา
  * - Admin: ดู/สร้าง/แก้/ลบ ได้เฉพาะสาขาตัวเอง
@@ -114,84 +114,104 @@ function canAccessBranch(
 }
 
 // ============================================
-// 📋 Main Functions - ฟังก์ชันหลัก
+// 📋 Main Functions — ฟังก์ชันหลัก
 // ============================================
 
 /**
  * ➕ สร้างกะใหม่ (Admin/SuperAdmin only)
- * 
- * Flow:
- * 1. Validate เวลา (HH:MM)
- * 2. ตรวจสอบ location (ถ้ามี)
- * 3. ตรวจสอบ shiftType และ specificDays/customDate
- * 4. ตรวจสอบสิทธิ์ตาม branch
- * 5. สร้าง shift
- * 6. บันทึก Audit Log
+ *
+ * ทำไม flow ถึงตรวจสอบสิทธิ์ branch ก่อน INSERT?
+ * ป้องกัน Admin สาขา A สร้างกะให้พนักงานสาขา B โดยบังเอิญหรือจงใจ
+ *
+ * ทำไม gracePeriodMinutes / lateThresholdMinutes เก็บต่อกะ?
+ * แต่ละกะมี policy เวลาต่างกัน (กะเช้าเข้มงวดกว่ากะบ่าย)
+ * frontend ส่ง config มาตอนสร้าง → บันทึกไว้ใน Shift → attendance.service อ่านใช้
+ *
+ * SQL เทียบเท่า:
+ * -- ตรวจสอบ location
+ * SELECT 1 FROM "Location" WHERE "locationId"=$1
+ *
+ * -- ตรวจสอบสิทธิ์ branch
+ * SELECT "branchId" FROM "User" WHERE "userId"=$1  -- target user
+ *
+ * -- สร้างกะ
+ * INSERT INTO "Shift" ("name","shiftType","startTime","endTime",
+ *   "gracePeriodMinutes","lateThresholdMinutes","specificDays",
+ *   "customDate","locationId","userId","createdByUserId")
+ * VALUES (...)
+ * RETURNING *
  */
 export const createShift = async (data: CreateShiftDTO) => {
   // ===== 1. Validate เวลา =====
+  // "08:00" ผ่าน, "8:0" หรือ "25:00" ไม่ผ่าน → ป้องกัน string แปลก ๆ เข้า DB
   if (!isValidTimeFormat(data.startTime) || !isValidTimeFormat(data.endTime)) {
     throw new Error('รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM เช่น 08:30)');
   }
 
   // ===== 2. ตรวจสอบ location (ถ้ามี) =====
+  // SQL: SELECT 1 FROM "Location" WHERE "locationId"=$1
   if (data.locationId) {
     const location = await prisma.location.findUnique({
       where: { locationId: data.locationId },
     });
     if (!location) {
-      throw new Error('ไม่พบสถานที่ที่ระบุ');
+      throw new Error('ไม่พบสถานที่ที่ระบุ'); // locationId ถูกลบหรือไม่มีจริง
     }
   }
 
   // ===== 3. ตรวจสอบ shiftType และ specificDays/customDate =====
+  // SPECIFIC_DAY ต้องมีวันที่ระบุ เช่น ["MONDAY","FRIDAY"]
   if (data.shiftType === 'SPECIFIC_DAY' && (!data.specificDays || data.specificDays.length === 0)) {
     throw new Error('กะแบบ SPECIFIC_DAY ต้องระบุวันที่ต้องการ (specificDays)');
   }
+  // CUSTOM ต้องระบุวันที่เจาะจง เช่น "2025-12-31"
   if (data.shiftType === 'CUSTOM' && !data.customDate) {
     throw new Error('กะแบบ CUSTOM ต้องระบุวันที่ (customDate)');
   }
 
   // ===== 4. ตรวจสอบสิทธิ์ตาม branch =====
-  // ดึงข้อมูล user ที่จะรับกะ (เพื่อเช็ค branch)
+  // SQL: SELECT "branchId" FROM "User" WHERE "userId"=$1
   const targetUser = await prisma.user.findUnique({
-    where: { userId: data.userId },
-    select: { branchId: true },
+    where: { userId: data.userId },      // พนักงานที่จะรับกะ
+    select: { branchId: true },          // ต้องการแค่ branchId สำหรับตรวจสิทธิ์
   });
 
   if (!targetUser) {
-    throw new Error('ไม่พบพนักงานที่ระบุ');
+    throw new Error('ไม่พบพนักงานที่ระบุ'); // userId ไม่มีในระบบ
   }
 
-  // Admin สามารถสร้างได้เฉพาะสาขาตัวเอง
+  // Admin สร้างกะได้เฉพาะสาขาตัวเอง, SuperAdmin ไม่มีข้อจำกัด
   if (!canAccessBranch(data.creatorRole, data.creatorBranchId, targetUser.branchId || undefined)) {
     throw new Error('คุณไม่มีสิทธิ์สร้างกะให้พนักงานสาขาอื่น');
   }
 
   // ===== 5. แปลง customDate เป็น Date object (ถ้าเป็น string) =====
+  // Prisma ต้องการ Date ไม่ใช่ string → แปลงก่อน INSERT
   let parsedCustomDate: Date | undefined = undefined;
   if (data.customDate) {
-    parsedCustomDate = typeof data.customDate === 'string' 
-      ? new Date(data.customDate) 
-      : data.customDate;
+    parsedCustomDate = typeof data.customDate === 'string'
+      ? new Date(data.customDate)   // "2025-12-31" → Date object
+      : data.customDate;            // ส่งมาเป็น Date แล้ว ใช้ได้เลย
   }
 
   // ===== 6. สร้าง shift =====
+  // SQL: INSERT INTO "Shift" (...) VALUES (...) RETURNING *
   const shift = await prisma.shift.create({
     data: {
       name: data.name,
-      shiftType: data.shiftType,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      gracePeriodMinutes: data.gracePeriodMinutes ?? 15, // default 15 นาที
-      lateThresholdMinutes: data.lateThresholdMinutes ?? 30, // default 30 นาที
-      specificDays: data.specificDays ?? [],
-      customDate: parsedCustomDate ?? null,
-      locationId: data.locationId ?? null,
-      userId: data.userId,
-      createdByUserId: data.createdByUserId,
+      shiftType: data.shiftType,           // REGULAR / SPECIFIC_DAY / CUSTOM
+      startTime: data.startTime,           // "HH:MM"
+      endTime: data.endTime,               // "HH:MM"
+      gracePeriodMinutes: data.gracePeriodMinutes ?? 15,   // default 15 นาที (ถ้าไม่ส่งมา)
+      lateThresholdMinutes: data.lateThresholdMinutes ?? 30, // default 30 นาที (ถ้าไม่ส่งมา)
+      specificDays: data.specificDays ?? [],       // [] สำหรับ REGULAR
+      customDate: parsedCustomDate ?? null,        // null สำหรับ REGULAR/SPECIFIC_DAY
+      locationId: data.locationId ?? null,         // null = ไม่ตรวจ GPS
+      userId: data.userId,                         // พนักงานเจ้าของกะ
+      createdByUserId: data.createdByUserId,       // Admin/SuperAdmin ที่กดสร้าง
     },
     include: {
+      // include ทันทีเพื่อให้ response มีข้อมูลครบสำหรับ frontend + WebSocket broadcast
       location: true,
       user: {
         select: {
@@ -213,24 +233,35 @@ export const createShift = async (data: CreateShiftDTO) => {
   });
 
   // ===== 7. บันทึก Audit Log =====
+  // บันทึกว่าใครสร้างกะอะไร เมื่อไหร่ → ใช้ tracking ย้อนหลัง
   await createAuditLog({
-    userId: data.createdByUserId,
+    userId: data.createdByUserId,        // ผู้กระทำ (Admin/SuperAdmin)
     action: AuditAction.CREATE_SHIFT,
     targetTable: 'shifts',
-    targetId: shift.shiftId,
-    newValues: shift,
+    targetId: shift.shiftId,            // id ที่ Postgres ออกให้หลัง INSERT
+    newValues: shift,                   // snapshot ทั้ง record
   });
 
-  return shift;
+  return shift; // ส่งกลับ controller → WebSocket broadcast + HTTP response
 };
 
 /**
  * 📋 ดึงกะ (ตาม role และ branch)
- * 
- * สิทธิ์:
- * - SuperAdmin: ดูได้ทุกกะ
- * - Admin: ดูได้เฉพาะสาขาตัวเอง
- * - User/Manager: ดูได้เฉพาะกะของตัวเอง
+ *
+ * ทำไม getShifts ถึงรับ role มาเป็น param แทนแยก 3 ฟังก์ชัน?
+ * เพราะ logic WHERE condition ต่างกันตาม role แต่ return type และ include เหมือนกัน
+ * รวมไว้ฟังก์ชันเดียวลด duplication และ test ได้ครอบคลุมกว่า
+ *
+ * SQL เทียบเท่า:
+ * -- SuperAdmin
+ * SELECT * FROM "Shift" s JOIN "User" u ON s."userId"=u."userId" WHERE (filters)
+ *
+ * -- Admin
+ * SELECT * FROM "Shift" s JOIN "User" u ON s."userId"=u."userId"
+ *   WHERE u."branchId" = $requesterBranchId AND (filters)
+ *
+ * -- User
+ * SELECT * FROM "Shift" WHERE "userId" = $requesterId AND "isActive" = true
  */
 export const getShifts = async (
   requesterId: number,
@@ -243,7 +274,7 @@ export const getShifts = async (
   }
 ) => {
   // กำหนด where clause ตาม role
-  let whereClause: any = {
+  let whereClause: Prisma.ShiftWhereInput = {
     ...(filters?.shiftType && { shiftType: filters.shiftType }),
   };
 
@@ -322,65 +353,19 @@ export const getShifts = async (
 };
 
 /**
- * 📋 ดึงกะของ user (เฉพาะตัวเอง)
- * 
- * ใช้สำหรับ User ดูกะของตัวเอง
- */
-export const getShiftsByUserId = async (userId: number) => {
-  const shifts = await prisma.shift.findMany({
-    where: {
-      userId,
-      isActive: true,
-    },
-    include: {
-      location: true,
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
-
-  return shifts;
-};
-
-/**
- * 📋 ดึงกะทั้งหมด (Admin only) - Legacy function
- * 
- * TODO: ควรใช้ getShifts แทน
- */
-export const getAllShifts = async (filters?: {
-  userId?: number;
-  shiftType?: ShiftType;
-  isActive?: boolean;
-}) => {
-  const shifts = await prisma.shift.findMany({
-    where: {
-      ...(filters?.userId && { userId: filters.userId }),
-      ...(filters?.shiftType && { shiftType: filters.shiftType }),
-      ...(filters?.isActive !== undefined && { isActive: filters.isActive }),
-    },
-    include: {
-      location: true,
-      user: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-          employeeId: true,
-          role: true,
-        },
-      },
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
-
-  return shifts;
-};
-
-/**
  * 📋 ดึงกะเฉพาะ ID
+ *
+ * ทำไมต้อง include creator, updatedBy, deletedBy ด้วย?
+ * หน้า Admin ต้องแสดงว่า "ใครสร้าง/แก้ไข/ลบ" เพื่อความโปร่งใส
+ *
+ * SQL: SELECT s.*, l.*, u."firstName", cr."firstName", ub."firstName", db."firstName"
+ *   FROM "Shift" s
+ *   LEFT JOIN "Location" l ON s."locationId" = l."locationId"
+ *   JOIN "User" u ON s."userId" = u."userId"
+ *   LEFT JOIN "User" cr ON s."createdByUserId" = cr."userId"
+ *   LEFT JOIN "User" ub ON s."updatedByUserId" = ub."userId"
+ *   LEFT JOIN "User" db ON s."deletedByUserId" = db."userId"
+ *   WHERE s."shiftId" = $1
  */
 export const getShiftById = async (shiftId: number) => {
   const shift = await prisma.shift.findUnique({
@@ -434,11 +419,13 @@ export const getShiftById = async (shiftId: number) => {
 };
 
 /**
- * 🔄 อัปเดตกะ
- * 
- * สิทธิ์:
- * - SuperAdmin: แก้ได้ทุกกะ
- * - Admin: แก้ได้เฉพาะสาขาตัวเอง
+ * 🔄 อัปเดตกะ (Admin/SuperAdmin only)
+ *
+ * ทำไม frontend ส่ง gracePeriodMinutes / lateThresholdMinutes มาได้ตอน update?
+ * Admin ต้องการปรับ policy หลังสร้างกะไปแล้ว โดยไม่ต้องลบและสร้างใหม่
+ *
+ * SQL: SELECT s.*, u."branchId" FROM "Shift" s JOIN "User" u ... WHERE s."shiftId"=$1
+ *      UPDATE "Shift" SET ... WHERE "shiftId"=$1 RETURNING *
  */
 export const updateShift = async (
   shiftId: number, 
@@ -475,7 +462,7 @@ export const updateShift = async (
   }
 
   // ===== 4. แปลง customDate (ถ้ามี) =====
-  let updateData: any = { ...data };
+  let updateData: Prisma.ShiftUpdateInput = { ...data };
   if (data.customDate) {
     updateData.customDate = typeof data.customDate === 'string' 
       ? new Date(data.customDate) 
@@ -523,17 +510,23 @@ export const updateShift = async (
 };
 
 /**
- * 🗑️ ลบกะ (soft delete)
- * 
- * สิทธิ์:
- * - SuperAdmin: ลบได้ทุกกะ
- * - Admin: ลบได้เฉพาะสาขาตัวเอง
- * 
- * ต้องระบุเหตุผลในการลบ!
+ * 🗑️ ลบกะ — Soft Delete (Admin/SuperAdmin only)
+ *
+ * ทำไมใช้ Soft Delete (isActive=false) แทนการลบจริง?
+ * - กะที่ผูกกับ Attendance ที่บันทึกไปแล้วจะ orphan ถ้าลบจริง
+ * - ต้อง audit trail ว่าใครลบเมื่อไหร่ด้วยเหตุผลอะไร
+ * - ถ้าลบผิดสามารถ reactivate ได้
+ *
+ * ต้องระบุเหตุผลในการลบเสมอ → บังคับ accountability
+ *
+ * SQL: UPDATE "Shift"
+ *   SET "isActive"=false, "deletedAt"=NOW(),
+ *       "deletedByUserId"=$2, "deleteReason"=$3
+ *   WHERE "shiftId"=$1
  */
 export const deleteShift = async (
-  shiftId: number, 
-  deletedByUserId: number, 
+  shiftId: number,
+  deletedByUserId: number,
   deleterRole: string,
   deleterBranchId: number | undefined,
   deleteReason: string
@@ -589,13 +582,21 @@ export const deleteShift = async (
 
 /**
  * 📋 ดึงกะที่ใช้งานได้ในวันนี้ของ user
- * 
- * ใช้สำหรับแสดงกะที่ต้องเข้างานวันนี้
- * 
- * Logic:
- * - REGULAR: ใช้ได้ทุกวัน
- * - SPECIFIC_DAY: ตรวจว่าวันนี้ตรงกับ specificDays หรือไม่
- * - CUSTOM: ตรวจว่าวันนี้ตรงกับ customDate หรือไม่
+ *
+ * ทำไมต้อง filter ตาม shiftType แยก 3 แบบ?
+ * - REGULAR: กะประจำ ใช้ได้ทุกวันโดยไม่ต้องตรวจวันที่
+ * - SPECIFIC_DAY: กะเฉพาะวัน เช่น จันทร์-ศุกร์ → ตรวจ specificDays[] ว่าตรงหรือเปล่า
+ * - CUSTOM: กะวันเดียว เช่น ทำงานแทน → ตรวจว่า customDate ตรงกับวันนี้
+ *
+ * หน้า check-in ของ frontend เรียก endpoint นี้ก่อน แล้วแสดงรายการกะให้เลือก
+ *
+ * SQL: SELECT * FROM "Shift"
+ *   WHERE "userId"=$1 AND "isActive"=true
+ *   AND (
+ *     "shiftType"='REGULAR' OR
+ *     ("shiftType"='SPECIFIC_DAY' AND $dayOfWeek = ANY("specificDays")) OR
+ *     ("shiftType"='CUSTOM' AND "customDate"::date = TODAY)
+ *   )
  */
 export const getActiveShiftsForToday = async (userId: number) => {
   const today = new Date();
@@ -633,14 +634,13 @@ export const getActiveShiftsForToday = async (userId: number) => {
 };
 
 // ============================================
+// ============================================
 // 📤 Export
 // ============================================
 
 export const shiftService = {
   createShift,
   getShifts,
-  getShiftsByUserId,
-  getAllShifts,
   getShiftById,
   updateShift,
   deleteShift,

@@ -1,137 +1,175 @@
 import type { Request, Response } from 'express';
+import type { ShiftType } from '@prisma/client';
 import * as shiftService from '../services/shift.service.js';
 import { broadcastShiftUpdate } from '../websocket/attendance.websocket.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
+/** req.query の値は string | string[] になりうるので string に正規化する */
+function qs(v: unknown): string | undefined {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v) && typeof v[0] === 'string') return v[0] as string;
+  return undefined;
+}
+
 /**
- * 📋 Shift Controller - จัดการ API เกี่ยวกับตารางงาน/กะ
- * 
- * 🔴 หมายเหตุ: ตอนนี้ยังไม่มี Auth Middleware
- * - รับ userId, role, branchId จาก body แทน req.user
- * - รอเพื่อนทำ Auth เสร็จค่อยเปลี่ยน
- * 
- * สิทธิ์การเข้าถึง:
- * - SuperAdmin: ดู/สร้าง/แก้/ลบ ได้ทุกสาขา
- * - Admin: ดู/สร้าง/แก้/ลบ ได้เฉพาะสาขาตัวเอง
- * - User: ดูได้เฉพาะกะของตัวเอง
+ * 📋 Shift Controller — API จัดการตารางงาน/กะ
+ *
+ * ทำไม Controller ถึงบางมาก?
+ * - รับ request, ตรวจ params/body เบื้องต้น
+ * - ดึง identity (userId, role, branchId) จาก req.user ที่ authenticate middleware ตั้งไว้
+ *   → ไม่ต้องรับจาก body อีกต่อไป เพราะ client ปลอมได้
+ * - business logic ทั้งหมดอยู่ใน shift.service.ts
+ *
+ * ============================================================
+ * API ENDPOINT REFERENCE (การสร้างตารางงาน)
+ * ============================================================
+ *
+ * POST /api/shifts
+ *   → Admin/SuperAdmin สร้างกะให้พนักงาน
+ *   → Body: { name, shiftType, startTime, endTime, userId,
+ *             gracePeriodMinutes?, lateThresholdMinutes?,
+ *             specificDays?, customDate?, locationId? }
+ *   → gracePeriodMinutes  = เข้าก่อนได้กี่นาทีถึงนับว่าตรงเวลา (default 15)
+ *   → lateThresholdMinutes = สายเกินนี้นาทีถือว่าขาดงาน (default 30)
+ *
+ * GET /api/shifts
+ *   → SuperAdmin: เห็นทุกกะ | Admin: เห็นสาขาตัวเอง | User: เห็นกะตัวเอง
+ *   → Query: userId?, shiftType?, isActive?
+ *
+ * GET /api/shifts/today/:userId
+ *   → กะที่ใช้งานได้วันนี้ของพนักงาน (filter ตาม DayOfWeek / customDate)
+ *
+ * GET /api/shifts/:id
+ *   → ดูรายละเอียดกะเดียว
+ *
+ * PUT /api/shifts/:id  (Admin/SuperAdmin only)
+ *   → แก้ไขกะ: เวลา, grace period, late threshold, สถานที่, เปิด/ปิด
+ *   → Body: { name?, startTime?, endTime?, gracePeriodMinutes?,
+ *             lateThresholdMinutes?, specificDays?, customDate?,
+ *             locationId?, isActive? }
+ *
+ * DELETE /api/shifts/:id  (Admin/SuperAdmin only — Soft Delete)
+ *   → Body: { deleteReason: string }
  */
 
 /**
  * ➕ สร้างกะใหม่ (Admin/SuperAdmin only)
  * POST /api/shifts
- * 
- * Body: {
- *   createdByUserId: number,   // (จำเป็น) ผู้สร้าง
- *   creatorRole: string,       // (จำเป็น) ADMIN หรือ SUPERADMIN
- *   creatorBranchId?: number,  // (จำเป็นถ้าเป็น ADMIN) สาขาของผู้สร้าง
- *   name: string,              // (จำเป็น) ชื่อกะ
- *   shiftType: string,         // (จำเป็น) REGULAR, SPECIFIC_DAY, CUSTOM
- *   startTime: string,         // (จำเป็น) เวลาเริ่ม HH:MM
- *   endTime: string,           // (จำเป็น) เวลาสิ้นสุด HH:MM
- *   userId: number,            // (จำเป็น) พนักงานที่รับกะนี้
- *   locationId?: number,       // (optional) รหัสสถานที่
- *   gracePeriodMinutes?: number,
- *   lateThresholdMinutes?: number,
- *   specificDays?: string[],
- *   customDate?: string
- * }
  */
 export const createShift = async (req: Request, res: Response) => {
   try {
-    // ดึงข้อมูลจาก body (ตอนนี้ยังไม่มี auth)
-    // TODO: หลังจากเพื่อนทำ Auth เสร็จ เปลี่ยนเป็น req.user
-    const { 
-      createdByUserId, 
-      creatorRole, 
-      creatorBranchId,
-      userId, // พนักงานที่รับกะนี้
-      ...shiftData 
-    } = req.body;
+    // [1] ดึง identity ของผู้สร้างจาก token ที่ authenticate middleware ถอดรหัสไว้
+    //     ทำไมไม่รับจาก body? ป้องกัน client ส่ง role='SUPERADMIN' ปลอมเพื่อสร้างกะสาขาอื่น
+    const createdByUserId = req.user?.userId;   // id ของ Admin/SuperAdmin ที่กดสร้างกะ
+    const creatorRole = req.user?.role;          // SUPERADMIN / ADMIN / MANAGER
+    const creatorBranchId = req.user?.branchId; // service จะตรวจว่า userId อยู่สาขาเดียวกันไหม
 
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!createdByUserId) {
-      return sendError(res, 'กรุณาระบุ createdByUserId (ผู้สร้าง)', 400);
+    // [2] token ไม่มีข้อมูล → request ไม่ผ่าน middleware → reject ทันที
+    if (createdByUserId === undefined || creatorRole === undefined) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้ กรุณา login ใหม่', 401);
     }
 
-    if (!creatorRole || !['ADMIN', 'SUPERADMIN'].includes(creatorRole)) {
-      return sendError(res, 'กรุณาระบุ creatorRole ที่ถูกต้อง (ADMIN หรือ SUPERADMIN)', 400);
-    }
+    // [3] Destructure body — field ที่ต้องมีจะ validate ข้างล่าง
+    //     userId            → พนักงานที่จะรับกะนี้
+    //     name              → ชื่อกะ เช่น "เช้า สาขา A"
+    //     shiftType         → REGULAR (ทุกวัน) | SPECIFIC_DAY (ระบุวัน) | CUSTOM (วันที่เจาะจง)
+    //     startTime/endTime → รูปแบบ "HH:MM" เช่น "08:00"
+    //     gracePeriodMinutes    → เข้าก่อนได้กี่นาทีถือว่าตรงเวลา (default 15 ใน service)
+    //     lateThresholdMinutes  → สายเกินนี้นาทีถือว่าขาด (default 30 ใน service)
+    //     specificDays      → ["MONDAY","WEDNESDAY"] ใช้กับ SPECIFIC_DAY
+    //     customDate        → "2025-12-31" ใช้กับ CUSTOM
+    //     locationId?       → ผูก GPS radius กับกะนี้
+    const {
+      userId,
+      name,
+      shiftType,
+      startTime,
+      endTime,
+      gracePeriodMinutes,
+      lateThresholdMinutes,
+      specificDays,
+      customDate,
+      locationId,
+    } = req.body as {
+      userId?: number;
+      name?: string;
+      shiftType?: string;
+      startTime?: string;
+      endTime?: string;
+      gracePeriodMinutes?: number;
+      lateThresholdMinutes?: number;
+      specificDays?: string[];
+      customDate?: string;
+      locationId?: number;
+    };
 
-    if (!userId) {
-      return sendError(res, 'กรุณาระบุ userId (พนักงานที่รับกะ)', 400);
-    }
+    // [4] Validate required fields — ส่ง 400 ทันทีพร้อมข้อความบอก field ที่ขาด
+    if (userId === undefined) return sendError(res, 'กรุณาระบุ userId (พนักงานที่รับกะ)', 400);
+    if (!name) return sendError(res, 'กรุณาระบุชื่อกะ (name)', 400);
+    if (!shiftType) return sendError(res, 'กรุณาระบุ shiftType (REGULAR, SPECIFIC_DAY, CUSTOM)', 400);
+    if (!startTime) return sendError(res, 'กรุณาระบุเวลาเริ่มงาน (startTime HH:MM)', 400);
+    if (!endTime) return sendError(res, 'กรุณาระบุเวลาเลิกงาน (endTime HH:MM)', 400);
 
-    // เรียก service
+    // [5] สร้างกะผ่าน service — service จะตรวจสิทธิ์ (Admin ข้ามสาขาไม่ได้)
+    //     แปลง Number() ตรงนี้เพราะ body JSON อาจส่งตัวเลขมาเป็น string
     const shift = await shiftService.createShift({
-      ...shiftData,
-      userId: parseInt(userId),
-      createdByUserId: parseInt(createdByUserId),
-      creatorRole,
-      creatorBranchId: creatorBranchId ? parseInt(creatorBranchId) : undefined,
+      name,
+      shiftType: shiftType as Parameters<typeof shiftService.createShift>[0]['shiftType'],
+      startTime,
+      endTime,
+      gracePeriodMinutes: gracePeriodMinutes !== undefined ? Number(gracePeriodMinutes) : undefined,
+      lateThresholdMinutes: lateThresholdMinutes !== undefined ? Number(lateThresholdMinutes) : undefined,
+      specificDays: specificDays as Parameters<typeof shiftService.createShift>[0]['specificDays'],
+      customDate,
+      locationId: locationId !== undefined ? Number(locationId) : undefined,
+      userId: Number(userId),
+      createdByUserId,   // ผู้สร้าง (จาก token)
+      creatorRole,       // บทบาท (จาก token) — service ใช้ตรวจสิทธิ์ครอสสาขา
+      creatorBranchId,   // สาขาผู้สร้าง (จาก token)
     });
 
-    // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Create สำเร็จ
+    // [6] Broadcast ให้ client ที่เปิด Dashboard อยู่รู้ว่ามีกะใหม่
     broadcastShiftUpdate('CREATE', shift);
 
+    // [7] Response 201 Created พร้อม shift record ที่เพิ่ง INSERT
     sendSuccess(res, shift, 'สร้างกะเรียบร้อยแล้ว', 201);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้างกะ');
+  } catch (error: unknown) {
+    // [8] service throw Error พร้อม message ภาษาไทย เช่น "Admin ข้ามสาขาไม่ได้"
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้างกะ');
   }
 };
 
 /**
  * 📋 ดึงกะทั้งหมด (ตาม role และ branch)
  * GET /api/shifts
- * 
- * Query: {
- *   requesterId: number,     // (จำเป็น) ผู้ขอดูข้อมูล
- *   requesterRole: string,   // (จำเป็น) Role ของผู้ขอ
- *   requesterBranchId?: number,
- *   userId?: number,
- *   shiftType?: string,
- *   isActive?: boolean
- * }
+ *
+ * ทำไม role และ branchId ดึงจาก req.user?
+ * เพื่อให้ getShifts() กรองข้อมูลตามสิทธิ์จริงของ user ที่ login อยู่
  */
 export const getShifts = async (req: Request, res: Response) => {
   try {
-    // ดึงข้อมูลจาก query (ตอนนี้ยังไม่มี auth)
-    // TODO: หลังจากเพื่อนทำ Auth เสร็จ เปลี่ยนเป็น req.user
-    const { 
-      requesterId, 
-      requesterRole, 
-      requesterBranchId,
-      userId, 
-      shiftType, 
-      isActive 
-    } = req.query;
+    const requesterId = req.user?.userId;
+    const requesterRole = req.user?.role;
+    const requesterBranchId = req.user?.branchId;
 
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!requesterId) {
-      return sendError(res, 'กรุณาระบุ requesterId (ผู้ขอดูข้อมูล)', 400);
+    if (requesterId === undefined || requesterRole === undefined) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้ กรุณา login ใหม่', 401);
     }
 
-    if (!requesterRole) {
-      return sendError(res, 'กรุณาระบุ requesterRole', 400);
-    }
+    const userId = qs(req.query['userId']);
+    const shiftType = qs(req.query['shiftType']) as ShiftType | undefined;
+    const isActiveRaw = qs(req.query['isActive']);
 
-    // เตรียม filter (ส่งแค่ค่าที่มี ไม่ส่ง undefined)
     type ShiftFilters = Parameters<typeof shiftService.getShifts>[3];
     const filters: ShiftFilters = {};
-    if (userId) filters.userId = parseInt(userId as string);
-    if (shiftType) filters.shiftType = shiftType as any;
-    if (isActive !== undefined) filters.isActive = isActive === 'true';
+    if (userId !== undefined) filters.userId = parseInt(userId);
+    if (shiftType !== undefined) filters.shiftType = shiftType;
+    if (isActiveRaw !== undefined) filters.isActive = isActiveRaw === 'true';
 
-    // เรียก service (ส่ง role และ branchId ไปด้วยเพื่อกรองตามสิทธิ์)
-    const shifts = await shiftService.getShifts(
-      parseInt(requesterId as string),
-      requesterRole as string,
-      requesterBranchId ? parseInt(requesterBranchId as string) : undefined,
-      filters
-    );
-
+    const shifts = await shiftService.getShifts(requesterId, requesterRole, requesterBranchId, filters);
     sendSuccess(res, shifts);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ');
   }
 };
 
@@ -141,18 +179,13 @@ export const getShifts = async (req: Request, res: Response) => {
  */
 export const getActiveShiftsToday = async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId as string);
+    const userId = parseInt(qs(req.params['userId']) ?? '');
+    if (isNaN(userId)) return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
 
-    if (!userId || isNaN(userId)) {
-      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
-    }
-
-    // เรียก service
     const shifts = await shiftService.getActiveShiftsForToday(userId);
-
     sendSuccess(res, shifts);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลกะวันนี้');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะวันนี้');
   }
 };
 
@@ -162,126 +195,94 @@ export const getActiveShiftsToday = async (req: Request, res: Response) => {
  */
 export const getShiftById = async (req: Request, res: Response) => {
   try {
-    const shiftId = parseInt(req.params.id as string);
+    const shiftId = parseInt(qs(req.params['id']) ?? '');
+    if (isNaN(shiftId)) return sendError(res, 'กรุณาระบุ shiftId ที่ถูกต้อง', 400);
 
-    if (!shiftId || isNaN(shiftId)) {
-      return sendError(res, 'กรุณาระบุ shiftId ที่ถูกต้อง', 400);
-    }
-
-    // เรียก service
     const shift = await shiftService.getShiftById(shiftId);
-
     sendSuccess(res, shift);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ');
   }
 };
 
 /**
- * 🔄 อัปเดตกะ
+ * 🔄 อัปเดตกะ (Admin/SuperAdmin only)
  * PUT /api/shifts/:id
- * 
- * Body: {
- *   updatedByUserId: number,   // (จำเป็น) ผู้แก้ไข
- *   updaterRole: string,       // (จำเป็น) Role ของผู้แก้ไข
- *   updaterBranchId?: number,  // (ถ้าเป็น ADMIN) สาขาของผู้แก้ไข
- *   name?, startTime?, endTime?, 
- *   gracePeriodMinutes?, lateThresholdMinutes?,
- *   specificDays?, customDate?, locationId?, isActive?
- * }
+ *
+ * Body: { name?, startTime?, endTime?, gracePeriodMinutes?,
+ *         lateThresholdMinutes?, specificDays?, customDate?,
+ *         locationId?, isActive? }
  */
 export const updateShift = async (req: Request, res: Response) => {
   try {
-    const shiftId = parseInt(req.params.id as string);
+    const shiftId = parseInt(qs(req.params['id']) ?? '');
+    if (isNaN(shiftId)) return sendError(res, 'กรุณาระบุ shiftId ที่ถูกต้อง', 400);
 
-    if (!shiftId || isNaN(shiftId)) {
-      return sendError(res, 'กรุณาระบุ shiftId ที่ถูกต้อง', 400);
+    const updatedByUserId = req.user?.userId;
+    const updaterRole = req.user?.role;
+    const updaterBranchId = req.user?.branchId;
+
+    if (updatedByUserId === undefined || updaterRole === undefined) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้ กรุณา login ใหม่', 401);
     }
 
-    // ดึงข้อมูลจาก body
-    const { 
-      updatedByUserId, 
-      updaterRole, 
-      updaterBranchId,
-      ...updateData 
-    } = req.body;
+    const {
+      name,
+      startTime,
+      endTime,
+      gracePeriodMinutes,
+      lateThresholdMinutes,
+      specificDays,
+      customDate,
+      locationId,
+      isActive,
+    } = req.body as Parameters<typeof shiftService.updateShift>[4];
 
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!updatedByUserId) {
-      return sendError(res, 'กรุณาระบุ updatedByUserId (ผู้แก้ไข)', 400);
-    }
-
-    if (!updaterRole) {
-      return sendError(res, 'กรุณาระบุ updaterRole', 400);
-    }
-
-    // เรียก service
     const updatedShift = await shiftService.updateShift(
-      shiftId, 
-      parseInt(updatedByUserId), 
+      shiftId,
+      updatedByUserId,
       updaterRole,
-      updaterBranchId ? parseInt(updaterBranchId) : undefined,
-      updateData
+      updaterBranchId,
+      { name, startTime, endTime, gracePeriodMinutes, lateThresholdMinutes, specificDays, customDate, locationId, isActive },
     );
 
-    // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Update สำเร็จ
     broadcastShiftUpdate('UPDATE', updatedShift);
-
     sendSuccess(res, updatedShift, 'อัปเดตกะเรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการอัปเดตกะ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอัปเดตกะ');
   }
 };
 
 /**
- * 🗑️ ลบกะ (soft delete)
+ * 🗑️ ลบกะ (Admin/SuperAdmin only — Soft Delete)
  * DELETE /api/shifts/:id
- * 
- * Body: { 
- *   deletedByUserId: number,   // (จำเป็น) ผู้ลบ
- *   deleterRole: string,       // (จำเป็น) Role ของผู้ลบ
- *   deleterBranchId?: number,  // (ถ้าเป็น ADMIN) สาขาของผู้ลบ
- *   deleteReason: string       // (จำเป็น) เหตุผลในการลบ
- * }
+ *
+ * Body: { deleteReason: string }
  */
 export const deleteShift = async (req: Request, res: Response) => {
   try {
-    const shiftId = parseInt(req.params.id as string);
+    const shiftId = parseInt(qs(req.params['id']) ?? '');
+    if (isNaN(shiftId)) return sendError(res, 'กรุณาระบุ shiftId ที่ถูกต้อง', 400);
 
-    if (!shiftId || isNaN(shiftId)) {
-      return sendError(res, 'กรุณาระบุ shiftId ที่ถูกต้อง', 400);
+    const deletedByUserId = req.user?.userId;
+    const deleterRole = req.user?.role;
+    const deleterBranchId = req.user?.branchId;
+
+    if (deletedByUserId === undefined || deleterRole === undefined) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้ กรุณา login ใหม่', 401);
     }
 
-    const { deletedByUserId, deleterRole, deleterBranchId, deleteReason } = req.body;
-
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!deletedByUserId) {
-      return sendError(res, 'กรุณาระบุ deletedByUserId (ผู้ลบ)', 400);
-    }
-
-    if (!deleterRole || !['ADMIN', 'SUPERADMIN'].includes(deleterRole)) {
-      return sendError(res, 'กรุณาระบุ deleterRole ที่ถูกต้อง (ADMIN หรือ SUPERADMIN)', 400);
-    }
-
+    const { deleteReason } = req.body as { deleteReason?: string };
     if (!deleteReason || deleteReason.trim().length === 0) {
       return sendError(res, 'กรุณาระบุเหตุผลในการลบ (deleteReason)', 400);
     }
 
-    // เรียก service
-    await shiftService.deleteShift(
-      shiftId, 
-      parseInt(deletedByUserId), 
-      deleterRole,
-      deleterBranchId ? parseInt(deleterBranchId) : undefined,
-      deleteReason
-    );
+    await shiftService.deleteShift(shiftId, deletedByUserId, deleterRole, deleterBranchId, deleteReason);
 
-    // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Delete สำเร็จ
     broadcastShiftUpdate('DELETE', { shiftId, deleteReason });
-
     sendSuccess(res, null, 'ลบกะเรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการลบกะ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบกะ');
   }
 };
 

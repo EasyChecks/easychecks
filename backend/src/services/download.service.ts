@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import type { User as PrismaUser, Role } from '@prisma/client';
+import type { Role } from '@prisma/client';
 import { generateExcel } from '../utils/excel.generator.js';
 import { generatePDF } from '../utils/pdf.generator.js';
 
@@ -40,7 +40,7 @@ export interface DownloadQuery {
  */
 export async function downloadReport(
   user: User,
-  query: any
+  query: DownloadQuery
 ): Promise<{
   buffer: Buffer;
   fileName: string;
@@ -60,28 +60,28 @@ export async function downloadReport(
   let buffer: Buffer;
 
   switch (type) {
-    case 'attendance':
-      ({ buffer, fileName } = await downloadAttendanceReport(
-        user,
-        format,
-        startDate,
-        endDate,
-        branchId
-      ));
-      break;
+  case 'attendance':
+    ({ buffer, fileName } = await downloadAttendanceReport(
+      user,
+      format,
+      startDate,
+      endDate,
+      branchId
+    ));
+    break;
 
-    case 'shift':
-      ({ buffer, fileName } = await downloadShiftReport(
-        user,
-        format,
-        startDate,
-        endDate,
-        branchId
-      ));
-      break;
+  case 'shift':
+    ({ buffer, fileName } = await downloadShiftReport(
+      user,
+      format,
+      startDate,
+      endDate,
+      branchId
+    ));
+    break;
 
-    default:
-      throw new Error('Invalid report type');
+  default:
+    throw new Error('Invalid report type');
   }
 
   // บันทึก log
@@ -129,8 +129,8 @@ async function downloadAttendanceReport(
         user: branchId
           ? { branchId }
           : user.role === 'ADMIN'
-          ? { branchId: user.branchId }
-          : {},
+            ? { branchId: user.branchId }
+            : {},
         checkIn: {
           gte: startDate || new Date(new Date().getFullYear(), 0, 1),
           lte: endDate || new Date(),
@@ -152,7 +152,7 @@ async function downloadAttendanceReport(
     console.log(`✓ Found ${attendances.length} attendance records`);
 
     // จัดรูปแบบข้อมูลให้เป็นตารางที่เม่าเอกสาร (Excel/PDF)
-    const data = attendances.map((att: any) => ({
+    const data: Record<string, unknown>[] = attendances.map((att) => ({
       'Employee ID': att.user.employeeId,
       'Name': `${att.user.firstName} ${att.user.lastName}`,
       'Check In': new Date(att.checkIn).toLocaleString('th-TH'),
@@ -171,13 +171,14 @@ async function downloadAttendanceReport(
         fileName,
         sheetName: 'Attendance Report',
         title: 'Attendance Report',
-        columns: [
+        columns:  [
           { header: 'Employee ID', key: 'Employee ID', width: 12 },
           { header: 'Name', key: 'Name', width: 20 },
           { header: 'Check In', key: 'Check In', width: 18 },
           { header: 'Check Out', key: 'Check Out', width: 18 },
           { header: 'Status', key: 'Status', width: 12 },
           { header: 'Late Minutes', key: 'Late Minutes', width: 12 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ] as any,
         data,
       });
@@ -223,8 +224,8 @@ async function downloadShiftReport(
         user: branchId
           ? { branchId }
           : user.role === 'ADMIN'
-          ? { branchId: user.branchId }
-          : {},
+            ? { branchId: user.branchId }
+            : {},
         createdAt: {
           gte: startDate || new Date(new Date().getFullYear(), 0, 1),
           lte: endDate || new Date(),
@@ -247,7 +248,7 @@ async function downloadShiftReport(
     console.log(`✓ Found ${shifts.length} shift records`);
 
     // แปลงข้อมูลให้พร้อม export
-    const data = shifts.map((shift: any) => ({
+    const data: Record<string, unknown>[] = shifts.map((shift) => ({
       'Employee ID': shift.user.employeeId,
       'Name': `${shift.user.firstName} ${shift.user.lastName}`,
       'Shift Name': shift.name,
@@ -275,6 +276,7 @@ async function downloadShiftReport(
           { header: 'Start Time', key: 'Start Time', width: 12 },
           { header: 'End Time', key: 'End Time', width: 12 },
           { header: 'Active', key: 'Active', width: 10 },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ] as any,
         data,
       });

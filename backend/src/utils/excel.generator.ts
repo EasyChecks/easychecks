@@ -10,10 +10,10 @@ import ExcelJS from 'exceljs';
  */
 
 export interface ExcelOptions {
-  fileName: string;
+  fileName?: string;
   sheetName: string;
-  columns: ExcelJS.Column[];
-  data: any[];
+  columns: unknown[];
+  data: Record<string, unknown>[];
   title?: string;
   autoFilter?: boolean;
   freezePane?: boolean;
@@ -29,12 +29,10 @@ export interface ExcelOptions {
  */
 export async function generateExcel(options: ExcelOptions): Promise<Buffer> {
   const {
-    fileName,
     sheetName,
     columns,
     data,
     title,
-    autoFilter = true,
     freezePane = true,
   } = options;
 

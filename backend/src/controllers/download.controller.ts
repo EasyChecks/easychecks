@@ -95,13 +95,13 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
      *   AND (endDate IS NULL OR createdDate <= endDate)
      *   AND (branchId IS NULL OR branchId = ?)
      */
-    const downloadQuery: any = {
+    const downloadQuery = {
       type: type as 'attendance' | 'shift',
       format: format as 'excel' | 'pdf',
+      ...(startDate && { startDate: new Date(startDate as string) }),
+      ...(endDate && { endDate: new Date(endDate as string) }),
+      ...(branchId && { branchId: parseInt(branchId as string) }),
     };
-    if (startDate) downloadQuery.startDate = new Date(startDate as string);
-    if (endDate) downloadQuery.endDate = new Date(endDate as string);
-    if (branchId) downloadQuery.branchId = parseInt(branchId as string);
 
     /**
      * เรียก service เพื่อสร้างไฟล์

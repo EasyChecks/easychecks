@@ -15,8 +15,9 @@ import {
   Map as MapIcon,
   Satellite
 } from "lucide-react";
-import { useAuth, useLocations, useEvents, usersData, type User, type Location } from "@/contexts/mock-contexts";
-import "leaflet/dist/leaflet.css";
+import { useAuth } from "@/contexts/AuthContext";
+import { useLocations, useEvents, usersData, type User, type Location } from "@/contexts/mock-contexts";
+import type L from "leaflet";
 
 // Dynamic import for Map components (client-side only)
 const MapContainer = dynamic(
@@ -39,6 +40,18 @@ const Popup = dynamic(
   () => import("react-leaflet").then((mod) => mod.Popup),
   { ssr: false }
 );
+
+// Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
+if (typeof window !== "undefined") {
+  import("leaflet").then((L) => {
+    delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+      iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+      shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+    });
+  });
+}
 
 // Types
 interface BranchOption {
@@ -98,7 +111,6 @@ export default function AdminDashboard() {
   // States
   const [selectedBranch, setSelectedBranch] = useState(user?.role === 'admin' ? (user?.branch || user?.provinceCode || 'all') : "all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
-  const [expandedLocationIds, setExpandedLocationIds] = useState<string[]>([]);
   const mapRef = useRef<L.Map | null>(null);
   
   // Modal states
@@ -120,8 +132,8 @@ export default function AdminDashboard() {
   ];
 
   // Get filtered locations and events
-  const allLocations = getFilteredLocations(user);
-  const allEvents = getFilteredEvents(user);
+  const allLocations = getFilteredLocations(user as unknown as User | null);
+  const allEvents = getFilteredEvents(user as unknown as User | null);
   
   const locations = useMemo(() => {
     if (user?.role !== "superadmin" || selectedBranch === "all") {
@@ -336,15 +348,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const toggleLocationDetails = (locationId: string) => {
-    const wasExpanded = expandedLocationIds.includes(locationId);
-    if (wasExpanded) {
-      setExpandedLocationIds(prev => prev.filter(id => id !== locationId));
-    } else {
-      setExpandedLocationIds(prev => [...prev, locationId]);
-    }
-  };
-
   const getTileLayerUrl = () => {
     if (mapType === "satellite") {
       return "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -390,7 +393,7 @@ export default function AdminDashboard() {
                       className="bg-secondaryMain rounded-lg p-4 border-2 border-borderMain hover:border-primaryMain transition-colors"
                     >
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-primaryMain rounded-full flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
+                        <div className="w-12 h-12 bg-primaryMain rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0">
                           {index + 1}
                         </div>
                         <div className="flex-1">
@@ -425,7 +428,7 @@ export default function AdminDashboard() {
               <select
                 value={selectedBranch}
                 onChange={(e) => setSelectedBranch(e.target.value)}
-                className="appearance-none px-4 py-2.5 pr-10 border-2 border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain focus:border-accentMain focus:ring-2 focus:ring-accentMain/20 transition-all outline-none cursor-pointer bg-white min-w-[200px]"
+                className="appearance-none px-4 py-2.5 pr-10 border-2 border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain focus:border-accentMain focus:ring-2 focus:ring-accentMain/20 transition-all outline-none cursor-pointer bg-white min-w-50"
               >
                 {branchOptions.map((branch) => (
                   <option key={branch.code} value={branch.code}>
@@ -581,7 +584,7 @@ export default function AdminDashboard() {
           <CardContent>
             <div className="flex flex-col md:flex-row items-center gap-8">
               {/* Donut Chart */}
-              <div className="w-full md:w-1/2 h-[300px]">
+              <div className="w-full md:w-1/2 h-75">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -593,7 +596,7 @@ export default function AdminDashboard() {
                       paddingAngle={5}
                       dataKey="value"
                       label={({ name, percent }) => 
-                        `${name} ${(percent * 100).toFixed(0)}%`
+                        `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
                       }
                     >
                       {donutChartData.map((entry, index) => (
@@ -705,7 +708,7 @@ export default function AdminDashboard() {
 
             {/* Map */}
             {typeof window !== 'undefined' && filteredLocations.length > 0 && (
-              <div className="h-[500px] rounded-lg overflow-hidden border border-borderMain">
+              <div className="h-125 rounded-lg overflow-hidden border border-borderMain">
                 <MapContainer
                   center={[filteredLocations[0].latitude, filteredLocations[0].longitude]}
                   zoom={13}

@@ -1,7 +1,7 @@
 // Mock Contexts สำหรับ Dashboard
 "use client";
 
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext } from "react";
 
 interface User {
   id: number;
@@ -118,7 +118,7 @@ export function useLocations() {
   if (!context) {
     // Mock locations for development
     return {
-      getFilteredLocations: () => [
+      getFilteredLocations: (): Location[] => [
         {
           id: "loc-1",
           name: "สำนักงานใหญ่ กรุงเทพ",
@@ -166,7 +166,7 @@ export function useEvents() {
   if (!context) {
     // Mock events for development
     return {
-      getFilteredEvents: () => [
+      getFilteredEvents: (): Event[] => [
         {
           id: "evt-1",
           name: "ประชุมใหญ่ประจำปี",
@@ -202,12 +202,12 @@ export function useEvents() {
 }
 
 // Mock usersData
-export const usersData = [
+export const usersData: User[] = [
   {
     id: 1,
     name: "สมชาย ใจดี",
     email: "somchai@example.com",
-    role: "user" as const,
+    role: "user",
     department: "การตลาด",
     position: "พนักงาน",
     branchCode: "101",
@@ -218,7 +218,7 @@ export const usersData = [
     id: 2,
     name: "วิภา สุขใจ",
     email: "wipa@example.com",
-    role: "user" as const,
+    role: "user",
     department: "ขาย",
     position: "หัวหน้าทีม",
     branchCode: "101",
@@ -229,7 +229,7 @@ export const usersData = [
     id: 3,
     name: "ชัยวัฒน์ รักดี",
     email: "chaiwat@example.com",
-    role: "user" as const,
+    role: "user",
     department: "IT",
     position: "นักพัฒนา",
     branchCode: "201",

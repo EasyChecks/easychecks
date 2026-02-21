@@ -149,7 +149,7 @@ export const authService = {
       const newAccessToken = crypto.randomBytes(32).toString('hex');
 
       // 3. อัพเดท database
-      const updatedSession = await prisma.session.update({
+      await prisma.session.update({
         where: { id: session.id },
         data: {
           token: newAccessToken,
@@ -186,7 +186,7 @@ export const authService = {
         where: { token }
       });
       return { success: true };
-    } catch (error) {
+    } catch (_error) {
       throw new Error('ไม่สามารถ logout ได้');
     }
   },

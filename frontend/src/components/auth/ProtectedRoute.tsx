@@ -57,6 +57,17 @@ export default function ProtectedRoute({
 
   // Check authentication
   if (requireAuth && !isAuthenticated) {
+    // If sessionStorage has authUser, wait briefly for state to sync instead of redirecting
+    if (typeof window !== 'undefined' && sessionStorage.getItem('authUser')) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-gray-600 font-medium">กำลังโหลด...</p>
+          </div>
+        </div>
+      );
+    }
     return null; // Will redirect in useEffect
   }
 

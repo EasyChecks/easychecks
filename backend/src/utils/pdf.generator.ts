@@ -46,7 +46,7 @@ export function generatePDF(options: PDFOptions): Promise<Buffer> {
       const doc = new PDFDocument({
         size: pageSize,
         margin: 20,
-      } as PDFKit.PDFDocumentOptions);
+      });
 
       /**
        * Collect chunks เพื่อ concatenate เป็น single Buffer

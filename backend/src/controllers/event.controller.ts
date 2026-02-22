@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { EventUserActions, EventAdminActions } from '../services/event.service.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import type { EventParticipantType } from '@prisma/client';
+import { sendSuccess } from '../utils/response.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { UnauthorizedError, BadRequestError, NotFoundError } from '../utils/custom-errors.js';
 
@@ -76,7 +77,7 @@ export const createEvent = asyncHandler(async (req: Request, res: Response) => {
  */
 export const getAllEvents = asyncHandler(async (req: Request, res: Response) => {
   const search = req.query.search as string | undefined;
-  const participantType = req.query.participantType as any;
+  const participantType = req.query.participantType as EventParticipantType | undefined;
   const isActive =
     req.query.isActive !== undefined
       ? req.query.isActive === 'true'

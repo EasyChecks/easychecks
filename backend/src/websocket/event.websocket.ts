@@ -14,11 +14,13 @@ interface EventNotificationMessage {
   eventId: number;
 }
 
+type EventAction = 'created' | 'updated' | 'deleted' | 'participant-joined' | 'participant-left';
+
 interface EventUpdateMessage {
   type: 'event-update';
   eventId: number;
-  action: 'created' | 'updated' | 'deleted' | 'participant-joined' | 'participant-left';
-  data: any;
+  action: EventAction;
+  data: unknown;
 }
 
 interface ErrorResponse {
@@ -30,7 +32,7 @@ interface ErrorResponse {
 interface SuccessResponse {
   type: 'success';
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 // Store active subscriptions
@@ -93,24 +95,24 @@ export function setupEventWebSocket(server: Server) {
         const message = JSON.parse(data.toString());
         
         switch (message.type) {
-          case 'subscribe-event':
-            await handleEventSubscription(ws, message as EventNotificationMessage);
-            break;
+        case 'subscribe-event':
+          await handleEventSubscription(ws, message as EventNotificationMessage);
+          break;
             
-          case 'unsubscribe-event':
-            await handleEventUnsubscription(ws, message);
-            break;
+        case 'unsubscribe-event':
+          await handleEventUnsubscription(ws, message);
+          break;
             
-          case 'ping':
-            ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
-            break;
+        case 'ping':
+          ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+          break;
             
-          default:
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: `Unknown message type: ${message.type}`,
-              code: 'UNKNOWN_TYPE'
-            } as ErrorResponse));
+        default:
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Unknown message type: ${message.type}`,
+            code: 'UNKNOWN_TYPE'
+          } as ErrorResponse));
         }
       } catch (error) {
         console.error('❌ Error processing event message:', error);
@@ -168,23 +170,23 @@ async function handleEventSubscription(ws: AuthenticatedWebSocket, message: Even
 
     ws.send(JSON.stringify({
       type: 'success',
-      message: `Subscribed to event: ${event.eventName}`,
-      data: { eventId, eventName: event.eventName }
+      message: `Subscribed to event: ${event.event_name}`,
+      data: { eventId, eventName: event.event_name }
     } as SuccessResponse));
 
     console.log(`✅ User ${ws.employeeId} subscribed to event ${eventId}`);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Event subscription error:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: error.message || 'Failed to subscribe to event',
+      message: error instanceof Error ? error.message : 'Failed to subscribe to event',
       code: 'SUBSCRIPTION_FAILED'
     } as ErrorResponse));
   }
 }
 
-async function handleEventUnsubscription(ws: AuthenticatedWebSocket, message: any) {
+async function handleEventUnsubscription(ws: AuthenticatedWebSocket, message: { eventId: number }) {
   try {
     const { eventId } = message;
 
@@ -209,11 +211,11 @@ async function handleEventUnsubscription(ws: AuthenticatedWebSocket, message: an
 
     console.log(`✅ User ${ws.employeeId} unsubscribed from event ${eventId}`);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Event unsubscription error:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: error.message || 'Failed to unsubscribe from event',
+      message: error instanceof Error ? error.message : 'Failed to unsubscribe from event',
       code: 'UNSUBSCRIPTION_FAILED'
     } as ErrorResponse));
   }
@@ -223,7 +225,7 @@ async function handleEventUnsubscription(ws: AuthenticatedWebSocket, message: an
  * Broadcast event updates to all subscribers
  * Usage: broadcastEventUpdate(eventId, 'created', eventData)
  */
-export function broadcastEventUpdate(eventId: number, action: string, data: any) {
+export function broadcastEventUpdate(eventId: number, action: EventAction, data: unknown) {
   const subscribers = eventSubscriptions.get(eventId);
   
   if (!subscribers || subscribers.size === 0) {
@@ -233,7 +235,7 @@ export function broadcastEventUpdate(eventId: number, action: string, data: any)
   const message: EventUpdateMessage = {
     type: 'event-update',
     eventId,
-    action: action as any,
+    action,
     data
   };
 
@@ -249,7 +251,7 @@ export function broadcastEventUpdate(eventId: number, action: string, data: any)
 /**
  * Broadcast to all admins connected to event WebSocket
  */
-export function broadcastToEventAdmins(message: any) {
+export function broadcastToEventAdmins(message: unknown) {
   let adminCount = 0;
 
   for (const subscribers of eventSubscriptions.values()) {

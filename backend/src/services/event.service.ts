@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import type { Event, EventParticipantType, Role } from '@prisma/client';
+import type { events, EventParticipantType, Role } from '@prisma/client';
 import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
@@ -65,7 +65,7 @@ export interface SearchEventParams {
  * 💡 เหตุผล: ต้องตรวจสอบสถานที่และวันเวลาก่อนเพื่อป้องกันการสร้างกิจกรรมที่ไม่สมบูรณ์
  *            แยกการเพิ่มผู้เข้าร่วมออกมาเพราะมีหลายประเภท (ALL, INDIVIDUAL, BRANCH, ROLE)
  */
-async function createEvent(data: CreateEventDTO): Promise<Event> {
+async function createEvent(data: CreateEventDTO): Promise<events> {
   // 🔍 ตรวจสอบว่าสถานที่มีอยู่จริงและยังไม่ถูกลบ
   // เพราะต้องการป้องกันการสร้างกิจกรรมในสถานที่ที่ไม่มีหรือถูกลบแล้ว
   // SQL: SELECT * FROM Location WHERE locationId = ? AND deletedAt IS NULL
@@ -160,6 +160,7 @@ async function addEventParticipants(
     roles?: Role[];
   }
 ) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const participantsToCreate: any[] = [];
 
   if (participantType === 'INDIVIDUAL' && participants.userIds) {
@@ -232,11 +233,12 @@ async function addEventParticipants(
  *            กรอง deletedAt: null เพื่อไม่แสดงที่ถูก soft delete
  */
 async function getAllEvents(params: SearchEventParams): Promise<{
-  data: Event[];
+  data: events[];
   total: number;
   active: number;
   inactive: number;
 }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {
     deletedAt: null, // 🚫 กรองเฉพาะที่ยังไม่ถูก soft delete (deletedAt IS NULL)
   };
@@ -326,7 +328,7 @@ async function getAllEvents(params: SearchEventParams): Promise<{
 /**
  * ดึงกิจกรรมด้วย ID พร้อมรายชื่อผู้เข้าร่วม
  */
-async function getEventById(eventId: number): Promise<Event | null> {
+async function getEventById(eventId: number): Promise<events | null> {
   const event = await prisma.event.findUnique({
     where: { eventId },
     include: {
@@ -390,7 +392,7 @@ async function getEventById(eventId: number): Promise<Event | null> {
 async function updateEvent(
   eventId: number,
   data: UpdateEventDTO
-): Promise<Event> {
+): Promise<events> {
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -481,7 +483,7 @@ async function updateEvent(
 async function deleteEvent(
   eventId: number,
   data: DeleteEventDTO
-): Promise<Event> {
+): Promise<events> {
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -542,7 +544,7 @@ async function deleteEvent(
 /**
  * กู้คืนกิจกรรมที่ถูกลบ
  */
-async function restoreEvent(eventId: number, restoredByUserId?: number): Promise<Event> {
+async function restoreEvent(eventId: number, restoredByUserId?: number): Promise<events> {
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -595,7 +597,7 @@ async function restoreEvent(eventId: number, restoredByUserId?: number): Promise
  *            ใช้ OR conditions เพื่อครอบคลุมทั้ง 4 ประเภท (ALL, INDIVIDUAL, BRANCH, ROLE)
  *            กรองเฉพาะกิจกรรมที่ยังไม่สิ้นสุด (endDateTime >= now)
  */
-async function getMyEvents(userId: number): Promise<Event[]> {
+async function getMyEvents(userId: number): Promise<events[]> {
   // 🔎 ดึงข้อมูล branch และ role ของผู้ใช้ก่อนเพื่อสร้าง where condition
   // จำเป็นเพราะใช้ในการกรอง participantType BRANCH และ ROLE
   // SQL: SELECT branchId, role FROM User WHERE userId = ?

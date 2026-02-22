@@ -101,7 +101,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
           <div className="flex items-center justify-between">
             {!sidebarCollapsed && (
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center shadow-md">
+                <div className="w-10 h-10 bg-linear-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center shadow-md">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -145,7 +145,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
                     href={item.href}
                     className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                       isActive
-                        ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-md'
+                        ? 'bg-linear-to-r from-orange-500 to-orange-600 text-white shadow-md'
                         : 'text-gray-700 hover:bg-gray-100'
                     } ${sidebarCollapsed ? 'justify-center' : ''}`}
                     title={sidebarCollapsed ? item.name : ''}
@@ -165,8 +165,8 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         <div className="p-4 border-t border-gray-200">
           {!sidebarCollapsed ? (
             <div className="space-y-3">
-              <div className="flex items-center gap-3 p-4 bg-gradient-to-br from-orange-50 to-orange-100/50 rounded-2xl border border-orange-200/50">
-                <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold shadow-md text-xl shrink-0">
+              <div className="flex items-center gap-3 p-4 bg-linear-to-br from-orange-50 to-orange-100/50 rounded-2xl border border-orange-200/50">
+                <div className="w-12 h-12 bg-linear-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold shadow-md text-xl shrink-0">
                   {user?.name?.charAt(0) || 'A'}
                 </div>
                 <div className="flex-1 min-w-0">

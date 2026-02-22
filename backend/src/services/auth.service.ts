@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma.js';
+import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
  * 🧠 AUTH SERVICE - Database Session with Refresh Token
@@ -53,7 +54,7 @@ export const authService = {
         }
       });
 
-      return {
+      const result = {
         accessToken: session.token,
         refreshToken: session.refreshToken,
         expiresIn: Math.floor(ACCESS_TOKEN_EXPIRY / 1000), // seconds
@@ -67,6 +68,18 @@ export const authService = {
           avatarUrl: user.avatarUrl
         }
       };
+
+      await createAuditLog({
+        userId: user.userId,
+        action: AuditAction.LOGIN,
+        targetTable: 'users',
+        targetId: user.userId,
+        ipAddress,
+        userAgent,
+        newValues: { employeeId: user.employeeId, role: user.role },
+      });
+
+      return result;
     } catch (error: any) {
       console.error('❌ Login service error:', error.message);
       throw error;
@@ -149,7 +162,7 @@ export const authService = {
       const newAccessToken = crypto.randomBytes(32).toString('hex');
 
       // 3. อัพเดท database
-      const updatedSession = await prisma.session.update({
+      await prisma.session.update({
         where: { id: session.id },
         data: {
           token: newAccessToken,
@@ -182,11 +195,27 @@ export const authService = {
    */
   async logout(token: string) {
     try {
+      const session = await prisma.session.findUnique({
+        where: { token },
+      });
+
+      if (!session) {
+        throw new Error('ไม่สามารถ logout ได้');
+      }
+
       await prisma.session.delete({
         where: { token }
       });
+
+      await createAuditLog({
+        userId: session.userId,
+        action: AuditAction.LOGOUT,
+        targetTable: 'users',
+        targetId: session.userId,
+      });
+
       return { success: true };
-    } catch (error) {
+    } catch (_error) {
       throw new Error('ไม่สามารถ logout ได้');
     }
   },
@@ -223,6 +252,13 @@ export const authService = {
       // 5. ลบ session เก่าทั้งหมด (บังคับ login ใหม่)
       await prisma.session.deleteMany({
         where: { userId }
+      });
+
+      await createAuditLog({
+        userId,
+        action: AuditAction.CHANGE_PASSWORD,
+        targetTable: 'users',
+        targetId: userId,
       });
 
       return { success: true };

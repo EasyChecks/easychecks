@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import type { Location, LocationType } from '@prisma/client';
+import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
  * Location Service - จัดการสถานที่/แผนที่
@@ -85,7 +86,7 @@ async function createLocation(data: CreateLocationDTO): Promise<Location> {
     throw new Error('รัศมีต้องมากกว่า 0 เมตร');
   }
 
-  return prisma.location.create({
+  const createdLocation = await prisma.location.create({
     data: {
       userId: data.userId,
       locationName: data.locationName,
@@ -108,6 +109,16 @@ async function createLocation(data: CreateLocationDTO): Promise<Location> {
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.userId,
+    action: AuditAction.CREATE_LOCATION,
+    targetTable: 'locations',
+    targetId: createdLocation.locationId,
+    newValues: { locationName: createdLocation.locationName, locationType: createdLocation.locationType, latitude: createdLocation.latitude, longitude: createdLocation.longitude, radius: createdLocation.radius },
+  });
+
+  return createdLocation;
 }
 
 /**
@@ -326,7 +337,7 @@ async function updateLocation(
     throw new Error('รัศมีต้องมากกว่า 0 เมตร');
   }
 
-  return prisma.location.update({
+  const updatedLocation = await prisma.location.update({
     where: { locationId },
     data: {
       locationName: data.locationName,
@@ -357,6 +368,17 @@ async function updateLocation(
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.updatedByUserId,
+    action: AuditAction.UPDATE_LOCATION,
+    targetTable: 'locations',
+    targetId: locationId,
+    oldValues: { locationName: location.locationName, isActive: location.isActive, latitude: location.latitude, longitude: location.longitude, radius: location.radius },
+    newValues: { locationName: updatedLocation.locationName, isActive: updatedLocation.isActive, latitude: updatedLocation.latitude, longitude: updatedLocation.longitude, radius: updatedLocation.radius },
+  });
+
+  return updatedLocation;
 }
 
 /**
@@ -392,7 +414,7 @@ async function deleteLocation(
     );
   }
 
-  return prisma.location.update({
+  const deletedLocation = await prisma.location.update({
     where: { locationId },
     data: {
       deletedAt: new Date(),
@@ -417,12 +439,23 @@ async function deleteLocation(
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.deletedByUserId,
+    action: AuditAction.DELETE_LOCATION,
+    targetTable: 'locations',
+    targetId: locationId,
+    oldValues: { locationName: location.locationName, isActive: location.isActive },
+    newValues: { deletedAt: new Date(), deleteReason: data.deleteReason },
+  });
+
+  return deletedLocation;
 }
 
 /**
  * กู้คืนสถานที่ที่ถูกลบ
  */
-async function restoreLocation(locationId: number): Promise<Location> {
+async function restoreLocation(locationId: number, restoredByUserId?: number): Promise<Location> {
   const location = await prisma.location.findUnique({
     where: { locationId },
   });
@@ -435,7 +468,7 @@ async function restoreLocation(locationId: number): Promise<Location> {
     throw new Error('สถานที่นี้ยังไม่ถูกลบ');
   }
 
-  return prisma.location.update({
+  const restoredLocation = await prisma.location.update({
     where: { locationId },
     data: {
       deletedAt: null,
@@ -452,6 +485,17 @@ async function restoreLocation(locationId: number): Promise<Location> {
       },
     },
   });
+
+  await createAuditLog({
+    userId: restoredByUserId,
+    action: AuditAction.RESTORE_LOCATION,
+    targetTable: 'locations',
+    targetId: locationId,
+    oldValues: { deletedAt: location.deletedAt, deleteReason: location.deleteReason },
+    newValues: { deletedAt: null },
+  });
+
+  return restoredLocation;
 }
 
 /**

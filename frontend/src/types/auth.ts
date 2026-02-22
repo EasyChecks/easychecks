@@ -30,7 +30,7 @@ export interface LoginCredentials {
 export interface AuthContextType {
   user: AuthUser | null;
   isAuthenticated: boolean;
-  login: (credentials: LoginCredentials) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<UserRole>;
   logout: () => void;
   isLoading: boolean;
   error: string | null;

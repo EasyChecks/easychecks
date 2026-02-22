@@ -234,6 +234,7 @@ export const deleteEvent = asyncHandler(async (req: Request, res: Response) => {
  * กู้คืนกิจกรรมที่ถูกลบ (Admin only)
  */
 export const restoreEvent = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
   const { id } = req.params;
   const eventId = parseInt(Array.isArray(id) ? id[0] : id);
 
@@ -247,7 +248,7 @@ export const restoreEvent = asyncHandler(async (req: Request, res: Response) => 
     throw new NotFoundError('ไม่พบกิจกรรม');
   }
 
-  const restoredEvent = await EventAdminActions.restoreEvent(eventId);
+  const restoredEvent = await EventAdminActions.restoreEvent(eventId, userId);
 
   sendSuccess(res, restoredEvent, 'กู้คืนกิจกรรมเรียบร้อยแล้ว');
 });

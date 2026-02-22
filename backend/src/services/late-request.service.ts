@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import type { LateRequest, ApprovalStatus } from '@prisma/client';
 import { differenceInMinutes, parse, format } from 'date-fns';
+import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
  * Late Request Service - จัดการการขอมาสาย
@@ -116,8 +117,7 @@ async function createLateRequest(
   }
 
   // 📝 บันทึกคำขอมาสายลงฐานข้อมูล สถานะเริ่มต้นเป็น PENDING
-  // SQL: INSERT INTO LateRequest (...) VALUES (...)
-  return prisma.lateRequest.create({
+  const newLateRequest = await prisma.lateRequest.create({
     data: {
       userId: data.userId,
       attendanceId: data.attendanceId,
@@ -130,6 +130,16 @@ async function createLateRequest(
       status: 'PENDING',
     },
   });
+
+  await createAuditLog({
+    userId: data.userId,
+    action: AuditAction.CREATE_LATE_REQUEST,
+    targetTable: 'late_requests',
+    targetId: newLateRequest.lateRequestId,
+    newValues: { requestDate: data.requestDate, scheduledTime: data.scheduledTime, actualTime: data.actualTime, lateMinutes, reason: data.reason },
+  });
+
+  return newLateRequest;
 }
 
 /**
@@ -247,7 +257,7 @@ async function updateLateRequest(
     throw new Error('เวลามาถึงต้องมากกว่าเวลาที่กำหนด');
   }
 
-  return prisma.lateRequest.update({
+  const updatedLateRequest = await prisma.lateRequest.update({
     where: { lateRequestId },
     data: {
       requestDate: data.requestDate ? new Date(data.requestDate) : undefined,
@@ -259,6 +269,17 @@ async function updateLateRequest(
       updatedAt: new Date(),
     },
   });
+
+  await createAuditLog({
+    userId: lateRequest.userId,
+    action: AuditAction.UPDATE_LATE_REQUEST,
+    targetTable: 'late_requests',
+    targetId: lateRequestId,
+    oldValues: { scheduledTime: lateRequest.scheduledTime, actualTime: lateRequest.actualTime, lateMinutes: lateRequest.lateMinutes, reason: lateRequest.reason },
+    newValues: { scheduledTime, actualTime, lateMinutes, reason: data.reason },
+  });
+
+  return updatedLateRequest;
 }
 
 /**
@@ -277,9 +298,19 @@ async function deleteLateRequest(lateRequestId: number): Promise<LateRequest> {
     throw new Error('สามารถลบได้เฉพาะคำขอที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
 
-  return prisma.lateRequest.delete({
+  const deletedLateRequest = await prisma.lateRequest.delete({
     where: { lateRequestId },
   });
+
+  await createAuditLog({
+    userId: lateRequest.userId,
+    action: AuditAction.DELETE_LATE_REQUEST,
+    targetTable: 'late_requests',
+    targetId: lateRequestId,
+    oldValues: { requestDate: lateRequest.requestDate, scheduledTime: lateRequest.scheduledTime, actualTime: lateRequest.actualTime, reason: lateRequest.reason, status: lateRequest.status },
+  });
+
+  return deletedLateRequest;
 }
 
 /**
@@ -389,7 +420,7 @@ async function approveLateRequest(
     throw new Error('ไม่สามารถอนุมัติคำขอที่มีสถานะอื่นได้');
   }
 
-  return prisma.lateRequest.update({
+  const approvedRequest = await prisma.lateRequest.update({
     where: { lateRequestId },
     data: {
       status: 'APPROVED',
@@ -399,6 +430,17 @@ async function approveLateRequest(
       updatedAt: new Date(),
     },
   });
+
+  await createAuditLog({
+    userId: data.approvedByUserId,
+    action: AuditAction.APPROVE_LATE_REQUEST,
+    targetTable: 'late_requests',
+    targetId: lateRequestId,
+    oldValues: { status: lateRequest.status },
+    newValues: { status: 'APPROVED', adminComment: data.adminComment },
+  });
+
+  return approvedRequest;
 }
 
 /**
@@ -420,7 +462,7 @@ async function rejectLateRequest(
     throw new Error('ไม่สามารถปฏิเสธคำขอที่มีสถานะอื่นได้');
   }
 
-  return prisma.lateRequest.update({
+  const rejectedRequest = await prisma.lateRequest.update({
     where: { lateRequestId },
     data: {
       status: 'REJECTED',
@@ -430,6 +472,17 @@ async function rejectLateRequest(
       updatedAt: new Date(),
     },
   });
+
+  await createAuditLog({
+    userId: data.approvedByUserId,
+    action: AuditAction.REJECT_LATE_REQUEST,
+    targetTable: 'late_requests',
+    targetId: lateRequestId,
+    oldValues: { status: lateRequest.status },
+    newValues: { status: 'REJECTED', rejectionReason: data.rejectionReason },
+  });
+
+  return rejectedRequest;
 }
 
 // ========================================================================================

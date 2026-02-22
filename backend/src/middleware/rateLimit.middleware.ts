@@ -71,7 +71,7 @@ export function loginAttemptMiddleware(req: Request, res: Response, next: NextFu
         console.warn(`🔒 Login locked for ${employeeId}`);
         res.status(429).json({
           success: false,
-          error: `บัญชีถูกล็อค เนื่องจากพยายาม login ล้มเหลวหลายครั้ง`,
+          error: 'บัญชีถูกล็อค เนื่องจากพยายาม login ล้มเหลวหลายครั้ง',
           retryAfter: Math.ceil((attemptData.resetTime - now) / 1000)
         });
         return;

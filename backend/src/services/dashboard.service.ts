@@ -145,10 +145,10 @@ export async function getEmployeesToday(user: User, branchId?: number) {
     }),
     checkOut: att.checkOut
       ? att.checkOut.toLocaleTimeString('th-TH', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
       : null,
     lateMinutes: att.lateMinutes || 0,
   }));
@@ -344,8 +344,8 @@ export async function getBranchStats(user: User, branchId?: number) {
     attendanceRate:
       branch._count.users > 0
         ? Math.round(
-            ((attendances.length / branch._count.users) * 100 * 100) / 100
-          )
+          ((attendances.length / branch._count.users) * 100 * 100) / 100
+        )
         : 0,
   };
 

@@ -11,9 +11,9 @@ import PDFDocument from 'pdfkit';
 
 export interface PDFOptions {
   title: string;
-  fileName: string;
+  fileName?: string;
   columns: string[];
-  data: any[];
+  data: Record<string, unknown>[];
   pageSize?: 'A4' | 'A3' | 'LETTER';
   landscape?: boolean;
 }
@@ -34,7 +34,6 @@ export function generatePDF(options: PDFOptions): Promise<Buffer> {
         columns,
         data,
         pageSize = 'A4',
-        landscape = true,
       } = options;
 
       /**
@@ -47,7 +46,7 @@ export function generatePDF(options: PDFOptions): Promise<Buffer> {
       const doc = new PDFDocument({
         size: pageSize,
         margin: 20,
-      } as any);
+      } as PDFKit.PDFDocumentOptions);
 
       /**
        * Collect chunks เพื่อ concatenate เป็น single Buffer

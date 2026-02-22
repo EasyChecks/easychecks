@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import type { Event, EventParticipantType, Role } from '@prisma/client';
+import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
  * Event Service - จัดการกิจกรรม/อีเวนต์
@@ -127,6 +128,14 @@ async function createEvent(data: CreateEventDTO): Promise<Event> {
   if (data.participantType !== 'ALL' && data.participants) {
     await addEventParticipants(event.eventId, data.participantType, data.participants);
   }
+
+  await createAuditLog({
+    userId: data.userId,
+    action: AuditAction.CREATE_EVENT,
+    targetTable: 'events',
+    targetId: event.eventId,
+    newValues: { eventName: event.eventName, locationId: event.locationId, participantType: event.participantType, startDateTime: event.startDateTime, endDateTime: event.endDateTime },
+  });
 
   return event;
 }
@@ -423,7 +432,7 @@ async function updateEvent(
     }
   }
 
-  return prisma.event.update({
+  const updatedEvent = await prisma.event.update({
     where: { eventId },
     data: {
       eventName: data.eventName,
@@ -453,6 +462,17 @@ async function updateEvent(
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.updatedByUserId,
+    action: AuditAction.UPDATE_EVENT,
+    targetTable: 'events',
+    targetId: eventId,
+    oldValues: { eventName: event.eventName, isActive: event.isActive, startDateTime: event.startDateTime, endDateTime: event.endDateTime },
+    newValues: { eventName: updatedEvent.eventName, isActive: updatedEvent.isActive, startDateTime: updatedEvent.startDateTime, endDateTime: updatedEvent.endDateTime },
+  });
+
+  return updatedEvent;
 }
 
 /**
@@ -480,7 +500,7 @@ async function deleteEvent(
     throw new Error('ไม่สามารถลบกิจกรรมที่กำลังดำเนินการอยู่');
   }
 
-  return prisma.event.update({
+  const deletedEvent = await prisma.event.update({
     where: { eventId },
     data: {
       deletedAt: new Date(),
@@ -506,12 +526,23 @@ async function deleteEvent(
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.deletedByUserId,
+    action: AuditAction.DELETE_EVENT,
+    targetTable: 'events',
+    targetId: eventId,
+    oldValues: { eventName: event.eventName, isActive: event.isActive },
+    newValues: { deletedAt: new Date(), deleteReason: data.deleteReason },
+  });
+
+  return deletedEvent;
 }
 
 /**
  * กู้คืนกิจกรรมที่ถูกลบ
  */
-async function restoreEvent(eventId: number): Promise<Event> {
+async function restoreEvent(eventId: number, restoredByUserId?: number): Promise<Event> {
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -524,7 +555,7 @@ async function restoreEvent(eventId: number): Promise<Event> {
     throw new Error('กิจกรรมนี้ยังไม่ถูกลบ');
   }
 
-  return prisma.event.update({
+  const restoredEvent = await prisma.event.update({
     where: { eventId },
     data: {
       deletedAt: null,
@@ -542,6 +573,17 @@ async function restoreEvent(eventId: number): Promise<Event> {
       },
     },
   });
+
+  await createAuditLog({
+    userId: restoredByUserId,
+    action: AuditAction.RESTORE_EVENT,
+    targetTable: 'events',
+    targetId: eventId,
+    oldValues: { deletedAt: event.deletedAt, deleteReason: event.deleteReason },
+    newValues: { deletedAt: null },
+  });
+
+  return restoredEvent;
 }
 
 /**

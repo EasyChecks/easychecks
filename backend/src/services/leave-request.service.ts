@@ -1,6 +1,7 @@
 import { prisma } from '../lib/prisma.js';
 import type { LeaveRequest, LeaveStatus, LeaveType, Gender } from '@prisma/client';
 import { differenceInBusinessDays, parseISO, format, isWeekend, startOfYear, endOfYear } from 'date-fns';
+import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
  * Leave Request Service - จัดการใบลา
@@ -362,7 +363,7 @@ async function createLeaveRequest(
   // Calculate paid days
   const paidDays = calculatePaidDays(data.leaveType, numberOfDays);
 
-  return prisma.leaveRequest.create({
+  const newLeaveRequest = await prisma.leaveRequest.create({
     data: {
       userId: data.userId,
       leaveType: data.leaveType,
@@ -395,6 +396,16 @@ async function createLeaveRequest(
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.userId,
+    action: AuditAction.CREATE_LEAVE,
+    targetTable: 'leave_requests',
+    targetId: newLeaveRequest.leaveId,
+    newValues: { leaveType: data.leaveType, startDate, endDate, numberOfDays, paidDays, reason: data.reason },
+  });
+
+  return newLeaveRequest;
 }
 
 /**
@@ -527,7 +538,7 @@ async function updateLeaveRequest(
   const leaveType = data.leaveType || leaveRequest.leaveType;
   const paidDays = calculatePaidDays(leaveType, numberOfDays);
 
-  return prisma.leaveRequest.update({
+  const updatedLeave = await prisma.leaveRequest.update({
     where: { leaveId },
     data: {
       ...(data.leaveType && { leaveType: data.leaveType }),
@@ -560,6 +571,17 @@ async function updateLeaveRequest(
       },
     },
   });
+
+  await createAuditLog({
+    userId: leaveRequest.userId,
+    action: AuditAction.UPDATE_LEAVE,
+    targetTable: 'leave_requests',
+    targetId: leaveId,
+    oldValues: { leaveType: leaveRequest.leaveType, startDate: leaveRequest.startDate, endDate: leaveRequest.endDate, reason: leaveRequest.reason },
+    newValues: { leaveType: updatedLeave.leaveType, startDate: updatedLeave.startDate, endDate: updatedLeave.endDate, reason: updatedLeave.reason },
+  });
+
+  return updatedLeave;
 }
 
 /**
@@ -578,9 +600,19 @@ async function deleteLeaveRequest(leaveId: number): Promise<LeaveRequest> {
     throw new Error('สามารถลบได้เฉพาะใบลาที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
 
-  return prisma.leaveRequest.delete({
+  const deletedLeave = await prisma.leaveRequest.delete({
     where: { leaveId },
   });
+
+  await createAuditLog({
+    userId: leaveRequest.userId,
+    action: AuditAction.DELETE_LEAVE,
+    targetTable: 'leave_requests',
+    targetId: leaveId,
+    oldValues: { leaveType: leaveRequest.leaveType, startDate: leaveRequest.startDate, endDate: leaveRequest.endDate, status: leaveRequest.status },
+  });
+
+  return deletedLeave;
 }
 
 /**
@@ -690,7 +722,7 @@ async function approveLeaveRequest(
     throw new Error('ไม่สามารถอนุมัติใบลาที่มีสถานะอื่นได้');
   }
 
-  return prisma.leaveRequest.update({
+  const approvedLeave = await prisma.leaveRequest.update({
     where: { leaveId },
     data: {
       status: 'APPROVED',
@@ -718,6 +750,17 @@ async function approveLeaveRequest(
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.approvedByUserId,
+    action: AuditAction.APPROVE_LEAVE,
+    targetTable: 'leave_requests',
+    targetId: leaveId,
+    oldValues: { status: leaveRequest.status },
+    newValues: { status: 'APPROVED', adminComment: data.adminComment },
+  });
+
+  return approvedLeave;
 }
 
 /**
@@ -739,7 +782,7 @@ async function rejectLeaveRequest(
     throw new Error('ไม่สามารถปฏิเสธใบลาที่มีสถานะอื่นได้');
   }
 
-  return prisma.leaveRequest.update({
+  const rejectedLeave = await prisma.leaveRequest.update({
     where: { leaveId },
     data: {
       status: 'REJECTED',
@@ -767,6 +810,17 @@ async function rejectLeaveRequest(
       },
     },
   });
+
+  await createAuditLog({
+    userId: data.approvedByUserId,
+    action: AuditAction.REJECT_LEAVE,
+    targetTable: 'leave_requests',
+    targetId: leaveId,
+    oldValues: { status: leaveRequest.status },
+    newValues: { status: 'REJECTED', rejectionReason: data.rejectionReason },
+  });
+
+  return rejectedLeave;
 }
 
 // ========================================================================================

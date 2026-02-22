@@ -227,6 +227,7 @@ export const deleteLocation = asyncHandler(async (req: Request, res: Response) =
  * กู้คืนสถานที่ที่ถูกลบ (Admin only)
  */
 export const restoreLocation = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
   const { id } = req.params;
   const locationId = parseInt(Array.isArray(id) ? id[0] : id);
 
@@ -240,7 +241,7 @@ export const restoreLocation = asyncHandler(async (req: Request, res: Response) 
     throw new NotFoundError('ไม่พบสถานที่');
   }
 
-  const restoredLocation = await LocationAdminActions.restoreLocation(locationId);
+  const restoredLocation = await LocationAdminActions.restoreLocation(locationId, userId);
 
   sendSuccess(res, restoredLocation, 'กู้คืนสถานที่เรียบร้อยแล้ว');
 });

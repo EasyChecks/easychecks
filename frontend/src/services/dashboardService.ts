@@ -1,0 +1,112 @@
+/**
+ * dashboardService.ts
+ * ─────────────────────────────────────────
+ * HTTP client สำหรับ Dashboard API
+ * Base URL: /api/dashboard
+ * สิทธิ์: ADMIN / SUPERADMIN เท่านั้น
+ */
+
+import api from './api';
+
+// ── Types (ตรงกับ backend response) ──
+
+export interface AttendanceSummary {
+  onTime: number;
+  late: number;
+  absent: number;
+  total: number;
+}
+
+export interface EmployeeToday {
+  employeeId: string;
+  name: string;
+  branch: string;
+  status: 'ON_TIME' | 'LATE' | 'ABSENT';
+  checkIn: string | null;
+  checkOut: string | null;
+  lateMinutes: number;
+}
+
+export interface BranchMapItem {
+  branchId: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  totalEmployees: number;
+  address: string;
+}
+
+export interface LocationEvent {
+  eventId: number;
+  employeeName: string;
+  checkInTime: string;
+  expectedLocation: string;
+  actualDistance: number;
+  allowedRadius: number;
+  timestamp: string;
+}
+
+export interface BranchStats {
+  branchId: number;
+  name: string;
+  totalEmployees: number;
+  presentToday: number;
+  lateToday: number;
+  absentToday: number;
+  attendanceRate: number;
+}
+
+// ── Service Methods ──
+
+export const dashboardService = {
+  /**
+   * GET /api/dashboard/attendance-summary
+   * สรุป attendance วันนี้ (Donut Chart)
+   */
+  async getAttendanceSummary(branchId?: number): Promise<AttendanceSummary> {
+    const params = branchId ? { branchId } : {};
+    const res = await api.get('/dashboard/attendance-summary', { params });
+    return res.data.data;
+  },
+
+  /**
+   * GET /api/dashboard/employees-today
+   * รายชื่อพนักงานพร้อมสถานะวันนี้ (Table)
+   */
+  async getEmployeesToday(branchId?: number): Promise<{ data: EmployeeToday[]; total: number }> {
+    const params = branchId ? { branchId } : {};
+    const res = await api.get('/dashboard/employees-today', { params });
+    return { data: res.data.data, total: res.data.total };
+  },
+
+  /**
+   * GET /api/dashboard/branches-map
+   * ข้อมูลสาขาพร้อม lat/lng (Map Pins)
+   */
+  async getBranchesMap(): Promise<{ data: BranchMapItem[]; total: number }> {
+    const res = await api.get('/dashboard/branches-map');
+    return { data: res.data.data, total: res.data.total };
+  },
+
+  /**
+   * GET /api/dashboard/location-events
+   * พนักงานที่ check-in นอกพื้นที่ (Alert List)
+   */
+  async getLocationEvents(branchId?: number): Promise<{ data: LocationEvent[]; total: number }> {
+    const params = branchId ? { branchId } : {};
+    const res = await api.get('/dashboard/location-events', { params });
+    return { data: res.data.data, total: res.data.total };
+  },
+
+  /**
+   * GET /api/dashboard/branch-stats
+   * สถิติ KPI ของสาขา (Stats Cards)
+   */
+  async getBranchStats(branchId?: number): Promise<BranchStats> {
+    const params = branchId ? { branchId } : {};
+    const res = await api.get('/dashboard/branch-stats', { params });
+    return res.data.data;
+  },
+};
+
+export default dashboardService;

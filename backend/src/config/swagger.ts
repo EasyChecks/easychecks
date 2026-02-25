@@ -379,6 +379,233 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+
+        // ──────────────────────────────────────────────
+        // Auth Schemas
+        // ──────────────────────────────────────────────
+        LoginRequest: {
+          type: 'object',
+          required: ['employeeId', 'password'],
+          properties: {
+            employeeId: {
+              type: 'string',
+              example: 'BKK001',
+              description: 'รหัสพนักงาน เช่น BKK001, CNX002',
+            },
+            password: {
+              type: 'string',
+              example: '1234567890123',
+              description: 'รหัสผ่าน (nationalId เริ่มต้น หรือรหัสที่เปลี่ยนแล้ว)',
+            },
+          },
+        },
+        LoginResponse: {
+          type: 'object',
+          properties: {
+            accessToken: {
+              type: 'string',
+              description: 'JWT Access Token (อายุ 15 นาที)',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+            },
+            refreshToken: {
+              type: 'string',
+              description: 'Refresh Token (อายุ 7 วัน)',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+            },
+            user: {
+              $ref: '#/components/schemas/UserProfile',
+            },
+          },
+        },
+
+        // ──────────────────────────────────────────────
+        // User Schemas
+        // ──────────────────────────────────────────────
+        UserProfile: {
+          type: 'object',
+          description: 'ข้อมูลพนักงานที่ใช้แสดงใน UI',
+          properties: {
+            userId: { type: 'integer', example: 5 },
+            employeeId: {
+              type: 'string',
+              example: 'BKK001',
+              description: 'รหัสพนักงาน auto-generate',
+            },
+            title: {
+              type: 'string',
+              enum: ['MR', 'MRS', 'MISS'],
+              example: 'MR',
+            },
+            firstName: { type: 'string', example: 'สมชาย' },
+            lastName: { type: 'string', example: 'ใจดี' },
+            nickname: { type: 'string', nullable: true, example: 'ชาย' },
+            gender: {
+              type: 'string',
+              enum: ['MALE', 'FEMALE'],
+              example: 'MALE',
+            },
+            phone: { type: 'string', example: '0898765432' },
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'somchai@example.com',
+            },
+            birthDate: {
+              type: 'string',
+              format: 'date',
+              example: '1990-01-15',
+            },
+            role: {
+              type: 'string',
+              enum: ['USER', 'MANAGER', 'ADMIN', 'SUPERADMIN'],
+              example: 'USER',
+            },
+            status: {
+              type: 'string',
+              enum: ['ACTIVE', 'INACTIVE', 'RESIGNED'],
+              example: 'ACTIVE',
+            },
+            branchId: { type: 'integer', example: 1 },
+            avatarUrl: {
+              type: 'string',
+              nullable: true,
+              example:
+                'https://xxx.supabase.co/storage/v1/object/public/avatars/male-1.png',
+            },
+            emergent_tel: { type: 'string', example: '0812345678' },
+            emergent_first_name: { type: 'string', example: 'สมหญิง' },
+            emergent_last_name: { type: 'string', example: 'ใจดี' },
+            emergent_relation: { type: 'string', example: 'ภรรยา' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        CreateUserRequest: {
+          type: 'object',
+          required: [
+            'createdByUserId', 'creatorRole',
+            'title', 'firstName', 'lastName', 'gender', 'nationalId',
+            'emergent_tel', 'emergent_first_name', 'emergent_last_name',
+            'emergent_relation', 'phone', 'email', 'password',
+            'birthDate', 'branchId',
+          ],
+          properties: {
+            createdByUserId: {
+              type: 'integer',
+              example: 1,
+              description: 'รหัส Admin ที่สร้าง (audit log)',
+            },
+            creatorRole: {
+              type: 'string',
+              enum: ['ADMIN', 'SUPERADMIN'],
+              example: 'ADMIN',
+            },
+            creatorBranchId: {
+              type: 'integer',
+              nullable: true,
+              example: 1,
+              description: 'สาขาของ Admin (จำเป็นถ้า creatorRole=ADMIN)',
+            },
+            title: {
+              type: 'string',
+              enum: ['MR', 'MRS', 'MISS'],
+              example: 'MR',
+            },
+            firstName: { type: 'string', example: 'สมชาย' },
+            lastName: { type: 'string', example: 'ใจดี' },
+            nickname: { type: 'string', nullable: true, example: 'ชาย' },
+            gender: {
+              type: 'string',
+              enum: ['MALE', 'FEMALE'],
+              example: 'MALE',
+            },
+            nationalId: {
+              type: 'string',
+              example: '1234567890123',
+              description: 'เลขบัตรประชาชน 13 หลัก (ใช้เป็นรหัสผ่านเริ่มต้น)',
+            },
+            emergent_tel: { type: 'string', example: '0812345678' },
+            emergent_first_name: { type: 'string', example: 'สมหญิง' },
+            emergent_last_name: { type: 'string', example: 'ใจดี' },
+            emergent_relation: { type: 'string', example: 'ภรรยา' },
+            phone: { type: 'string', example: '0898765432' },
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'somchai@example.com',
+            },
+            password: {
+              type: 'string',
+              example: '1234567890123',
+              description: 'รหัสผ่านเริ่มต้น',
+            },
+            birthDate: {
+              type: 'string',
+              format: 'date',
+              example: '1990-01-15',
+            },
+            branchId: {
+              type: 'integer',
+              example: 1,
+              description: 'สาขาที่พนักงานสังกัด (ใช้ generate employeeId)',
+            },
+            role: {
+              type: 'string',
+              enum: ['USER', 'MANAGER', 'ADMIN', 'SUPERADMIN'],
+              default: 'USER',
+              example: 'USER',
+            },
+          },
+        },
+        UpdateUserRequest: {
+          type: 'object',
+          required: ['updatedByUserId', 'updaterRole'],
+          properties: {
+            updatedByUserId: {
+              type: 'integer',
+              example: 1,
+              description: 'รหัส Admin ที่แก้ไข (audit log)',
+            },
+            updaterRole: {
+              type: 'string',
+              enum: ['ADMIN', 'SUPERADMIN'],
+              example: 'ADMIN',
+            },
+            updaterBranchId: {
+              type: 'integer',
+              nullable: true,
+              example: 1,
+            },
+            firstName: { type: 'string', example: 'สมชาย' },
+            lastName: { type: 'string', example: 'ใจดี' },
+            nickname: { type: 'string', example: 'ชาย' },
+            phone: { type: 'string', example: '0898765432' },
+            email: { type: 'string', format: 'email', example: 'new@example.com' },
+            birthDate: { type: 'string', format: 'date', example: '1990-01-15' },
+            branchId: { type: 'integer', example: 2 },
+            role: {
+              type: 'string',
+              enum: ['USER', 'MANAGER', 'ADMIN', 'SUPERADMIN'],
+              example: 'MANAGER',
+            },
+            status: {
+              type: 'string',
+              enum: ['ACTIVE', 'INACTIVE', 'RESIGNED'],
+              example: 'ACTIVE',
+            },
+            nationalId: { type: 'string', example: '1234567890123' },
+            emergent_tel: { type: 'string', example: '0812345678' },
+            emergent_first_name: { type: 'string', example: 'สมหญิง' },
+            emergent_last_name: { type: 'string', example: 'ใจดี' },
+            emergent_relation: { type: 'string', example: 'ภรรยา' },
+            avatarGender: {
+              type: 'string',
+              enum: ['male', 'female'],
+              example: 'male',
+              description: 'เปลี่ยน avatar',
+            },
+          },
+        },
       },
     },
     security: [

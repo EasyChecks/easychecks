@@ -14,7 +14,7 @@ COPY prisma ./prisma/
 RUN npm install --legacy-peer-deps
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3001
 
 # Start development server with hot reload
 CMD ["npm", "run", "dev"]

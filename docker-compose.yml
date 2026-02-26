@@ -8,16 +8,14 @@ services:
     container_name: easycheck-backend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3001"
     env_file:
       - ./backend/.env
     environment:
       NODE_ENV: development
-      PORT: 3000
+      PORT: 3001
     volumes:
-      # Mount source code for hot reload
       - ./backend:/app
-      # Use anonymous volume to prevent node_modules from showing red in VS Code
       - /app/node_modules
     networks:
       - easycheck-network
@@ -28,14 +26,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    # image=
     image: easycheck-frontend:dev
     container_name: easycheck-frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "3000:3000"
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000/api}
+      # when running via docker-compose use internal network name
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     volumes:
       # Mount source code for hot reload
       - ./frontend:/app

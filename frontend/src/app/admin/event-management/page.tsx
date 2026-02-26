@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useMemo, useCallback, Suspense } from 'react';
+import { useState, useMemo, useCallback, useEffect, Suspense } from 'react';
 import dynamic from 'next/dynamic';
-import { useEvents, useLocations } from '@/contexts/mock-contexts';
-import { EventData, DialogState } from '@/types/event';
+import eventService, { EventItem as ApiEventItem } from '@/services/eventService';
+import locationService, { LocationItem } from '@/services/locationService';
+import { EventData, LocationData, DialogState } from '@/types/event';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,9 +26,68 @@ const EventMap = dynamic(() => import('@/components/admin/EventMap'), {
 const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
 const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
 
+// ── Helpers: map API types → UI types ──
+const apiEventToEventData = (e: ApiEventItem): EventData => ({
+  id: String(e.eventId),
+  name: e.eventName,
+  date: e.startDateTime ? e.startDateTime.split('T')[0] : '',
+  description: e.description,
+  locationName: e.location?.locationName || '',
+  radius: e.location?.radius,
+  latitude: e.location?.latitude ?? 13.7563,
+  longitude: e.location?.longitude ?? 100.5018,
+  startTime: e.startDateTime
+    ? new Date(e.startDateTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false })
+    : '',
+  endTime: e.endDateTime
+    ? new Date(e.endDateTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false })
+    : '',
+  teams: '',
+  status: new Date(e.endDateTime) < new Date() ? 'completed' : 'ongoing',
+  createdAt: e.createdAt,
+});
+
+const apiLocationToLocationData = (loc: LocationItem): LocationData => ({
+  id: String(loc.locationId),
+  locationName: loc.locationName,
+  latitude: loc.latitude,
+  longitude: loc.longitude,
+  radius: loc.radius,
+  createdAt: loc.createdAt,
+});
+
+// Build ISO datetime string from date + time strings (local time)
+const toISO = (date: string, time: string) => {
+  if (!date) return new Date().toISOString();
+  const [h = '08', m = '00'] = (time || '08:00').split(':');
+  const d = new Date(`${date}T${h}:${m}:00`);
+  return d.toISOString();
+};
+
 export default function EventManagement() {
-  const { events, addEvent, updateEvent, deleteEvent } = useEvents();
-  const { locations } = useLocations();
+  // ── API data state ──
+  const [events, setEvents] = useState<EventData[]>([]);
+  const [locations, setLocations] = useState<LocationData[]>([]);
+  const [isLoadingPage, setIsLoadingPage] = useState(true);
+
+  // ── Fetch events + locations on mount ──
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [eventsResp, locsResp] = await Promise.all([
+          eventService.getAll({ take: 100 }),
+          locationService.getAll(),
+        ]);
+        setEvents(eventsResp.data.map(apiEventToEventData));
+        setLocations(locsResp.map(apiLocationToLocationData));
+      } catch (err) {
+        console.error('[EventManagement] load error:', err);
+      } finally {
+        setIsLoadingPage(false);
+      }
+    };
+    load();
+  }, []);
 
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -118,87 +178,73 @@ export default function EventManagement() {
     }
   }, [editingEventId]);
 
-  const handleAddEvent = useCallback(() => {
-    if (!formData.name || !formData.date || !formData.locationName) {
+  const handleAddEvent = useCallback(async () => {
+    if (!formData.name || !formData.date) {
       setAlertDialog({
         isOpen: true,
         type: 'error',
         title: 'ข้อมูลไม่ครบ',
-        message: 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน (ชื่อกิจกรรม, วันที่, สถานที่)'
+        message: 'กรุณากรอกชื่อกิจกรรมและวันที่'
       });
       return;
     }
 
-    const newEvent: EventData = {
-      id: `event-${Date.now()}`,
-      name: formData.name,
-      date: formData.date,
-      description: formData.description,
-      locationName: formData.locationName,
-      radius: formData.radius ? parseInt(formData.radius) : undefined,
-      latitude: parseFloat(formData.latitude) || 13.7563,
-      longitude: parseFloat(formData.longitude) || 100.5018,
-      startTime: formData.startTime,
-      endTime: formData.endTime,
-      teams: formData.teams,
-      status: formData.status,
-      createdAt: new Date().toISOString()
-    };
+    try {
+      // 1. Create location first
+      const newLoc = await locationService.create({
+        locationName: formData.locationName || 'ไม่ระบุสถานที่',
+        address:      formData.locationName || '',
+        latitude:     parseFloat(formData.latitude)  || 13.7563,
+        longitude:    parseFloat(formData.longitude) || 100.5018,
+        radius:       parseInt(formData.radius)      || 100,
+      });
 
-    addEvent(newEvent);
+      // 2. Create event
+      const created = await eventService.create({
+        eventName:       formData.name,
+        description:     formData.description || undefined,
+        locationId:      newLoc.locationId,
+        startDateTime:   toISO(formData.date, formData.startTime),
+        endDateTime:     toISO(formData.date, formData.endTime),
+        participantType: 'ALL',
+      });
 
-    setAlertDialog({
-      isOpen: true,
-      type: 'success',
-      title: 'สำเร็จ!',
-      message: 'เพิ่มกิจกรรมใหม่เรียบร้อยแล้ว'
-    });
-
-    // Reset form
-    setFormData({
-      name: '',
-      date: '',
-      description: '',
-      locationName: '',
-      radius: '',
-      latitude: '',
-      longitude: '',
-      startTime: '',
-      endTime: '',
-      teams: '',
-      status: 'ongoing'
-    });
-    setIsAddingEvent(false);
-  }, [formData, addEvent]);
+      setEvents(prev => [apiEventToEventData(created), ...prev]);
+      setAlertDialog({ isOpen: true, type: 'success', title: 'สำเร็จ!', message: 'เพิ่มกิจกรรมใหม่เรียบร้อยแล้ว' });
+      setFormData({ name:'', date:'', description:'', locationName:'', radius:'', latitude:'', longitude:'', startTime:'', endTime:'', teams:'', status:'ongoing' });
+      setIsAddingEvent(false);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setAlertDialog({ isOpen: true, type: 'error', title: 'ผิดพลาด', message: e.response?.data?.error || 'เวลาสร้างกิจกรรมล้มเหลว' });
+    }
+  }, [formData]);
 
   const handleEditEvent = useCallback((event: EventData) => {
     setEditingEventId(event.id);
     setEditFormData({ ...event });
   }, []);
 
-  const handleSaveEdit = useCallback(() => {
-    if (!editFormData.name || !editFormData.date || !editFormData.locationName) {
-      setAlertDialog({
-        isOpen: true,
-        type: 'error',
-        title: 'ข้อมูลไม่ครบ',
-        message: 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน'
-      });
+  const handleSaveEdit = useCallback(async () => {
+    if (!editFormData.name || !editFormData.date) {
+      setAlertDialog({ isOpen: true, type: 'error', title: 'ข้อมูลไม่ครบ', message: 'กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน' });
       return;
     }
-
-    updateEvent(editingEventId!, editFormData as EventData);
-
-    setAlertDialog({
-      isOpen: true,
-      type: 'success',
-      title: 'บันทึกสำเร็จ',
-      message: 'แก้ไขข้อมูลกิจกรรมเรียบร้อยแล้ว'
-    });
-
-    setEditingEventId(null);
-    setEditFormData({});
-  }, [editFormData, editingEventId, updateEvent]);
+    try {
+      const updated = await eventService.update(parseInt(editingEventId!), {
+        eventName:     editFormData.name,
+        description:   editFormData.description,
+        startDateTime: toISO(editFormData.date!, editFormData.startTime || ''),
+        endDateTime:   toISO(editFormData.date!, editFormData.endTime   || ''),
+      });
+      setEvents(prev => prev.map(e => e.id === editingEventId ? apiEventToEventData(updated) : e));
+      setAlertDialog({ isOpen: true, type: 'success', title: 'บันทึกสำเร็จ', message: 'แก้ไขข้อมูลกิจกรรมเรียบร้อยแล้ว' });
+      setEditingEventId(null);
+      setEditFormData({});
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setAlertDialog({ isOpen: true, type: 'error', title: 'ผิดพลาด', message: e.response?.data?.error || 'เวลาแก้ไขล้มเหลว' });
+    }
+  }, [editFormData, editingEventId]);
 
   const handleCancelEdit = useCallback(() => {
     setEditingEventId(null);
@@ -209,20 +255,21 @@ export default function EventManagement() {
     setConfirmDialog({
       isOpen: true,
       title: 'ยืนยันการลบ',
-      message: `คุณแน่ใจหรือไม่ที่จะลบกิจกรรม "${event.name}"? การดำเนินการนี้ไม่สามารถย้อนกลับได้`,
-      onConfirm: () => {
-        deleteEvent(event.id);
-        setAlertDialog({
-          isOpen: true,
-          type: 'success',
-         title: 'ลบสำเร็จ',
-          message: 'ลบกิจกรรมเรียบร้อยแล้ว'
-        });
+      message: `คุณแน่ใจหรือไม่ที่จะลบกิจกรรม "${event.name}"?`,
+      onConfirm: async () => {
+        try {
+          await eventService.delete(parseInt(event.id), 'ลบโดยผู้ดูแลระบบ');
+          setEvents(prev => prev.filter(e => e.id !== event.id));
+          setAlertDialog({ isOpen: true, type: 'success', title: 'ลบสำเร็จ', message: 'ลบกิจกรรมเรียบร้อยแล้ว' });
+        } catch (err: unknown) {
+          const e = err as { response?: { data?: { error?: string } } };
+          setAlertDialog({ isOpen: true, type: 'error', title: 'ผิดพลาด', message: e.response?.data?.error || 'ไม่สามารถลบกิจกรรมนี้ได้' });
+        }
         setConfirmDialog({ isOpen: false });
       },
       onCancel: () => setConfirmDialog({ isOpen: false })
     });
-  }, [deleteEvent]);
+  }, []);
 
   const formatDateDisplay = useCallback((dateStr: string): string => {
     if (!dateStr) return '';
@@ -237,6 +284,17 @@ export default function EventManagement() {
   const getStatusVariant = useCallback((status: string): "active" | "suspend" | "default" => {
     return status === 'ongoing' ? 'active' : 'suspend';
   }, []);
+
+  if (isLoadingPage) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="text-center">
+          <div className="w-12 h-12 mx-auto mb-4 border-b-2 border-orange-600 rounded-full animate-spin" />
+          <p className="text-gray-500">กำลังโหลดข้อมูล...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen p-4 bg-slate-50 sm:p-6">

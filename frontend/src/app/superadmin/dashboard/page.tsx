@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useCallback, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +16,9 @@ import {
   Satellite
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLocations, useEvents, usersData, type User, type Location } from "@/contexts/mock-contexts";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem } from "@/services/dashboardService";
+import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
+import locationService, { LocationItem } from "@/services/locationService";
 import type L from "leaflet";
 
 // Dynamic import for Map components (client-side only)
@@ -44,7 +46,7 @@ const Popup = dynamic(
 // Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
 if (typeof window !== "undefined") {
   import("leaflet").then((L) => {
-    delete (L.Icon.Default.prototype as Record<string, unknown>)._getIconUrl;
+    delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
     L.Icon.Default.mergeOptions({
       iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
       iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
@@ -57,6 +59,16 @@ if (typeof window !== "undefined") {
 interface BranchOption {
   code: string;
   name: string;
+}
+
+interface User {
+  id: string;
+  name: string;
+  department: string;
+  position: string;
+  avatar: string;
+  time: string;
+  status: string;
 }
 
 interface AttendanceStats {
@@ -84,8 +96,16 @@ interface EventStats {
   lateEventUsers: User[];
 }
 
-interface LocationWithStatus extends Location {
+interface LocationWithStatus {
+  id: string;
+  name: string;
+  description?: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
   type: "mapping" | "event";
+  team: string;
+  time: string;
   checkInStatus: string;
   statusColor: string;
 }
@@ -105,196 +125,149 @@ const CHART_COLORS = {
 
 export default function AdminDashboard() {
   const { user } = useAuth();
-  const { getFilteredLocations } = useLocations();
-  const { getFilteredEvents } = useEvents();
-  
+
   // States
-  const [selectedBranch, setSelectedBranch] = useState(user?.role === 'admin' ? (user?.branch || user?.provinceCode || 'all') : "all");
+  const [selectedBranch, setSelectedBranch] = useState("all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
   const [expandedLocationIds, setExpandedLocationIds] = useState<string[]>([]);
   const mapRef = useRef<L.Map | null>(null);
-  
+
   // Modal states
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailType, setDetailType] = useState<DetailType | null>(null);
   const [detailUsers, setDetailUsers] = useState<User[]>([]);
-  
+
   // Map states
   const [searchQuery, setSearchQuery] = useState("");
   const [mapType, setMapType] = useState<MapType>("default");
   const [filterType, setFilterType] = useState<FilterType>("all");
-  
-  // Branch options
-  const branchOptions: BranchOption[] = [
+
+  // ── API Data states ──
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [employeesToday, setEmployeesToday] = useState<EmployeeToday[]>([]);
+  const [branchesMap, setBranchesMap] = useState<BranchMapItem[]>([]);
+  const [apiEvents, setApiEvents] = useState<ApiEventItem[]>([]);
+  const [apiLocations, setApiLocations] = useState<LocationItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Branch options: dynamic from API
+  const branchOptions: BranchOption[] = useMemo(() => [
     { code: "all", name: "สาขา: ทั้งหมด" },
-    { code: "BKK", name: "BKK (กรุงเทพ)" },
-    { code: "CNX", name: "CNX (เชียงใหม่)" },
-    { code: "PKT", name: "PKT (ภูเก็ต)" },
-  ];
+    ...branchesMap.map(b => ({ code: String(b.branchId), name: b.name })),
+  ], [branchesMap]);
 
-  // Get filtered locations and events
-  const allLocations = getFilteredLocations(user);
-  const allEvents = getFilteredEvents(user);
-  
-  const locations = useMemo(() => {
-    if (user?.role !== "superadmin" || selectedBranch === "all") {
-      return allLocations;
-    }
-    const branchPrefix = selectedBranch === "BKK" ? "1" : 
-                        selectedBranch === "CNX" ? "2" : 
-                        selectedBranch === "PKT" ? "3" : null;
-    
-    return allLocations.filter(loc => {
-      if (loc.createdBy?.branch === selectedBranch) return true;
-      if (branchPrefix && loc.createdBy?.branch?.startsWith(branchPrefix)) return true;
-      return loc.branchCode === selectedBranch || loc.provinceCode === selectedBranch;
-    });
-  }, [allLocations, selectedBranch, user?.role]);
-  
-  const events = useMemo(() => {
-    if (user?.role !== "superadmin" || selectedBranch === "all") {
-      return allEvents;
-    }
-    const branchPrefix = selectedBranch === "BKK" ? "1" : 
-                        selectedBranch === "CNX" ? "2" : 
-                        selectedBranch === "PKT" ? "3" : null;
-    
-    return allEvents.filter(evt => {
-      if (evt.createdBy?.branch === selectedBranch) return true;
-      if (branchPrefix && evt.createdBy?.branch?.startsWith(branchPrefix)) return true;
-      return evt.branchCode === selectedBranch || evt.provinceCode === selectedBranch;
-    });
-  }, [allEvents, selectedBranch, user?.role]);
+  // ── Fetch dashboard data when branch changes ──
+  useEffect(() => {
+    const branchIdNum =
+      selectedBranch !== "all" ? parseInt(selectedBranch, 10) : undefined;
 
-  // Calculate attendance stats
-  const calculateAttendanceStats = useCallback((branchFilter = "all"): AttendanceStats => {
-    const today = new Date();
-    const todayStr = `${today.getDate().toString().padStart(2, "0")}/${(today.getMonth() + 1).toString().padStart(2, "0")}/${today.getFullYear() + 543}`;
-    
-    const users = [...usersData];
-    
-    const branchPrefix = branchFilter === "BKK" ? "1" : 
-                        branchFilter === "CNX" ? "2" : 
-                        branchFilter === "PKT" ? "3" : null;
-    
-    const filteredUsers = users.filter(u => {
-      if (u.role === "admin" || u.role === "superadmin") return false;
-      if (branchFilter === "all") return true;
-      if (u.branchCode === branchFilter) return true;
-      if (branchPrefix && u.branchCode?.startsWith(branchPrefix)) return true;
-      return u.provinceCode === branchFilter;
-    });
-    
-    const absentUsers: User[] = [];
-    const leaveUsers: User[] = [];
-    const lateUsers: User[] = [];
-    const onTimeUsers: User[] = [];
-    
-    filteredUsers.forEach(user => {
-      const todayRecord = user.attendanceRecords?.find(r => r.date === todayStr);
-      
-      if (todayRecord && (todayRecord.status === "leave" || todayRecord.checkIn?.status === "leave")) {
-        leaveUsers.push(user);
-      } else if (!todayRecord || !todayRecord.checkIn) {
-        absentUsers.push(user);
-      } else {
-        const checkInStatus = todayRecord.checkIn.status;
-        if (checkInStatus === "มาสาย") {
-          lateUsers.push(user);
-        } else if (checkInStatus === "ตรงเวลา") {
-          onTimeUsers.push(user);
-        } else if (checkInStatus === "ขาด") {
-          absentUsers.push(user);
-        }
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        const [summary, employees, branches, eventsResp, locations] = await Promise.all([
+          dashboardService.getAttendanceSummary(branchIdNum),
+          dashboardService.getEmployeesToday(branchIdNum),
+          dashboardService.getBranchesMap(),
+          eventService.getAll({ take: 100 }),
+          locationService.getAll(),
+        ]);
+        setDashboardSummary(summary);
+        setEmployeesToday(employees.data);
+        setBranchesMap(branches.data);
+        setApiEvents(eventsResp.data);
+        setApiLocations(locations);
+      } catch (err) {
+        console.error('[Dashboard] Failed to fetch data:', err);
+      } finally {
+        setIsLoading(false);
       }
+    };
+
+    fetchData();
+  }, [selectedBranch]);
+
+  // ── Map API employees → AttendanceStats ──
+  const attendanceStats = useMemo((): AttendanceStats => {
+    const toUser = (e: EmployeeToday, idx: number): User => ({
+      id: String(e.employeeId || idx),
+      name: e.name,
+      department: e.branch || '',
+      position: '',
+      avatar: '',
+      time: e.checkIn || '',
+      status: e.status,
     });
-    
+    const absentUsers = employeesToday.filter(e => e.status === 'ABSENT').map(toUser);
+    const lateUsers   = employeesToday.filter(e => e.status === 'LATE').map(toUser);
+    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME').map(toUser);
     return {
-      totalEmployees: filteredUsers.length,
-      absentCount: absentUsers.length,
-      leaveCount: leaveUsers.length,
-      lateCount: lateUsers.length,
-      onTimeCount: onTimeUsers.length,
+      totalEmployees: dashboardSummary?.total ?? employeesToday.length,
+      absentCount:    dashboardSummary?.absent ?? absentUsers.length,
+      leaveCount:     0,
+      lateCount:      dashboardSummary?.late ?? lateUsers.length,
+      onTimeCount:    dashboardSummary?.onTime ?? onTimeUsers.length,
       absentUsers,
-      leaveUsers,
+      leaveUsers:     [],
       lateUsers,
       onTimeUsers,
     };
-  }, []);
+  }, [dashboardSummary, employeesToday]);
 
-  const attendanceStats = useMemo(() => {
-    const branchFilter = user?.role === "superadmin" ? selectedBranch : (user?.provinceCode || user?.branch || "all");
-    return calculateAttendanceStats(branchFilter);
-  }, [selectedBranch, user, calculateAttendanceStats]);
-
-  // Calculate event stats
-  const calculateEventStats = useCallback((branchFilter = "all"): EventStats => {
-    const today = new Date();
-    const todayStr = `${today.getDate().toString().padStart(2, "0")}/${(today.getMonth() + 1).toString().padStart(2, "0")}/${today.getFullYear()}`;
-    
-    const activeEvents = events.filter(e => e.status === "ongoing");
-    const todayEvents = events.filter(e => e.date === todayStr || e.startDate === todayStr);
-    const completedEvents = events.filter(e => e.status === "completed");
-    
-    const users = [...usersData];
-    const branchPrefix = branchFilter === "BKK" ? "1" : 
-                        branchFilter === "CNX" ? "2" : 
-                        branchFilter === "PKT" ? "3" : null;
-    
-    const filteredUsers = users.filter(u => {
-      if (u.role === "admin" || u.role === "superadmin") return false;
-      if (branchFilter === "all") return true;
-      if (u.branchCode === branchFilter) return true;
-      if (branchPrefix && u.branchCode?.startsWith(branchPrefix)) return true;
-      return u.provinceCode === branchFilter;
+  // ── Map API events → EventStats ──
+  const eventStats = useMemo((): EventStats => {
+    const now = new Date();
+    const activeEvts  = apiEvents.filter(e => e.isActive && new Date(e.startDateTime) <= now && new Date(e.endDateTime) >= now);
+    const todayEvts   = apiEvents.filter(e => {
+      const d = new Date(e.startDateTime);
+      return d.toDateString() === now.toDateString();
     });
-    
-    const notParticipatedUsers = filteredUsers.filter(u => u.id % 6 === 0).slice(0, 4);
-    const leaveEventUsers = filteredUsers.filter(u => u.id % 4 === 0 && u.id % 6 !== 0).slice(0, 5);
-    const lateEventUsers = filteredUsers.filter(u => u.id % 8 === 0 && u.id % 4 !== 0 && u.id % 6 !== 0).slice(0, 4);
-    
+    const completedEvts = apiEvents.filter(e => new Date(e.endDateTime) < now);
     return {
-      totalEvents: events.length,
-      activeEvents: activeEvents.length,
-      todayEvents: todayEvents.length,
-      completedEvents: completedEvents.length,
-      notParticipatedCount: notParticipatedUsers.length,
-      leaveEventCount: leaveEventUsers.length,
-      lateEventCount: lateEventUsers.length,
-      notParticipatedUsers,
-      leaveEventUsers,
-      lateEventUsers,
+      totalEvents:          apiEvents.length,
+      activeEvents:         activeEvts.length,
+      todayEvents:          todayEvts.length,
+      completedEvents:      completedEvts.length,
+      notParticipatedCount: 0,
+      leaveEventCount:      0,
+      lateEventCount:       0,
+      notParticipatedUsers: [],
+      leaveEventUsers:      [],
+      lateEventUsers:       [],
     };
-  }, [events]);
+  }, [apiEvents]);
 
-  const eventStats = useMemo(() => {
-    const branchFilter = user?.role === "superadmin" ? selectedBranch : (user?.provinceCode || user?.branch || "all");
-    return calculateEventStats(branchFilter);
-  }, [selectedBranch, user, calculateEventStats]);
-
-  // Combine locations
-  const mappingLocations: LocationWithStatus[] = locations.map((loc, index) => ({
-    ...loc,
+  // Combine locations from API data
+  const mappingLocations: LocationWithStatus[] = apiLocations.map((loc) => ({
+    id: String(loc.locationId),
+    name: loc.locationName,
+    description: loc.address,
+    latitude: loc.latitude,
+    longitude: loc.longitude,
+    radius: loc.radius,
     type: "mapping" as const,
-    team: loc.team || ["ทีมพัฒนา", "ทีมการตลาด", "ทีมปฏิบัติการ"][index % 3],
-    time: loc.time || ["09:15 น.", "09:32 น.", "08:45 น."][index % 3],
+    team: "",
+    time: "",
     checkInStatus: "พื้นที่อนุญาต",
     statusColor: "text-green-600",
   }));
 
-  const eventLocations: LocationWithStatus[] = events.map((evt) => ({
-    id: `event-${evt.id}`,
-    name: evt.locationName,
-    description: `งาน: ${evt.name}`,
-    latitude: evt.latitude,
-    longitude: evt.longitude,
-    radius: evt.radius,
-    type: "event" as const,
-    team: evt.teams ? evt.teams.join(", ") : "ไม่ระบุ",
-    time: evt.startTime || "ไม่ระบุ",
-    checkInStatus: "พื้นที่กิจกรรม",
-    statusColor: "text-orange-600",
-  }));
+  const eventLocations: LocationWithStatus[] = apiEvents
+    .filter(evt => evt.location?.latitude != null)
+    .map((evt) => ({
+      id: `event-${evt.eventId}`,
+      name: evt.location!.locationName,
+      description: `งาน: ${evt.eventName}`,
+      latitude: evt.location!.latitude,
+      longitude: evt.location!.longitude,
+      radius: evt.location!.radius,
+      type: "event" as const,
+      team: "",
+      time: evt.startDateTime
+        ? new Date(evt.startDateTime).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+        : "ไม่ระบุ",
+      checkInStatus: "พื้นที่กิจกรรม",
+      statusColor: "text-orange-600",
+    }));
 
   const locationsWithStatus = [...mappingLocations, ...eventLocations];
   
@@ -372,6 +345,17 @@ export default function AdminDashboard() {
     return '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-secondaryMain flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 mx-auto mb-4 border-b-2 border-orange-600 rounded-full animate-spin" />
+          <p className="text-gray-500">กำลังโหลดข้อมูล...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-secondaryMain">
       {/* Detail Modal */}
@@ -409,7 +393,7 @@ export default function AdminDashboard() {
                         <div className="flex-1">
                           <h3 className="font-bold text-primaryMain text-lg">{user.name}</h3>
                           <p className="text-sm text-textMain">{user.department} - {user.position}</p>
-                          {user.email && <p className="text-xs text-textMain/70 mt-1">{user.email}</p>}
+                          {user.time && <p className="text-xs text-textMain/70 mt-1">{user.time}</p>}
                         </div>
                       </div>
                     </div>
@@ -605,8 +589,8 @@ export default function AdminDashboard() {
                       outerRadius={100}
                       paddingAngle={5}
                       dataKey="value"
-                      label={({ name, percent }) => 
-                        `${name} ${(percent * 100).toFixed(0)}%`
+                      label={({ name, percent }: { name?: string; percent?: number }) => 
+                        `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`
                       }
                     >
                       {donutChartData.map((entry, index) => (

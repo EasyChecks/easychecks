@@ -1,26 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
-import api from '@/services/api';
-
-interface Event {
-  id: string;
-  title: string;
-  description: string | null;
-  location: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  radius: number;
-  startDate: string;
-  endDate: string;
-  createdAt: string;
-}
+import eventService, { EventItem } from '@/services/eventService';
 
 export default function UserEventsPage() {
   const { } = useAuth();
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,8 +17,8 @@ export default function UserEventsPage() {
   const fetchEvents = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/events');
-      setEvents(response.data);
+      const data = await eventService.getMy();
+      setEvents(data);
     } catch (error) {
       console.error('Failed to fetch events:', error);
     } finally {
@@ -47,10 +34,10 @@ export default function UserEventsPage() {
     });
   };
 
-  const isEventActive = (event: Event) => {
+  const isEventActive = (event: EventItem) => {
     const now = new Date();
-    const start = new Date(event.startDate);
-    const end = new Date(event.endDate);
+    const start = new Date(event.startDateTime);
+    const end = new Date(event.endDateTime);
     return now >= start && now <= end;
   };
 
@@ -95,14 +82,14 @@ export default function UserEventsPage() {
             const isActive = isEventActive(event);
             return (
               <Card
-                key={event.id}
+                key={event.eventId}
                 className={`p-4 ${isActive ? 'border-2 border-orange-500 bg-orange-50' : ''}`}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h3 className="text-lg font-semibold text-gray-800">
-                        {event.title}
+                        {event.eventName}
                       </h3>
                       {isActive && (
                         <span className="px-2 py-1 text-xs font-medium text-orange-700 bg-orange-200 rounded-full">
@@ -116,7 +103,7 @@ export default function UserEventsPage() {
                       </p>
                     )}
                     <div className="mt-3 space-y-1">
-                      {event.location && (
+                      {event.location?.locationName && (
                         <div className="flex items-center text-sm text-gray-600">
                           <svg
                             className="h-4 w-4 mr-2 text-gray-400"
@@ -137,7 +124,7 @@ export default function UserEventsPage() {
                               d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
                             />
                           </svg>
-                          {event.location}
+                          {event.location.locationName}
                         </div>
                       )}
                       <div className="flex items-center text-sm text-gray-600">
@@ -154,9 +141,9 @@ export default function UserEventsPage() {
                             d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
                           />
                         </svg>
-                        {formatDate(event.startDate)} - {formatDate(event.endDate)}
+                        {formatDate(event.startDateTime)} - {formatDate(event.endDateTime)}
                       </div>
-                      {event.latitude && event.longitude && (
+                      {event.location?.radius && (
                         <div className="flex items-center text-sm text-gray-600">
                           <svg
                             className="h-4 w-4 mr-2 text-gray-400"
@@ -171,7 +158,7 @@ export default function UserEventsPage() {
                               d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
                             />
                           </svg>
-                          รัศมี {event.radius} เมตร
+                          รัศมี {event.location.radius} เมตร
                         </div>
                       )}
                     </div>

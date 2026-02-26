@@ -606,6 +606,229 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+
+        // ──────────────────────────────────────────────
+        // Dashboard Schemas
+        // ──────────────────────────────────────────────
+        AttendanceSummary: {
+          type: 'object',
+          description: 'สรุปจำนวน attendance วันนี้สำหรับ Donut Chart',
+          properties: {
+            onTime: { type: 'integer', example: 15, description: 'จำนวนมาตรงเวลา' },
+            late: { type: 'integer', example: 3, description: 'จำนวนมาสาย' },
+            absent: { type: 'integer', example: 2, description: 'จำนวนขาดงาน' },
+            total: { type: 'integer', example: 20, description: 'จำนวนทั้งหมด' },
+          },
+        },
+        EmployeeToday: {
+          type: 'object',
+          description: 'ข้อมูลพนักงานพร้อมสถานะ check-in วันนี้',
+          properties: {
+            employeeId: { type: 'string', example: 'BKK001' },
+            name: { type: 'string', example: 'สมชาย ใจดี' },
+            branch: { type: 'string', example: 'สำนักงานใหญ่' },
+            status: { type: 'string', enum: ['ON_TIME', 'LATE', 'ABSENT'], example: 'ON_TIME' },
+            checkIn: { type: 'string', example: '08:30', description: 'เวลาเข้างาน (HH:mm)' },
+            checkOut: { type: 'string', nullable: true, example: '17:30', description: 'เวลาออกงาน (HH:mm)' },
+            lateMinutes: { type: 'integer', example: 0 },
+          },
+        },
+        BranchMap: {
+          type: 'object',
+          description: 'ข้อมูลสาขาสำหรับแสดง Map Pins',
+          properties: {
+            branchId: { type: 'integer', example: 1 },
+            name: { type: 'string', example: 'สำนักงานใหญ่' },
+            latitude: { type: 'number', format: 'double', example: 13.7563 },
+            longitude: { type: 'number', format: 'double', example: 100.5018 },
+            totalEmployees: { type: 'integer', example: 50 },
+            address: { type: 'string', example: 'กรุงเทพมหานคร' },
+          },
+        },
+        LocationEvent: {
+          type: 'object',
+          description: 'เหตุการณ์ check-in นอกพื้นที่',
+          properties: {
+            eventId: { type: 'integer', example: 101 },
+            employeeName: { type: 'string', example: 'สมหญิง รักไทย' },
+            checkInTime: { type: 'string', example: '09:15' },
+            expectedLocation: { type: 'string', example: 'สำนักงานใหญ่' },
+            actualDistance: { type: 'integer', example: 1500, description: 'ระยะห่างจริง (เมตร)' },
+            allowedRadius: { type: 'integer', example: 200, description: 'radius ที่กำหนด (เมตร)' },
+            timestamp: { type: 'string', format: 'date-time' },
+          },
+        },
+        BranchStats: {
+          type: 'object',
+          description: 'สถิติ KPI ของสาขา',
+          properties: {
+            branchId: { type: 'integer', example: 1 },
+            name: { type: 'string', example: 'สำนักงานใหญ่' },
+            totalEmployees: { type: 'integer', example: 50 },
+            presentToday: { type: 'integer', example: 40 },
+            lateToday: { type: 'integer', example: 5 },
+            absentToday: { type: 'integer', example: 5 },
+            attendanceRate: { type: 'integer', example: 80, description: 'อัตราการมา (%)' },
+          },
+        },
+
+        // ──────────────────────────────────────────────
+        // Event Schemas
+        // ──────────────────────────────────────────────
+        Event: {
+          type: 'object',
+          description: 'ข้อมูลกิจกรรม/อีเวนต์',
+          properties: {
+            eventId: { type: 'integer', example: 1 },
+            eventName: { type: 'string', example: 'ประชุมประจำเดือน' },
+            description: { type: 'string', nullable: true, example: 'ประชุมสรุปผลงานประจำเดือน' },
+            locationId: { type: 'integer', example: 1 },
+            participantType: {
+              type: 'string',
+              enum: ['ALL', 'INDIVIDUAL', 'BRANCH', 'ROLE'],
+              example: 'ALL',
+            },
+            isActive: { type: 'boolean', example: true },
+            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000Z' },
+            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000Z' },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true },
+            deletedAt: { type: 'string', format: 'date-time', nullable: true },
+            deleteReason: { type: 'string', nullable: true },
+            location: {
+              type: 'object',
+              properties: {
+                locationId: { type: 'integer', example: 1 },
+                locationName: { type: 'string', example: 'ห้องประชุม A' },
+                address: { type: 'string', example: 'อาคาร A ชั้น 5' },
+                latitude: { type: 'number', format: 'double', example: 13.7563 },
+                longitude: { type: 'number', format: 'double', example: 100.5018 },
+                radius: { type: 'integer', example: 200 },
+              },
+            },
+            creator: {
+              type: 'object',
+              properties: {
+                userId: { type: 'integer', example: 1 },
+                firstName: { type: 'string', example: 'Admin' },
+                lastName: { type: 'string', example: 'User' },
+              },
+            },
+            _count: {
+              type: 'object',
+              properties: {
+                event_participants: { type: 'integer', example: 10 },
+                attendance: { type: 'integer', example: 8 },
+              },
+            },
+          },
+        },
+        CreateEventRequest: {
+          type: 'object',
+          required: ['eventName', 'locationId', 'startDateTime', 'endDateTime', 'participantType'],
+          properties: {
+            eventName: { type: 'string', example: 'ประชุมประจำเดือน', description: 'ชื่อกิจกรรม' },
+            description: { type: 'string', example: 'ประชุมสรุปผลงาน', description: 'รายละเอียด (optional)' },
+            locationId: { type: 'integer', example: 1, description: 'ID สถานที่จัดกิจกรรม' },
+            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000Z', description: 'วันเวลาเริ่ม' },
+            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000Z', description: 'วันเวลาสิ้นสุด' },
+            participantType: {
+              type: 'string',
+              enum: ['ALL', 'INDIVIDUAL', 'BRANCH', 'ROLE'],
+              example: 'ALL',
+              description: 'ประเภทผู้เข้าร่วม',
+            },
+            participants: {
+              type: 'object',
+              description: 'รายชื่อผู้เข้าร่วม (ไม่ต้องส่งถ้า participantType = ALL)',
+              properties: {
+                userIds: { type: 'array', items: { type: 'integer' }, example: [1, 2, 3], description: 'สำหรับ INDIVIDUAL' },
+                branchIds: { type: 'array', items: { type: 'integer' }, example: [1, 2], description: 'สำหรับ BRANCH' },
+                roles: { type: 'array', items: { type: 'string', enum: ['USER', 'MANAGER', 'ADMIN', 'SUPERADMIN'] }, example: ['USER', 'MANAGER'], description: 'สำหรับ ROLE' },
+              },
+            },
+          },
+        },
+        UpdateEventRequest: {
+          type: 'object',
+          description: 'ส่งเฉพาะ field ที่ต้องการแก้ไข',
+          properties: {
+            eventName: { type: 'string', example: 'ชื่อกิจกรรมใหม่' },
+            description: { type: 'string', example: 'รายละเอียดใหม่' },
+            startDateTime: { type: 'string', format: 'date-time' },
+            endDateTime: { type: 'string', format: 'date-time' },
+            participantType: { type: 'string', enum: ['ALL', 'INDIVIDUAL', 'BRANCH', 'ROLE'] },
+            isActive: { type: 'boolean', example: false },
+            participants: {
+              type: 'object',
+              properties: {
+                userIds: { type: 'array', items: { type: 'integer' } },
+                branchIds: { type: 'array', items: { type: 'integer' } },
+                roles: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+        DeleteEventRequest: {
+          type: 'object',
+          properties: {
+            deleteReason: { type: 'string', example: 'ยกเลิกเนื่องจากสถานการณ์ฉุกเฉิน', description: 'เหตุผลการลบ (optional)' },
+          },
+        },
+        EventStatistics: {
+          type: 'object',
+          description: 'สถิติกิจกรรมทั้งหมด',
+          properties: {
+            totalEvents: { type: 'integer', example: 20 },
+            activeEvents: { type: 'integer', example: 15 },
+            upcomingEvents: { type: 'integer', example: 8 },
+            ongoingEvents: { type: 'integer', example: 3 },
+            pastEvents: { type: 'integer', example: 4 },
+            deletedEvents: { type: 'integer', example: 2 },
+            byParticipantType: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', example: 'ALL' },
+                  count: { type: 'integer', example: 5 },
+                },
+              },
+            },
+          },
+        },
+        EventListResponse: {
+          type: 'object',
+          properties: {
+            data: { type: 'array', items: { $ref: '#/components/schemas/Event' } },
+            total: { type: 'integer', example: 15 },
+            active: { type: 'integer', example: 12 },
+            inactive: { type: 'integer', example: 3 },
+          },
+        },
+
+        // ──────────────────────────────────────────────
+        // Download Report Schemas
+        // ──────────────────────────────────────────────
+        DownloadLog: {
+          type: 'object',
+          description: 'ประวัติการดาวน์โหลดรายงาน',
+          properties: {
+            downloadLogId: { type: 'integer', example: 1 },
+            userId: { type: 'integer', example: 1 },
+            fileName: { type: 'string', example: 'attendance_1708588800000.xlsx' },
+            reportType: { type: 'string', example: 'attendance' },
+            downloadAt: { type: 'string', format: 'date-time' },
+            user: {
+              type: 'object',
+              properties: {
+                employeeId: { type: 'string', example: 'BKK001' },
+                firstName: { type: 'string', example: 'สมชาย' },
+                lastName: { type: 'string', example: 'ใจดี' },
+              },
+            },
+          },
+        },
       },
     },
     security: [

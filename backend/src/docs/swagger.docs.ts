@@ -70,6 +70,67 @@
  *       **สิทธิ์การเข้าถึง:**
  *       - ทุก role: check-in/check-out ได้
  *       - Admin/SuperAdmin: ดู/แก้ไข/ลบ attendance ทุกคน
+ *   - name: Dashboard
+ *     description: |
+ *       📊 API สำหรับหน้า Admin Dashboard
+ *
+ *       **ทำไมต้องมี Dashboard API?**
+ *       Admin/SuperAdmin ต้องเห็นภาพรวมข้อมูลพนักงาน ‒ สถิติเข้างาน,
+ *       ตำแหน่งสาขาบนแผนที่, พนักงาน check-in นอกพื้นที่ ฯลฯ
+ *       โดย aggregate ข้อมูลทั้งหมดจาก attendance, branch, user
+ *
+ *       **สิทธิ์การเข้าถึง:**
+ *       - **Admin**: เห็นเฉพาะข้อมูลสาขาตัวเอง
+ *       - **SuperAdmin**: เห็นทั้งองค์กร (สามารถ filter branchId ได้)
+ *
+ *       **Endpoints (5 endpoints):**
+ *       | Endpoint | ใช้ทำอะไร |
+ *       |----------|----------|
+ *       | attendance-summary | Donut Chart สรุปสถานะวันนี้ |
+ *       | employees-today | ตารางพนักงาน + สถานะ check-in |
+ *       | branches-map | Map pins ของแต่ละสาขา |
+ *       | location-events | Alert พนักงาน check-in นอกพื้นที่ |
+ *       | branch-stats | KPI สถิติของสาขา |
+ *   - name: Events
+ *     description: |
+ *       🎉 API สำหรับจัดการกิจกรรม/อีเวนต์
+ *
+ *       **ทำไมต้องมีระบบ Event?**
+ *       องค์กรจัดกิจกรรมต่าง ๆ เช่น ประชุม, อบรม, กิจกรรมบริษัท
+ *       ต้องกำหนดผู้เข้าร่วมตามประเภท (ทุกคน, รายบุคคล, ตามสาขา, ตาม role)
+ *       และต้อง track สถิติกิจกรรมทั้งหมด
+ *
+ *       **participantType:**
+ *       - `ALL` — ทุกคนเข้าร่วมได้ (ไม่ต้องระบุ participants)
+ *       - `INDIVIDUAL` — ระบุ userIds
+ *       - `BRANCH` — ระบุ branchIds
+ *       - `ROLE` — ระบุ roles
+ *
+ *       **สิทธิ์การเข้าถึง:**
+ *       - **Admin/SuperAdmin**: สร้าง, แก้ไข, ลบ, กู้คืน, ดูสถิติ
+ *       - **ทุก role (authenticated)**: ดูรายการ, ดูกิจกรรมตัวเอง
+ *
+ *       **WebSocket:**
+ *       เชื่อมต่อ `ws://HOST/ws/events` สำหรับ real-time event updates
+ *   - name: Download Report
+ *     description: |
+ *       📥 API สำหรับดาวน์โหลดรายงาน (Excel / PDF)
+ *
+ *       **ทำไมต้องมี Download API?**
+ *       Admin ต้องดาวน์โหลดรายงาน attendance/shift เป็นไฟล์เพื่อนำไปวิเคราะห์
+ *       หรือพิมพ์เป็นเอกสาร พร้อมเก็บ audit log ว่าใครดาวน์โหลดอะไร เมื่อไร
+ *
+ *       **รูปแบบรายงานที่รองรับ:**
+ *       - `excel` (.xlsx) — สำหรับวิเคราะห์ข้อมูลใน spreadsheet
+ *       - `pdf` (.pdf) — สำหรับพิมพ์เป็นเอกสาร
+ *
+ *       **ประเภทรายงาน:**
+ *       - `attendance` — ประวัติเข้า-ออกงาน
+ *       - `shift` — ข้อมูลกะงาน
+ *
+ *       **สิทธิ์การเข้าถึง:**
+ *       - **Admin**: ดาวน์โหลดเฉพาะสาขาตัวเอง
+ *       - **SuperAdmin**: ดาวน์โหลดได้ทั้งองค์กร
  */
 
 /**
@@ -2129,4 +2190,875 @@
  *           enum: [male, female]
  *           example: "male"
  *           description: เปลี่ยน avatar ตามเพศ
+ */
+
+// ════════════════════════════════════════════════════════════
+// 📊 DASHBOARD ENDPOINTS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * @swagger
+ * /api/dashboard/attendance-summary:
+ *   get:
+ *     summary: สรุป Attendance วันนี้ (Donut Chart)
+ *     description: |
+ *       ดึงจำนวนพนักงานแยกตามสถานะ (ON_TIME, LATE, ABSENT) ของวันนี้
+ *       สำหรับแสดง Donut Chart บน Dashboard
+ *
+ *       **Role-based:**
+ *       - ADMIN → เห็นเฉพาะสาขาตัวเอง
+ *       - SUPERADMIN → เห็นทั้งองค์กร (สามารถ filter branchId ได้)
+ *     tags:
+ *       - Dashboard
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: branchId
+ *         schema:
+ *           type: integer
+ *         required: false
+ *         description: |
+ *           Filter เฉพาะสาขา (SUPERADMIN only)
+ *           ADMIN จะใช้ branchId ของตัวเองอัตโนมัติ
+ *     responses:
+ *       200:
+ *         description: สรุป attendance สำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/AttendanceSummary'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/dashboard/employees-today:
+ *   get:
+ *     summary: รายชื่อพนักงานพร้อมสถานะวันนี้ (Table)
+ *     description: |
+ *       ดึงรายชื่อพนักงานทั้งหมดพร้อมสถานะ check-in/check-out ของวันนี้
+ *       สำหรับแสดงเป็น Table บน Dashboard
+ *
+ *       **ข้อมูลที่ได้:**
+ *       - ชื่อ-นามสกุล, สาขา
+ *       - สถานะ (ON_TIME / LATE / ABSENT)
+ *       - เวลาเข้า-ออก
+ *       - จำนวนนาทีที่สาย
+ *     tags:
+ *       - Dashboard
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: branchId
+ *         schema:
+ *           type: integer
+ *         required: false
+ *         description: Filter เฉพาะสาขา (SUPERADMIN only)
+ *     responses:
+ *       200:
+ *         description: ดึงข้อมูลพนักงานวันนี้สำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/EmployeeToday'
+ *                 total:
+ *                   type: integer
+ *                   example: 25
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/dashboard/branches-map:
+ *   get:
+ *     summary: ข้อมูลสาขาสำหรับ Map Pins
+ *     description: |
+ *       ดึงข้อมูลสาขาพร้อม lat/lng สำหรับแสดง pin บนแผนที่
+ *       แต่ละ pin แสดงชื่อสาขา, จำนวนพนักงาน, ที่อยู่
+ *
+ *       **Role-based:**
+ *       - ADMIN → เห็นเฉพาะสาขาตัวเอง (1 pin)
+ *       - SUPERADMIN → เห็นทุกสาขา (หลาย pins)
+ *     tags:
+ *       - Dashboard
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: ดึงข้อมูลสาขาสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/BranchMap'
+ *                 total:
+ *                   type: integer
+ *                   example: 3
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/dashboard/location-events:
+ *   get:
+ *     summary: พนักงาน Check-in นอกพื้นที่ (Alert List)
+ *     description: |
+ *       ดึงรายชื่อพนักงานที่ check-in จากตำแหน่งที่อยู่นอก radius ที่กำหนด
+ *       ใช้สำหรับ security monitoring / fraud detection
+ *
+ *       **ตัวอย่างเหตุการณ์:**
+ *       พนักงาน check-in ห่างจากสาขา 1,500 เมตร (radius กำหนด 200 เมตร)
+ *       → ถูก flag เป็น location event
+ *     tags:
+ *       - Dashboard
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: branchId
+ *         schema:
+ *           type: integer
+ *         required: false
+ *         description: Filter เฉพาะสาขา (SUPERADMIN only)
+ *     responses:
+ *       200:
+ *         description: ดึงเหตุการณ์นอกพื้นที่สำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/LocationEvent'
+ *                 total:
+ *                   type: integer
+ *                   example: 2
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/dashboard/branch-stats:
+ *   get:
+ *     summary: สถิติ KPI ของสาขา (Statistics Cards)
+ *     description: |
+ *       ดึงสถิติสาขา ได้แก่ จำนวนพนักงาน, มาตรงเวลา, มาสาย, ขาดงาน, อัตราการมา (%)
+ *       ใช้สำหรับแสดง KPI cards บน Dashboard
+ *     tags:
+ *       - Dashboard
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: branchId
+ *         schema:
+ *           type: integer
+ *         required: false
+ *         description: Filter เฉพาะสาขา (SUPERADMIN only)
+ *     responses:
+ *       200:
+ *         description: ดึงสถิติสาขาสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/BranchStats'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+// ════════════════════════════════════════════════════════════
+// 🎉 EVENT ENDPOINTS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * @swagger
+ * /api/events:
+ *   post:
+ *     summary: สร้างกิจกรรมใหม่ (Admin/SuperAdmin only)
+ *     description: |
+ *       สร้างกิจกรรมใหม่พร้อมกำหนดสถานที่, ช่วงเวลา, ผู้เข้าร่วม
+ *
+ *       **participantType rules:**
+ *       - `ALL` → ไม่ต้องส่ง participants (ทุกคนเข้าร่วมได้)
+ *       - `INDIVIDUAL` → ส่ง `participants.userIds`
+ *       - `BRANCH` → ส่ง `participants.branchIds`
+ *       - `ROLE` → ส่ง `participants.roles`
+ *
+ *       **Validation:**
+ *       - สถานที่ (locationId) ต้องมีอยู่จริงและยังไม่ถูกลบ
+ *       - startDateTime ต้องน้อยกว่า endDateTime
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateEventRequest'
+ *     responses:
+ *       201:
+ *         description: สร้างกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
+ *                 message:
+ *                   type: string
+ *                   example: สร้างกิจกรรมเรียบร้อยแล้ว
+ *       400:
+ *         description: ข้อมูลไม่ครบหรือไม่ถูกต้อง
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *   get:
+ *     summary: ดึงรายการกิจกรรมทั้งหมด (Authenticated)
+ *     description: |
+ *       ดึงกิจกรรมทั้งหมด (ที่ยังไม่ถูก soft delete) พร้อม pagination, search, filter
+ *       ส่งคืนข้อมูลพร้อมสถิติ total/active/inactive
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: ค้นหาจากชื่อหรือรายละเอียด (case-insensitive)
+ *       - in: query
+ *         name: participantType
+ *         schema:
+ *           type: string
+ *           enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
+ *         description: กรองตามประเภทผู้เข้าร่วม
+ *       - in: query
+ *         name: isActive
+ *         schema:
+ *           type: boolean
+ *         description: กรองตามสถานะ (true = active, false = inactive)
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: กรองกิจกรรมที่เริ่มหลังวันนี้
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: กรองกิจกรรมที่จบก่อนวันนี้
+ *       - in: query
+ *         name: skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: จำนวนที่ข้าม (pagination offset)
+ *       - in: query
+ *         name: take
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: จำนวนต่อหน้า
+ *     responses:
+ *       200:
+ *         description: ดึงรายการกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/EventListResponse'
+ *                 message:
+ *                   type: string
+ *                   example: ดึงรายการกิจกรรมสำเร็จ
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/events/my:
+ *   get:
+ *     summary: ดึงกิจกรรมที่ผู้ใช้เข้าร่วมได้ (Authenticated)
+ *     description: |
+ *       ดึงเฉพาะกิจกรรมที่เกี่ยวข้องกับผู้ใช้ปัจจุบัน ตาม participantType:
+ *       - `ALL` → แสดงทุกกิจกรรม
+ *       - `INDIVIDUAL` → แสดงเฉพาะที่มี userId ตรง
+ *       - `BRANCH` → แสดงเฉพาะที่ branchId ตรง
+ *       - `ROLE` → แสดงเฉพาะที่ role ตรง
+ *
+ *       แสดงเฉพาะกิจกรรมที่ **ยังไม่จบ** (endDateTime >= now)
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: ดึงกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Event'
+ *                 message:
+ *                   type: string
+ *                   example: ดึงกิจกรรมที่เข้าร่วมสำเร็จ
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/events/statistics:
+ *   get:
+ *     summary: สถิติกิจกรรมภาพรวม (Admin/SuperAdmin only)
+ *     description: |
+ *       คำนวณสถิติกิจกรรมทั้งหมด:
+ *       - จำนวนกิจกรรมทั้งหมด / active / upcoming / ongoing / past / deleted
+ *       - จัดกลุ่มตาม participantType
+ *
+ *       ใช้แสดง Stats Cards + Pie Chart บนหน้า Event Management
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: ดึงสถิติสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/EventStatistics'
+ *                 message:
+ *                   type: string
+ *                   example: ดึงสถิติกิจกรรมสำเร็จ
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/events/{id}:
+ *   get:
+ *     summary: ดึงรายละเอียดกิจกรรมด้วย ID (Authenticated)
+ *     description: |
+ *       ดึงข้อมูลกิจกรรมแบบละเอียด รวมถึง:
+ *       - สถานที่จัดกิจกรรม (location)
+ *       - ผู้สร้าง, ผู้แก้ไข, ผู้ลบ
+ *       - รายชื่อผู้เข้าร่วม (participants) พร้อม user/branch detail
+ *       - จำนวน attendance
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Event ID
+ *     responses:
+ *       200:
+ *         description: ดึงกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
+ *       404:
+ *         description: ไม่พบกิจกรรม
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *   patch:
+ *     summary: แก้ไขกิจกรรม (Admin/SuperAdmin only)
+ *     description: |
+ *       แก้ไขข้อมูลกิจกรรม ส่งเฉพาะ field ที่ต้องการแก้ไข
+ *
+ *       **ข้อจำกัด:**
+ *       - ไม่สามารถแก้กิจกรรมที่ถูก soft delete แล้ว
+ *       - ถ้าเปลี่ยน participantType หรือ participants → ลบผู้เข้าร่วมเดิมและเพิ่มใหม่
+ *       - startDateTime ต้องน้อยกว่า endDateTime
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Event ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateEventRequest'
+ *     responses:
+ *       200:
+ *         description: แก้ไขกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
+ *                 message:
+ *                   type: string
+ *                   example: แก้ไขกิจกรรมเรียบร้อยแล้ว
+ *       400:
+ *         description: ข้อมูลไม่ถูกต้อง
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: ไม่พบกิจกรรม
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *   delete:
+ *     summary: ลบกิจกรรม — Soft Delete (Admin/SuperAdmin only)
+ *     description: |
+ *       Soft delete กิจกรรม (set deletedAt + ปิด isActive)
+ *
+ *       **ข้อจำกัด:**
+ *       - ไม่สามารถลบกิจกรรมที่กำลังดำเนินการอยู่ (startDateTime <= now <= endDateTime)
+ *       - กิจกรรมที่ลบแล้วจะไม่ปรากฏใน getAllEvents
+ *       - สามารถกู้คืนได้ด้วย POST /api/events/:id/restore
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Event ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/DeleteEventRequest'
+ *     responses:
+ *       200:
+ *         description: ลบกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
+ *                 message:
+ *                   type: string
+ *                   example: ลบกิจกรรมเรียบร้อยแล้ว
+ *       400:
+ *         description: ไม่สามารถลบกิจกรรมที่กำลังดำเนินการ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: ไม่พบกิจกรรม
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/events/{id}/restore:
+ *   post:
+ *     summary: กู้คืนกิจกรรมที่ถูกลบ (Admin/SuperAdmin only)
+ *     description: |
+ *       กู้คืนกิจกรรมที่ถูก soft delete กลับมา
+ *       (set deletedAt = null, ลบ deleteReason)
+ *
+ *       **หมายเหตุ:** isActive ไม่เปลี่ยน — ต้อง PATCH แยกถ้าต้องการเปิดใช้งาน
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Event ID
+ *     responses:
+ *       200:
+ *         description: กู้คืนกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
+ *                 message:
+ *                   type: string
+ *                   example: กู้คืนกิจกรรมเรียบร้อยแล้ว
+ *       400:
+ *         description: กิจกรรมนี้ยังไม่ถูกลบ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: ไม่พบกิจกรรม
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+// ════════════════════════════════════════════════════════════
+// 📥 DOWNLOAD REPORT ENDPOINTS
+// ════════════════════════════════════════════════════════════
+
+/**
+ * @swagger
+ * /api/download/report:
+ *   get:
+ *     summary: ดาวน์โหลดรายงาน Attendance/Shift (Excel หรือ PDF)
+ *     description: |
+ *       สร้างและดาวน์โหลดรายงานเป็นไฟล์ Excel (.xlsx) หรือ PDF (.pdf)
+ *
+ *       **ประเภทรายงาน:**
+ *       - `attendance` — ประวัติเข้า-ออกงาน (Employee ID, Name, Check In/Out, Status, Late Minutes)
+ *       - `shift` — ข้อมูลกะงาน (Employee ID, Name, Shift Name, Type, Start/End Time, Active)
+ *
+ *       **Role-based:**
+ *       - ADMIN → ดาวน์โหลดเฉพาะสาขาตัวเอง
+ *       - SUPERADMIN → ดาวน์โหลดได้ทั้งองค์กร + filter branchId ได้
+ *
+ *       **Response:** Binary file (ไม่ใช่ JSON)
+ *       - Content-Type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (Excel)
+ *       - Content-Type: `application/pdf` (PDF)
+ *       - Content-Disposition: `attachment; filename="..."`
+ *
+ *       **ข้อจำกัด:** ดึงสูงสุด 100 records ต่อครั้ง
+ *     tags:
+ *       - Download Report
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [attendance, shift]
+ *         description: ประเภทรายงาน
+ *       - in: query
+ *         name: format
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [excel, pdf]
+ *         description: รูปแบบไฟล์
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-01-01"
+ *         description: วันเริ่มต้น (default = 1 ม.ค. ปีนี้)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-12-31"
+ *         description: วันสิ้นสุด (default = วันนี้)
+ *       - in: query
+ *         name: branchId
+ *         schema:
+ *           type: integer
+ *         description: Filter สาขา (SUPERADMIN only, ADMIN ใช้สาขาตัวเอง)
+ *     responses:
+ *       200:
+ *         description: ไฟล์รายงาน (binary download)
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       400:
+ *         description: ข้อมูลไม่ครบ (type หรือ format ไม่ถูกต้อง)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/download/history:
+ *   get:
+ *     summary: ดูประวัติการดาวน์โหลด (Audit Trail)
+ *     description: |
+ *       ดึงประวัติการดาวน์โหลดรายงาน — ใครดาวน์โหลดอะไร เมื่อไร
+ *
+ *       **Role-based:**
+ *       - ADMIN → เห็นเฉพาะ history ของตัวเอง
+ *       - SUPERADMIN → เห็นทั้งองค์กร
+ *
+ *       **Pagination:**
+ *       - `limit` — จำนวน record ต่อหน้า (default: 10)
+ *       - `offset` — ข้าม records (page 2 ใช้ offset = limit)
+ *     tags:
+ *       - Download Report
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: จำนวน record ต่อหน้า
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: จำนวน record ที่ข้าม (pagination)
+ *     responses:
+ *       200:
+ *         description: ดึงประวัติดาวน์โหลดสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/DownloadLog'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                       example: 10
+ *                     offset:
+ *                       type: integer
+ *                       example: 0
+ *                     total:
+ *                       type: integer
+ *                       example: 5
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */

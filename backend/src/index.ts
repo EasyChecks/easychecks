@@ -6,7 +6,7 @@ import { setupAttendanceWebSocket } from './websocket/attendance.websocket.js';
 import { setupSwagger } from './config/swagger.js';
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 3001;
 
 // Middleware
 app.use(cors());

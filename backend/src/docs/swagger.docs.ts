@@ -131,6 +131,31 @@
  *       **สิทธิ์การเข้าถึง:**
  *       - **Admin**: ดาวน์โหลดเฉพาะสาขาตัวเอง
  *       - **SuperAdmin**: ดาวน์โหลดได้ทั้งองค์กร
+ *   - name: Announcements
+ *     description: |
+ *       📢 API สำหรับจัดการประกาศ/ข่าวสารภายในองค์กร
+ *
+ *       **ทำไมต้องมีระบบประกาศ?**
+ *       Admin/SuperAdmin ต้องสื่อสารกับพนักงานแบบ broadcast
+ *       โดยไม่ต้องส่ง LINE/email แยกทีละคน สามารถกำหนดกลุ่มเป้าหมายได้
+ *
+ *       **Status Flow:**
+ *       ```
+ *       DRAFT → (send) → SENT
+ *       ```
+ *       เมื่อ SENT แล้วแก้ไขไม่ได้ (immutable)
+ *
+ *       **Targeting:**
+ *       - `targetRoles` ว่าง = ส่งหา ทุก role
+ *       - `targetBranchIds` ว่าง = ส่ง ทุกสาขา
+ *       - ADMIN จะถูกจำกัดให้ส่งได้แค่ใน branch ตัวเองเสมอ ไม่ว่าจะตั้งค่าอะไร
+ *       - ADMIN ไม่สามารถส่งให้ SUPERADMIN ได้
+ *
+ *       **Email:**
+ *       ระบบจะส่งอีเมลอัตโนมัติผ่าน Resend ทุกครั้งที่มีการ Send (fire-and-forget)
+ *
+ *       **Soft Delete:**
+ *       ประกาศที่ถูกลบจะยังคงอยู่ใน DB แต่มี `deletedAt` — ไม่ปรากฏใน list
  */
 
 /**
@@ -3057,6 +3082,454 @@
  *               $ref: '#/components/schemas/ErrorResponse'
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+// ============================================================
+// 📢 Announcements
+// ============================================================
+
+/**
+ * @swagger
+ * /api/announcements:
+ *   post:
+ *     summary: สร้างประกาศใหม่ (Admin/SuperAdmin only)
+ *     description: |
+ *       สร้างประกาศใหม่ในสถานะ DRAFT
+ *
+ *       **ทำไมต้องเป็น DRAFT ก่อน?**
+ *       เพื่อให้ Admin ตรวจทานก่อนส่งจริง เมื่อส่งแล้วจะเป็น immutable
+ *
+ *       **targetRoles / targetBranchIds:**
+ *       - ว่างทั้งคู่ = ส่งหาทุกคนในองค์กร
+ *       - ระบุ roles = ส่งเฉพาะ role นั้น ๆ
+ *       - ระบุ branchIds = ส่งเฉพาะสาขานั้น ๆ
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateAnnouncementRequest'
+ *           examples:
+ *             ส่งทุกคน:
+ *               summary: ประกาศทั่วไปส่งทุกคนทุกสาขา
+ *               value:
+ *                 title: "ประกาศหยุดวันสงกรานต์"
+ *                 content: "บริษัทหยุดวันสงกรานต์ตั้งแต่ 13-15 เมษายน 2026"
+ *             ส่งเฉพาะสาขา:
+ *               summary: ประกาศเฉพาะสาขา BKK
+ *               value:
+ *                 title: "ประชุมทีม BKK"
+ *                 content: "ขอเชิญพนักงานสาขา BKK เข้าประชุมวันศุกร์"
+ *                 targetBranchIds: [1]
+ *             ส่งเฉพาะ role:
+ *               summary: ประกาศเฉพาะ MANAGER
+ *               value:
+ *                 title: "ประชุมผู้บริหาร"
+ *                 content: "นัดประชุมผู้จัดการทุกสาขา"
+ *                 targetRoles: ["MANAGER"]
+ *     responses:
+ *       201:
+ *         description: สร้างประกาศสำเร็จ (status = DRAFT)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Announcement'
+ *                 message:
+ *                   type: string
+ *                   example: สร้างประกาศเรียบร้อยแล้ว
+ *       400:
+ *         description: ไม่ได้ส่ง title หรือ content
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       403:
+ *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin หรือ SuperAdmin)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *   get:
+ *     summary: ดึงรายการประกาศทั้งหมด (Authenticated)
+ *     description: |
+ *       ดึงประกาศทั้งหมดที่ยังไม่ถูก soft-delete
+ *       เรียงจากใหม่ → เก่า (`createdAt DESC`)
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [DRAFT, SENT]
+ *         description: กรองตามสถานะ — ไม่ระบุ = ดึงทุกสถานะ
+ *       - in: query
+ *         name: createdByUserId
+ *         schema:
+ *           type: integer
+ *         description: กรองเฉพาะประกาศที่สร้างโดย userId นี้
+ *     responses:
+ *       200:
+ *         description: ดึงรายการประกาศสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Announcement'
+ *       401:
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/announcements/{id}:
+ *   get:
+ *     summary: ดึงประกาศตาม ID พร้อมรายชื่อผู้รับ
+ *     description: |
+ *       ดึงประกาศรายชิ้นพร้อม JOIN recipients และ creator
+ *       ถ้าประกาศถูก soft-delete จะได้ 404
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: announcementId
+ *     responses:
+ *       200:
+ *         description: ดึงประกาศสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/AnnouncementWithRecipients'
+ *       404:
+ *         description: ไม่พบประกาศ (หรือถูก soft-delete แล้ว)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *   put:
+ *     summary: แก้ไขประกาศ — DRAFT เท่านั้น (Admin/SuperAdmin only)
+ *     description: |
+ *       แก้ไขได้เฉพาะประกาศที่ยังเป็น **DRAFT**
+ *       รองรับ partial update — ส่งแค่ field ที่ต้องการเปลี่ยน
+ *
+ *       **ทำไมแก้ไขไม่ได้หลัง SENT?**
+ *       มีคนรับข้อมูลไปแล้ว การแก้ไขทำให้ DB ไม่ตรงกับที่ผู้รับได้รับจริง
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: announcementId ที่ต้องการแก้ไข
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateAnnouncementRequest'
+ *           example:
+ *             title: "ประกาศฉบับแก้ไข"
+ *             content: "เนื้อหาใหม่"
+ *     responses:
+ *       200:
+ *         description: อัปเดตประกาศสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/Announcement'
+ *                 message:
+ *                   type: string
+ *                   example: อัปเดตประกาศเรียบร้อยแล้ว
+ *       400:
+ *         description: ประกาศอยู่ในสถานะ SENT แก้ไขไม่ได้
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *   delete:
+ *     summary: ลบประกาศ (Soft Delete) — Admin/SuperAdmin only
+ *     description: |
+ *       Soft Delete ประกาศ — ตั้งค่า `deletedAt` และ `deleteReason`
+ *       ประกาศไม่ปรากฏใน list แต่ยังอยู่ใน DB เพื่อ audit trail
+ *
+ *       **ทำไมต้อง deleteReason?**
+ *       เพื่อให้ audit log มีบริบท — รู้ว่าลบเพราะอะไร
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: announcementId ที่ต้องการลบ
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - deleteReason
+ *             properties:
+ *               deleteReason:
+ *                 type: string
+ *                 example: "ข้อมูลผิดพลาด ต้องการสร้างใหม่"
+ *     responses:
+ *       200:
+ *         description: ลบประกาศสำเร็จ (Soft Delete)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: ลบประกาศเรียบร้อยแล้ว (Soft Delete)
+ *       400:
+ *         description: ไม่ได้ส่ง deleteReason
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/announcements/{id}/send:
+ *   post:
+ *     summary: ส่งประกาศ DRAFT → SENT (Admin/SuperAdmin only)
+ *     description: |
+ *       เปลี่ยน status จาก DRAFT → SENT บันทึก recipients และส่งอีเมลอัตโนมัติ
+ *
+ *       **Permission rules:**
+ *       - **ADMIN**: ส่งได้เฉพาะใน branch ตัวเอง, ไม่สามารถส่งให้ SUPERADMIN
+ *       - **SUPERADMIN**: ส่งได้ทุกคน ทุก branch ทุก role
+ *
+ *       **Email (fire-and-forget):**
+ *       Resend ส่งอีเมลแบบ async — API response กลับมาทันที ไม่รอ delivery
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: announcementId ที่ต้องการส่ง (ต้องเป็น DRAFT)
+ *     responses:
+ *       200:
+ *         description: ส่งประกาศสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     announcement:
+ *                       $ref: '#/components/schemas/Announcement'
+ *                     recipientCount:
+ *                       type: integer
+ *                       example: 42
+ *                 message:
+ *                   type: string
+ *                   example: "ส่งประกาศเรียบร้อยแล้ว ส่งให้ 42 คน"
+ *       400:
+ *         description: ประกาศไม่ได้อยู่ในสถานะ DRAFT
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: ไม่มีสิทธิ์ส่ง
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: ไม่พบประกาศ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/announcements/{announcementId}/recipients/{recipientId}:
+ *   delete:
+ *     summary: ลบผู้รับออก 1 คน (Admin/SuperAdmin only)
+ *     description: |
+ *       ลบ recipient record ออกจาก `announcement_recipients`
+ *       ใช้เมื่อต้องการ revoke การส่งของพนักงานคนนั้นโดยไม่กระทบคนอื่น
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: announcementId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: recipientId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: ลบผู้รับสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: ลบผู้รับประกาศเรียบร้อยแล้ว
+ *       404:
+ *         description: ไม่พบ recipient
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/announcements/{announcementId}/recipients:
+ *   delete:
+ *     summary: ล้างผู้รับทั้งหมดของประกาศ (Admin/SuperAdmin only)
+ *     description: |
+ *       Hard-delete recipients ทั้งหมดใน `announcement_recipients` ของประกาศนี้
+ *
+ *       **ทำไมต้องมี endpoint นี้?**
+ *       ใช้ก่อน re-send ประกาศให้กลุ่มใหม่ — ต้องล้างก่อนแล้วค่อย send ใหม่
+ *       ป้องกัน duplicate records ใน announcement_recipients
+ *     tags:
+ *       - Announcements
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: announcementId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: announcementId ที่ต้องการล้าง recipients
+ *     responses:
+ *       200:
+ *         description: ล้างผู้รับสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     clearedCount:
+ *                       type: integer
+ *                       example: 35
+ *                 message:
+ *                   type: string
+ *                   example: "ล้างผู้รับประกาศเรียบร้อยแล้ว ลบ 35 รายการ"
+ *       404:
+ *         description: ไม่พบประกาศ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
  *         content:
  *           application/json:
  *             schema:

@@ -3,12 +3,26 @@ import * as announcementService from '../services/announcement.service.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
 /**
- * 📢 Announcement Controller - จัดการ API ประกาศ
+ * ─────────────────────────────────────────────────────────────
+ * 📢 Announcement Controller
+ * ─────────────────────────────────────────────────────────────
+ * ทำหน้าที่: รับ HTTP request → parse ข้อมูล → ส่งต่อ Service → ส่ง response
+ *
+ * ทำไมแยก Controller ออกจาก Service?
+ * → Controller รู้แค่ HTTP (parse req, return res)
+ *   Service รู้แค่ business logic
+ *   แยก concern ถึงจะ test ได้ทีละชั้น
+ *
+ * Pattern: Controller validate input → Service ทำ business logic → Controller return response
+ * ─────────────────────────────────────────────────────────────
  */
 
 /**
- * ➕ สร้างประกาศใหม่
- * POST /api/announcements
+ * ➕ POST /api/announcements
+ *
+ * ทำไม validate ที่ controller อีกทั้งที่ service ก็ validate แล้ว?
+ * → Controller validate เร็วเพื่อ fail fast — เช็คค่าแล้ว reject ทันที
+ *   ไม่ต้องเชื่อม DB เพื่อรู้ว่าข้อมูลไม่ครบ
  */
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
@@ -28,7 +42,6 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
-    // สร้างประกาศ
     const announcement = await announcementService.createAnnouncement({
       title,
       content,
@@ -44,8 +57,11 @@ export const createAnnouncement = async (req: Request, res: Response) => {
 };
 
 /**
- * 📋 ดึงประกาศทั้งหมด
- * GET /api/announcements
+ * 📋 GET /api/announcements
+ *
+ * ทำไม query filters เป็น optional?
+ * → ใช้ endpoint เดียวกันสำหรับทั้ง ADMIN และ SUPERADMIN
+ *   ADMIN อาจ filter เฉพาะของตัวเอง ส่วน SUPERADMIN เห็นทั้งหมด
  */
 export const getAnnouncements = async (req: Request, res: Response) => {
   try {
@@ -64,8 +80,11 @@ export const getAnnouncements = async (req: Request, res: Response) => {
 };
 
 /**
- * 🔍 ดึงประกาศตาม ID
- * GET /api/announcements/:id
+ * 🔍 GET /api/announcements/:id
+ *
+ * ทำไม parseInt แล้ว check isNaN อีก?
+ * → parseInt('abc') คืน NaN ซึ่ง truthy ในบาง context
+ *   isNaN guard เพื่อไม่ให้ query ไปดึง WHERE announcement_id = NaN
  */
 export const getAnnouncementById = async (req: Request, res: Response) => {
   try {
@@ -84,8 +103,12 @@ export const getAnnouncementById = async (req: Request, res: Response) => {
 };
 
 /**
- * ✏️ อัปเดตประกาศ
- * PUT /api/announcements/:id
+ * ✏️ PUT /api/announcements/:id
+ *
+ * ทำไมใส่เฉพาะ field ที่ส่งมา (partial update)?
+ * → รองรับ PATCH-style update — ไม่ต้องส่งทุก field มาทุกครั้ง
+ *   Service ใช้ spread conditional เพื่อไม่ overwrite field ที่ไม่ได้ส่งมา
+ *   เช่น ส่งแค่ title มา → content เดิมไม่ถูกแตะ
  */
 export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
@@ -117,11 +140,14 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
   }
 };
 
-
-
 /**
- * 📤 ส่งประกาศ
- * POST /api/announcements/:id/send
+ * 📤 POST /api/announcements/:id/send
+ *
+ * Controller นี้แค่ pass-through — logic ทั้งหมดอยู่ใน service
+ *
+ * ทำไม pass branchId ด้วย?
+ * → Service ต้องรู้ branchId ของผู้ส่ง เพื่อสร้าง WHERE branch_id = $x guard ให้ ADMIN
+ *   ถ้าไม่ส่งมา ADMIN จะสามารถส่งประกาศข้ามสาขาได้
  */
 export const sendAnnouncement = async (req: Request, res: Response) => {
   try {
@@ -149,8 +175,12 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
 };
 
 /**
- * 🗑️ ลบประกาศ (Soft Delete)
- * DELETE /api/announcements/:id
+ * 🗑️ DELETE /api/announcements/:id
+ *
+ * ทำไม require deleteReason?
+ * → Soft Delete เป็นแค่การตั้ง flag deletedAt
+ *   ถ้าไม่มี reason ยังบันทึกได้แต่ไม่รู้ว่าลบเพราะอะไร
+ *   audit log จะไม่มีประโยชน์
  */
 export const deleteAnnouncement = async (req: Request, res: Response) => {
   try {
@@ -187,8 +217,11 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 };
 
 /**
- * 🔄 ลบผู้รับประกาศ (ลบตัวรับ 1 คน)
- * DELETE /api/announcements/:announcementId/recipients/:recipientId
+ * 🔄 DELETE /api/announcements/:announcementId/recipients/:recipientId
+ *
+ * ทำไมมี endpoint นี้แยกจาก clearAll?
+ * → รองรับการ revoke เฉพาะราย โดยไม่กระทบคนอื่น
+ *   clearAll ลบทั้งสาย — endpoint นี้ลบคนเดียวโดยการ revoke อีเมล / เปลี่ยนชื่อระบุ
  */
 export const deleteRecipient = async (req: Request, res: Response) => {
   try {
@@ -219,8 +252,11 @@ export const deleteRecipient = async (req: Request, res: Response) => {
 };
 
 /**
- * 🔄 ล้างผู้รับประกาศทั้งหมด
- * DELETE /api/announcements/:announcementId/recipients
+ * 🔄 DELETE /api/announcements/:announcementId/recipients
+ *
+ * ทำไมต้องระบุ announcementId ใน URL?
+ * → ถ้าใช้แค่ :id Prisma จะไม่รู้ว่าต้องลบ recipients ของ announcement ไหน
+ *   (Bug เดิมที่เคยลบ recipients ทั้งระบบโดยไม่ส่ง announcementId)
  */
 export const clearAllRecipients = async (req: Request, res: Response) => {
   try {
@@ -228,7 +264,14 @@ export const clearAllRecipients = async (req: Request, res: Response) => {
       return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
+    const announcementId = parseInt(req.params.announcementId as string);
+
+    if (!announcementId || isNaN(announcementId)) {
+      return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
+    }
+
     const result = await announcementService.clearAllRecipients(
+      announcementId,
       req.user.userId
     );
 

@@ -829,6 +829,90 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+
+        // ───────────────────────────────────────────
+        // 📢 Announcement Schemas
+        // ───────────────────────────────────────────
+        Announcement: {
+          type: 'object',
+          properties: {
+            announcementId:   { type: 'integer', example: 1 },
+            title:            { type: 'string',  example: 'ประกาศหยุดวันสงกรานต์' },
+            content:          { type: 'string',  example: 'Hdays in 2026 จะมีวันหยุดเพิ่มเติม 1 วัน' },
+            targetRoles:      { type: 'array', items: { type: 'string', enum: ['SUPERADMIN','ADMIN','MANAGER','USER'] }, example: ['ADMIN','USER'] },
+            targetBranchIds:  { type: 'array', items: { type: 'integer' }, example: [1, 2] },
+            status:           { type: 'string', enum: ['DRAFT','SENT'], example: 'DRAFT' },
+            createdByUserId:  { type: 'integer', example: 3 },
+            updatedByUserId:  { type: 'integer', nullable: true, example: null },
+            sentByUserId:     { type: 'integer', nullable: true, example: null },
+            sentAt:           { type: 'string',  format: 'date-time', nullable: true, example: null },
+            deletedAt:        { type: 'string',  format: 'date-time', nullable: true, example: null },
+            deleteReason:     { type: 'string',  nullable: true, example: null },
+            createdAt:        { type: 'string',  format: 'date-time' },
+            updatedAt:        { type: 'string',  format: 'date-time' },
+            creator: {
+              type: 'object',
+              properties: {
+                userId:    { type: 'integer', example: 3 },
+                firstName: { type: 'string',  example: 'สมคิด' },
+                lastName:  { type: 'string',  example: 'เก่งกาจ' },
+              },
+            },
+          },
+        },
+
+        AnnouncementWithRecipients: {
+          allOf: [
+            { '$ref': '#/components/schemas/Announcement' },
+            {
+              type: 'object',
+              properties: {
+                recipients: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      recipientId:    { type: 'integer', example: 10 },
+                      announcementId: { type: 'integer', example: 1 },
+                      userId:         { type: 'integer', example: 7 },
+                      sentAt:         { type: 'string', format: 'date-time' },
+                      user: {
+                        type: 'object',
+                        properties: {
+                          userId:    { type: 'integer', example: 7 },
+                          firstName: { type: 'string',  example: 'อนุวัตร' },
+                          lastName:  { type: 'string',  example: 'ค์เกื้อ' },
+                          email:     { type: 'string',  example: 'anuwatch@company.com' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+
+        CreateAnnouncementRequest: {
+          type: 'object',
+          required: ['title', 'content'],
+          properties: {
+            title:           { type: 'string', example: 'ประกาศหยุดวันสงกรานต์' },
+            content:         { type: 'string', example: 'บริษัทหยุดวันสงกรานต์ทุกวัน' },
+            targetRoles:     { type: 'array', items: { type: 'string', enum: ['SUPERADMIN','ADMIN','MANAGER','USER'] }, description: 'ตั้งค่าว่าง = ส่งหาทุก role', example: ['ADMIN','USER'] },
+            targetBranchIds: { type: 'array', items: { type: 'integer' }, description: 'ตั้งค่าว่าง = ส่งทุกสาขา', example: [1, 2] },
+          },
+        },
+
+        UpdateAnnouncementRequest: {
+          type: 'object',
+          properties: {
+            title:           { type: 'string', example: 'ประกาศแก้ไข' },
+            content:         { type: 'string', example: 'เนื้อหาใหม่' },
+            targetRoles:     { type: 'array', items: { type: 'string', enum: ['SUPERADMIN','ADMIN','MANAGER','USER'] } },
+            targetBranchIds: { type: 'array', items: { type: 'integer' } },
+          },
+        },
       },
     },
     security: [

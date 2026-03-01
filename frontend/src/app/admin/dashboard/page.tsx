@@ -3,20 +3,15 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  UserX, 
-  Calendar, 
-  Clock,
+import {
   X,
   Search,
   Map as MapIcon,
   Satellite
 } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
-import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem } from "@/services/dashboardService";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
 import type L from "leaflet";
@@ -56,11 +51,6 @@ if (typeof window !== "undefined") {
 }
 
 // Types
-interface BranchOption {
-  code: string;
-  name: string;
-}
-
 interface User {
   id: string;
   name: string;
@@ -124,10 +114,7 @@ const CHART_COLORS = {
 };
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
-
   // States
-  const [selectedBranch, setSelectedBranch] = useState("all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
   const mapRef = useRef<L.Map | null>(null);
 
@@ -144,35 +131,24 @@ export default function AdminDashboard() {
   // ── API Data states ──
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [employeesToday, setEmployeesToday] = useState<EmployeeToday[]>([]);
-  const [branchesMap, setBranchesMap] = useState<BranchMapItem[]>([]);
   const [apiEvents, setApiEvents] = useState<ApiEventItem[]>([]);
   const [apiLocations, setApiLocations] = useState<LocationItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Branch options: dynamic from API
-  const branchOptions: BranchOption[] = useMemo(() => [
-    { code: "all", name: "สาขา: ทั้งหมด" },
-    ...branchesMap.map(b => ({ code: String(b.branchId), name: b.name })),
-  ], [branchesMap]);
-
-  // ── Fetch dashboard data when branch changes ──
+  // ── Fetch dashboard data ──
   useEffect(() => {
-    const branchIdNum =
-      selectedBranch !== "all" ? parseInt(selectedBranch, 10) : undefined;
-
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [summary, employees, branches, eventsResp, locations] = await Promise.all([
-          dashboardService.getAttendanceSummary(branchIdNum),
-          dashboardService.getEmployeesToday(branchIdNum),
+        const [summary, employees, , eventsResp, locations] = await Promise.all([
+          dashboardService.getAttendanceSummary(undefined),
+          dashboardService.getEmployeesToday(undefined),
           dashboardService.getBranchesMap(),
           eventService.getAll({ take: 100 }),
           locationService.getAll(),
         ]);
         setDashboardSummary(summary);
         setEmployeesToday(employees.data);
-        setBranchesMap(branches.data);
         setApiEvents(eventsResp.data);
         setApiLocations(locations);
       } catch (err) {
@@ -183,7 +159,7 @@ export default function AdminDashboard() {
     };
 
     fetchData();
-  }, [selectedBranch]);
+  }, []);
 
   // ── Map API employees → AttendanceStats ──
   const attendanceStats = useMemo((): AttendanceStats => {
@@ -346,6 +322,17 @@ export default function AdminDashboard() {
     );
   }
 
+  const statusLabel = (status: string) => {
+    switch (status) {
+      case 'ON_TIME': return { text: 'ตรงเวลา', cls: 'bg-emerald-100 text-emerald-700' };
+      case 'LATE':    return { text: 'มาสาย',   cls: 'bg-orange-100 text-orange-700'   };
+      case 'ABSENT':  return { text: 'ขาดงาน',  cls: 'bg-red-100 text-red-700'         };
+      default:        return { text: 'ไม่ทราบ', cls: 'bg-gray-100 text-gray-600'       };
+    }
+  };
+
+  const totalChart = donutChartData.reduce((a, b) => a + b.value, 0) || 1;
+
   return (
     <div className="min-h-screen bg-secondaryMain">
       {/* Detail Modal */}
@@ -395,366 +382,257 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Page Header */}
+      {/* ── Header ── */}
       <div className="bg-white border-b border-borderMain px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-primaryMain">ภาพรวมการปฏิบัติงานทั้งหมด</h1>
-            <p className="text-sm text-textMain/70 mt-1">
-              ข้อมูลเรียลไทม์ของระบบตรวจสอบการเข้างาน การลางาน และพื้นที่อนุญาต
-            </p>
+            <h1 className="text-2xl font-bold text-primaryMain">ภาพรวมการปฏิบัติงาน</h1>
+            <p className="text-sm text-textMain/70 mt-0.5">ข้อมูลเรียลไทม์ · ระบบตรวจสอบการเข้างาน</p>
           </div>
-
-          {/* Branch Filter (SuperAdmin only) */}
-          {user?.role === "superadmin" && (
-            <div className="flex items-center gap-3">
-              <label className="text-sm font-medium text-textMain">สาขา:</label>
-              <select
-                value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value)}
-                className="appearance-none px-4 py-2.5 pr-10 border-2 border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain focus:border-accentMain focus:ring-2 focus:ring-accentMain/20 transition-all outline-none cursor-pointer bg-white min-w-50"
-              >
-                {branchOptions.map((branch) => (
-                  <option key={branch.code} value={branch.code}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Main Content */}
-      <main className="px-6 py-8 max-w-8xl mx-auto">
-        {/* Section 1: Stats with Selector */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-primaryMain">
-              {statsType === "attendance" ? "สถิติการเข้างาน" : "สถิติการเข้าร่วมกิจกรรม"}
-            </h2>
-            <div className="flex gap-2 bg-borderMain/50 rounded-lg p-1">
-              <Button
-                variant={statsType === "attendance" ? "default" : "ghost"}
-                onClick={() => setStatsType("attendance")}
-              >
-                การเข้างาน
-              </Button>
-              <Button
-                variant={statsType === "event" ? "default" : "ghost"}
-                onClick={() => setStatsType("event")}
-              >
-                กิจกรรม
-              </Button>
-            </div>
-          </div>
+      {/* ── Main 2-column layout ── */}
+      <main className="flex gap-0 h-[calc(100vh-73px)] overflow-hidden">
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {statsType === "attendance" ? (
-              <>
-                <button
-                  onClick={() => handleDetailClick("absent", attendanceStats.absentUsers)}
-                  className="bg-red-500 rounded-2xl shadow-sm p-6 text-white hover:bg-red-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <UserX className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ขาดงาน</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{attendanceStats.absentCount}</p>
-                  </div>
-                </button>
+        {/* ───── LEFT COLUMN: Map + Activity Log ───── */}
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
-                <button
-                  onClick={() => handleDetailClick("leave", attendanceStats.leaveUsers)}
-                  className="bg-blue-500 rounded-2xl shadow-sm p-6 text-white hover:bg-blue-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Calendar className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ลางาน</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{attendanceStats.leaveCount}</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleDetailClick("late", attendanceStats.lateUsers)}
-                  className="bg-orange-500 rounded-2xl shadow-sm p-6 text-white hover:bg-orange-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Clock className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">มาสาย</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{attendanceStats.lateCount}</p>
-                  </div>
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => handleDetailClick("notParticipated", eventStats.notParticipatedUsers)}
-                  className="bg-red-500 rounded-2xl shadow-sm p-6 text-white hover:bg-red-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <UserX className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ยังไม่เข้าร่วม</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{eventStats.notParticipatedCount}</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleDetailClick("leave", eventStats.leaveEventUsers)}
-                  className="bg-blue-500 rounded-2xl shadow-sm p-6 text-white hover:bg-blue-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Calendar className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ลางาน</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{eventStats.leaveEventCount}</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleDetailClick("late", eventStats.lateEventUsers)}
-                  className="bg-orange-500 rounded-2xl shadow-sm p-6 text-white hover:bg-orange-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Clock className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">มาสาย</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{eventStats.lateEventCount}</p>
-                  </div>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Section 2: Donut Chart */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="text-primaryMain">
-              {statsType === "attendance" ? "สัดส่วนการมาทำงาน" : "สัดส่วนการเข้าร่วมกิจกรรม"}
-            </CardTitle>
-            <CardDescription>
-              แสดงสัดส่วนข้อมูลในรูปแบบกราฟวงกลม (Donut Chart)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col md:flex-row items-center gap-8">
-              {/* Donut Chart */}
-              <div className="w-full md:w-1/2 h-75">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={donutChartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
-                      dataKey="value"
-                      label={({ name, percent }) => 
-                        `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                      }
-                    >
-                      {donutChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: "white",
-                        border: "2px solid #E2E8F0",
-                        borderRadius: "8px",
-                        padding: "8px",
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Legend */}
-              <div className="w-full md:w-1/2 space-y-4">
-                {donutChartData.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between p-4 bg-secondaryMain rounded-lg border-2 border-borderMain">
-                    <div className="flex items-center gap-3">
-                      <div 
-                        className="w-4 h-4 rounded-full" 
-                        style={{ backgroundColor: item.color }}
-                      />
-                      <span className="font-medium text-textMain">{item.name}</span>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-primaryMain">{item.value}</p>
-                      <p className="text-xs text-textMain/70">
-                        {((item.value / donutChartData.reduce((a, b) => a + b.value, 0)) * 100).toFixed(1)}%
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Section 3: Map ต้องใช้ MapContainer จาก react-leaflet */}
-        <Card>
-          <CardHeader className="border-b border-borderMain">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-primaryMain">ตั้งค่าพื้นที่และกิจกรรม</CardTitle>
-                <CardDescription className="mt-1">
-                  กำหนดพื้นที่ปฏิบัติงานและกิจกรรมต่างๆ ที่พนักงานสามารถเข้าถึงได้
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="text-accentMain bg-accentMain/10 text-sm px-4 py-2">
-                {locationsWithStatus.length} รายการ
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="p-6">
-            {/* Map Controls */}
-            <div className="flex flex-col md:flex-row gap-4 mb-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-textMain/40" />
+          {/* Map */}
+          <div className="relative flex-1 min-h-0">
+            {/* Map Controls overlay */}
+            <div className="absolute top-3 left-3 right-3 z-999 flex gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-52">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
                   placeholder="ค้นหาพื้นที่หรือกิจกรรม..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-borderMain rounded-lg focus:outline-none focus:ring-2 focus:ring-primaryMain"
+                  className="w-full pl-9 pr-3 py-2 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg text-sm shadow focus:outline-none focus:ring-2 focus:ring-primaryMain"
                 />
               </div>
-              <div className="flex gap-2">
-                <Button
-                  variant={filterType === 'all' ? 'default' : 'outline'}
-                  onClick={() => setFilterType('all')}
-                  size="sm"
-                >
-                  ทั้งหมด
-                </Button>
-                <Button
-                  variant={filterType === 'location' ? 'default' : 'outline'}
-                  onClick={() => setFilterType('location')}
-                  size="sm"
-                >
-                  พื้นที่
-                </Button>
-                <Button
-                  variant={filterType === 'event' ? 'default' : 'outline'}
-                  onClick={() => setFilterType('event')}
-                  size="sm"
-                >
-                  กิจกรรม
-                </Button>
-                <Button
+              <div className="flex gap-1">
+                {(['all','location','event'] as FilterType[]).map(f => (
+                  <Button key={f} size="sm"
+                    variant={filterType === f ? 'default' : 'outline'}
+                    onClick={() => setFilterType(f)}
+                    className="bg-white/95 backdrop-blur-sm text-xs"
+                  >
+                    {{ all: 'ทั้งหมด', location: 'พื้นที่', event: 'กิจกรรม' }[f]}
+                  </Button>
+                ))}
+                <Button size="sm"
                   variant={mapType === 'default' ? 'default' : 'outline'}
                   onClick={() => setMapType('default')}
-                  size="sm"
-                >
-                  <MapIcon className="h-4 w-4" />
-                </Button>
-                <Button
+                  className="bg-white/95 backdrop-blur-sm"
+                ><MapIcon className="h-4 w-4" /></Button>
+                <Button size="sm"
                   variant={mapType === 'satellite' ? 'default' : 'outline'}
                   onClick={() => setMapType('satellite')}
-                  size="sm"
-                >
-                  <Satellite className="h-4 w-4" />
-                </Button>
+                  className="bg-white/95 backdrop-blur-sm"
+                ><Satellite className="h-4 w-4" /></Button>
               </div>
             </div>
 
-            {/* Map */}
-            {typeof window !== 'undefined' && filteredLocations.length > 0 && (
-              <div className="h-125 rounded-lg overflow-hidden border border-borderMain">
-                <MapContainer
-                  center={[filteredLocations[0].latitude, filteredLocations[0].longitude]}
-                  zoom={13}
-                  className="h-full w-full"
-                  ref={mapRef}
-                >
-                  <TileLayer
-                    attribution={getTileLayerAttribution()}
-                    url={getTileLayerUrl()}
-                  />
-                  {filteredLocations.map((location) => (
-                    <React.Fragment key={location.id}>
-                      <Marker
-                        position={[location.latitude, location.longitude]}
-                      >
-                        <Popup>
-                          <div className="p-2">
-                            <h3 className="font-bold text-sm">{location.name}</h3>
-                            {location.description && (
-                              <p className="text-xs text-gray-600 mt-1">{location.description}</p>
-                            )}
-                            <div className="mt-2 space-y-1">
-                              <p className="text-xs">
-                                <span className="font-medium">ทีม:</span> {location.team}
-                              </p>
-                              <p className="text-xs">
-                                <span className="font-medium">เวลา:</span> {location.time}
-                              </p>
-                              <p className={`text-xs font-medium ${location.statusColor}`}>
-                                {location.checkInStatus}
-                              </p>
-                            </div>
-                          </div>
-                        </Popup>
-                      </Marker>
-                      <Circle
-                        center={[location.latitude, location.longitude]}
-                        radius={location.radius}
-                        pathOptions={{
-                          color: location.type === 'event' ? '#f97316' : '#10b981',
-                          fillColor: location.type === 'event' ? '#f97316' : '#10b981',
-                          fillOpacity: 0.2,
-                        }}
-                      />
-                    </React.Fragment>
-                  ))}
-                </MapContainer>
+            {/* Map itself */}
+            {typeof window !== 'undefined' && filteredLocations.length > 0 ? (
+              <MapContainer
+                center={[filteredLocations[0].latitude, filteredLocations[0].longitude]}
+                zoom={13}
+                className="h-full w-full"
+                ref={mapRef}
+              >
+                <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
+                {filteredLocations.map((location) => (
+                  <React.Fragment key={location.id}>
+                    <Marker position={[location.latitude, location.longitude]}>
+                      <Popup>
+                        <div className="p-2 min-w-40">
+                          <p className="font-bold text-sm">{location.name}</p>
+                          {location.description && <p className="text-xs text-gray-500 mt-1">{location.description}</p>}
+                          <span className={`text-xs font-medium mt-2 inline-block ${location.statusColor}`}>{location.checkInStatus}</span>
+                        </div>
+                      </Popup>
+                    </Marker>
+                    <Circle
+                      center={[location.latitude, location.longitude]}
+                      radius={location.radius}
+                      pathOptions={{
+                        color: location.type === 'event' ? '#f97316' : '#10b981',
+                        fillColor: location.type === 'event' ? '#f97316' : '#10b981',
+                        fillOpacity: 0.15,
+                      }}
+                    />
+                  </React.Fragment>
+                ))}
+              </MapContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center bg-gray-100">
+                <div className="text-center text-gray-400">
+                  <MapIcon className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">ไม่พบข้อมูลพื้นที่</p>
+                </div>
               </div>
             )}
+          </div>
 
-            {/* No Data */}
-            {filteredLocations.length === 0 && (
-              <div className="text-center py-12 text-textMain/60">
-                <MapIcon className="w-16 h-16 mx-auto mb-4 text-textMain/30" />
-                <p className="text-lg font-medium">ไม่พบข้อมูล</p>
-                <p className="text-sm mt-2 text-textMain/50">
-                  ลองค้นหาด้วยคำอื่นหรือเปลี่ยนตัวกรอง
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          {/* Activity Log */}
+          <div className="h-52 border-t-2 border-borderMain bg-white flex flex-col">
+            <div className="px-4 py-2 border-b border-borderMain flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-semibold text-primaryMain">บันทึกกิจกรรม (Activity Log)</h3>
+              <span className="text-xs text-textMain/60">{employeesToday.length} รายการ</span>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
+                    <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
+                    <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
+                    <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
+                    <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-borderMain/50">
+                  {employeesToday.length === 0 ? (
+                    <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
+                  ) : (
+                    employeesToday.map((emp) => {
+                      const nameParts = emp.name.split(' ');
+                      const firstName = nameParts[0] ?? emp.name;
+                      const lastName  = nameParts.slice(1).join(' ');
+                      const sl = statusLabel(emp.status);
+                      return (
+                        <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
+                          <td className="px-3 py-2 text-textMain">{firstName}</td>
+                          <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
+                          <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
+                              {sl.text}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* ───── RIGHT PANEL ───── */}
+        <div className="w-80 shrink-0 border-l-2 border-borderMain bg-white flex flex-col overflow-y-auto">
+
+          {/* Tabs */}
+          <div className="flex shrink-0 border-b-2 border-borderMain">
+            <button
+              onClick={() => setStatsType('attendance')}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+                statsType === 'attendance'
+                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
+                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+              }`}
+            >
+              การเข้างาน
+            </button>
+            <button
+              onClick={() => setStatsType('event')}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors border-l border-borderMain ${
+                statsType === 'event'
+                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
+                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+              }`}
+            >
+              กิจกรรม
+            </button>
+          </div>
+
+          {/* Date range / info */}
+          <div className="px-4 py-2 bg-gray-50 border-b border-borderMain shrink-0">
+            <p className="text-xs text-textMain/60">เลือกช่วงเวลาหรือวันที่เพื่อดูข้อมูล</p>
+            <p className="text-xs font-medium text-primaryMain mt-0.5">
+              {new Date().toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
+          </div>
+
+          {/* Donut Chart */}
+          <div className="px-4 py-3 shrink-0">
+            <div className="h-52">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={donutChartData}
+                    cx="50%" cy="50%"
+                    innerRadius={52} outerRadius={82}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {donutChartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
+                    formatter={(value: number | undefined) => [(value ?? 0) + ' คน']}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Legend rows — clickable */}
+          <div className="px-4 pb-4 space-y-2 shrink-0">
+            {donutChartData.map((item) => {
+              let detailFn: (() => void) | undefined;
+              if (statsType === 'attendance') {
+                if (item.name === 'ขาดงาน') detailFn = () => handleDetailClick('absent', attendanceStats.absentUsers);
+                if (item.name === 'ลางาน')  detailFn = () => handleDetailClick('leave',  attendanceStats.leaveUsers);
+                if (item.name === 'มาสาย')  detailFn = () => handleDetailClick('late',   attendanceStats.lateUsers);
+              } else {
+                if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', eventStats.notParticipatedUsers);
+                if (item.name === 'ลางาน')      detailFn = () => handleDetailClick('leave', eventStats.leaveEventUsers);
+                if (item.name === 'มาสาย')      detailFn = () => handleDetailClick('late',  eventStats.lateEventUsers);
+              }
+              const pct = ((item.value / totalChart) * 100).toFixed(0);
+              return (
+                <button
+                  key={item.name}
+                  onClick={detailFn}
+                  disabled={!detailFn}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-borderMain hover:border-primaryMain hover:bg-gray-50 transition-colors disabled:cursor-default"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                    <span className="text-sm text-textMain">{item.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-primaryMain">{item.value}</span>
+                    <span className="text-xs text-textMain/50 w-8 text-right">{pct}%</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-borderMain mx-4" />
+
+          {/* Summary totals */}
+          <div className="px-4 py-3 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-textMain/60">พนักงานทั้งหมด</span>
+              <span className="font-bold text-primaryMain">{attendanceStats.totalEmployees} คน</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-textMain/60">คิดรวมอัตราการสถิติ</span>
+              <span className="font-bold text-emerald-600">{totalChart} คน</span>
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   );

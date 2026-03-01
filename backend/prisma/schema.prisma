@@ -22,6 +22,7 @@ model User {
   phone                                                   String               @map("phone")
   email                                                   String               @unique
   password                                                String               @map("password")
+  customPassword                                          String?              @map("custom_password")
   avatarUrl                                               String?              @map("avatar_url")
   birthDate                                               DateTime?            @map("birth_date") @db.Date
   branchId                                                Int?                 @map("branch_id")

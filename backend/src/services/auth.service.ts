@@ -1,4 +1,3 @@
-import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
@@ -32,9 +31,12 @@ export const authService = {
         throw new Error('ไม่พบพนักงาน (employeeId ไม่ถูกต้อง)');
       }
 
-      // 2. เช็ค password = nationalId
-      if (password !== user.nationalId) {
-        throw new Error('รหัสผ่าน (nationalId) ไม่ถูกต้อง');
+      // 2. เช็ค password
+      // ถ้าผู้ใช้เคยเปลี่ยนรหัสผ่านเองแล้ว → ใช้ customPassword
+      // ถ้ายังไม่เคยเปลี่ยน → fallback ไปใช้ nationalId (รหัสเริ่มต้น)
+      const validPassword = user.customPassword ?? user.nationalId;
+      if (password !== validPassword) {
+        throw new Error('รหัสผ่านไม่ถูกต้อง');
       }
 
       // 3. สร้าง tokens
@@ -234,19 +236,17 @@ export const authService = {
         throw new Error('ไม่พบผู้ใช้');
       }
 
-      // 2. เช็ค password เก่า
-      const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
-      if (!isPasswordValid) {
+      // 2. เช็ค password ปัจจุบัน
+      // ถ้าเคยเปลี่ยนแล้ว → เช็ค customPassword, ถ้ายังไม่เคย → เช็ค nationalId
+      const validPassword = user.customPassword ?? user.nationalId;
+      if (currentPassword !== validPassword) {
         throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
       }
 
-      // 3. Hash password ใหม่
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-      // 4. อัพเดท password
+      // 3. บันทึกรหัสใหม่ลง customPassword เท่านั้น — nationalId ไม่เปลี่ยน
       await prisma.user.update({
         where: { userId },
-        data: { password: hashedPassword }
+        data: { customPassword: newPassword }
       });
 
       // 5. ลบ session เก่าทั้งหมด (บังคับ login ใหม่)

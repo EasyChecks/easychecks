@@ -16,10 +16,16 @@ import { Resend } from 'resend';
  * ─────────────────────────────────────────────────────────────
  */
 
-// อ่านจาก env ทุกครั้ง ไม่แคจรองไว้ใน module scope
-// เพราะถ้าเปลี่ยน env โดยไม่ restart จะยังใช้บริการ onboarding@resend.dev ได้
-// (ผู้รับนอกโดเมนยัง receive ได้เฉพาะอีเมลที่ยืนยันใน Resend dashboard)
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy init — สร้าง Resend instance เฉพาะตอนส่งอีเมลจริง ป้องกัน crash ตอน startup
+let _resend: Resend | null = null;
+const getResend = (): Resend => {
+  if (!_resend) {
+    const key = process.env.RESEND_API_KEY;
+    if (!key || key === 're_placeholder') throw new Error('RESEND_API_KEY ยังไม่ได้ตั้งค่า');
+    _resend = new Resend(key);
+  }
+  return _resend;
+};
 const MAIL_FROM = process.env.MAIL_FROM || 'EasyCheck <onboarding@resend.dev>';
 
 export interface SendAnnouncementEmailOptions {
@@ -40,7 +46,7 @@ export interface SendAnnouncementEmailOptions {
 export const sendAnnouncementEmail = async (opts: SendAnnouncementEmailOptions): Promise<void> => {
   const { to, recipientName, title, content, sentAt } = opts;
 
-  await resend.emails.send({
+  await getResend().emails.send({
     from: MAIL_FROM,
     to,
     subject: `📢 [EasyCheck] ${title}`,

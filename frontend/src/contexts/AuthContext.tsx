@@ -14,7 +14,7 @@
  *   const { user, isAuthenticated, login, logout } = useAuth();
  */
 
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { AuthUser, UserRole, LoginCredentials, AuthContextType, MOCK_CREDENTIALS, MOCK_USERS } from '@/types/auth';
 import { authService } from '@/services/authService';
 
@@ -25,21 +25,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /**
    * user state — เก็บข้อมูลผู้ใช้ที่ login อยู่
    *
-   * ใช้ Lazy Initializer (ฟังก์ชันใน useState) เพื่ออ่าน sessionStorage แบบ synchronous
-   * ตั้งแต่ render ครั้งแรก → ป้องกัน "blank flash" ของ Protected Route
-   * (ถ้าใช้ useEffect จะมี 1 render ที่ user = null ก่อน → ProtectedRoute redirect ผิด)
+   * เริ่มต้นที่ null เสมอ (ทั้ง server และ client) เพื่อป้องกัน hydration mismatch
+   * หลัง mount จะ restore จาก sessionStorage ผ่าน useEffect ด้านล่าง
    */
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    if (typeof window === 'undefined') return null; // SSR: ไม่มี sessionStorage
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true); // true จนกว่าจะ restore sessionStorage แล้ว
+  const [error, setError] = useState<string | null>(null);
+
+  // Restore user จาก sessionStorage หลัง mount (client-side only)
+  useEffect(() => {
     try {
       const stored = sessionStorage.getItem('authUser');
-      return stored ? JSON.parse(stored) : null;
+      if (stored) {
+        setUser(JSON.parse(stored));
+      }
     } catch {
-      return null; // JSON parse ล้มเหลว → ถือว่ายังไม่ได้ login
+      // JSON parse ล้มเหลว → ถือว่ายังไม่ได้ login
+    } finally {
+      setIsLoading(false);
     }
-  });
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  }, []);
 
   /**
    * login() — รับ credentials แล้วคืน role ของผู้ที่ login สำเร็จ

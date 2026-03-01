@@ -42,7 +42,7 @@ export const authService = {
    */
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
-      const response = await api.post<LoginResponse>('api/auth/login', {
+      const response = await api.post<LoginResponse>('/auth/login', {
         employeeId: credentials.employeeId,
         password: credentials.password
       });

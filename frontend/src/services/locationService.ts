@@ -34,7 +34,8 @@ export const locationService = {
    */
   async getAll(): Promise<LocationItem[]> {
     const res = await api.get('/locations');
-    return res.data.data || res.data;
+    const data = res.data?.data ?? res.data;
+    return Array.isArray(data) ? data : [];
   },
 
   /**

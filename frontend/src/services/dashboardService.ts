@@ -14,6 +14,7 @@ export interface AttendanceSummary {
   onTime: number;
   late: number;
   absent: number;
+  leave: number;
   total: number;
 }
 
@@ -21,7 +22,7 @@ export interface EmployeeToday {
   employeeId: string;
   name: string;
   branch: string;
-  status: 'ON_TIME' | 'LATE' | 'ABSENT';
+  status: 'ON_TIME' | 'LATE' | 'ABSENT' | 'LEAVE' | 'LEAVE_APPROVED';
   checkIn: string | null;
   checkOut: string | null;
   lateMinutes: number;

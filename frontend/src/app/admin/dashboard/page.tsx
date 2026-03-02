@@ -9,9 +9,13 @@ import {
   X,
   Search,
   Map as MapIcon,
-  Satellite
+  Satellite,
+  AlertTriangle,
+  TrendingUp,
+  Users,
+  Clock
 } from "lucide-react";
-import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday } from "@/services/dashboardService";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, LocationEvent, BranchStats } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
 import type L from "leaflet";
@@ -37,6 +41,7 @@ const Popup = dynamic(
   () => import("react-leaflet").then((mod) => mod.Popup),
   { ssr: false }
 );
+
 
 // Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
 if (typeof window !== "undefined") {
@@ -133,6 +138,8 @@ export default function AdminDashboard() {
   const [employeesToday, setEmployeesToday] = useState<EmployeeToday[]>([]);
   const [apiEvents, setApiEvents] = useState<ApiEventItem[]>([]);
   const [apiLocations, setApiLocations] = useState<LocationItem[]>([]);
+  const [locationEvents, setLocationEvents] = useState<LocationEvent[]>([]);
+  const [branchStats, setBranchStats] = useState<BranchStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // ── Fetch dashboard data ──
@@ -140,6 +147,7 @@ export default function AdminDashboard() {
     const fetchData = async () => {
       setIsLoading(true);
       try {
+        // ดึงข้อมูลหลัก (ถ้าพังจะไม่แสดงอะไรเลย)
         const [summary, employees, , eventsResp, locations] = await Promise.all([
           dashboardService.getAttendanceSummary(undefined),
           dashboardService.getEmployeesToday(undefined),
@@ -151,6 +159,14 @@ export default function AdminDashboard() {
         setEmployeesToday(employees.data);
         setApiEvents(eventsResp.data);
         setApiLocations(locations);
+
+        // ดึงข้อมูลเสริม (ถ้าพังไม่กระทบข้อมูลหลัก)
+        const [locEventsResult, statsResult] = await Promise.allSettled([
+          dashboardService.getLocationEvents(undefined),
+          dashboardService.getBranchStats(undefined),
+        ]);
+        if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
+        if (statsResult.status === 'fulfilled') setBranchStats(statsResult.value);
       } catch (err) {
         console.error('[Dashboard] Failed to fetch data:', err);
       } finally {
@@ -174,15 +190,16 @@ export default function AdminDashboard() {
     });
     const absentUsers = employeesToday.filter(e => e.status === 'ABSENT').map(toUser);
     const lateUsers   = employeesToday.filter(e => e.status === 'LATE').map(toUser);
-    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME').map(toUser);
+    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME' || e.status === 'LEAVE_APPROVED').map(toUser);
+    const leaveUsers  = employeesToday.filter(e => e.status === 'LEAVE').map(toUser);
     return {
       totalEmployees: dashboardSummary?.total ?? employeesToday.length,
       absentCount:    dashboardSummary?.absent ?? absentUsers.length,
-      leaveCount:     0,
+      leaveCount:     dashboardSummary?.leave ?? leaveUsers.length,
       lateCount:      dashboardSummary?.late ?? lateUsers.length,
       onTimeCount:    dashboardSummary?.onTime ?? onTimeUsers.length,
       absentUsers,
-      leaveUsers:     [],
+      leaveUsers,
       lateUsers,
       onTimeUsers,
     };
@@ -324,10 +341,12 @@ export default function AdminDashboard() {
 
   const statusLabel = (status: string) => {
     switch (status) {
-      case 'ON_TIME': return { text: 'ตรงเวลา', cls: 'bg-emerald-100 text-emerald-700' };
-      case 'LATE':    return { text: 'มาสาย',   cls: 'bg-orange-100 text-orange-700'   };
-      case 'ABSENT':  return { text: 'ขาดงาน',  cls: 'bg-red-100 text-red-700'         };
-      default:        return { text: 'ไม่ทราบ', cls: 'bg-gray-100 text-gray-600'       };
+      case 'ON_TIME':        return { text: 'ตรงเวลา', cls: 'bg-emerald-100 text-emerald-700' };
+      case 'LATE':           return { text: 'มาสาย',   cls: 'bg-orange-100 text-orange-700'   };
+      case 'ABSENT':         return { text: 'ขาดงาน',  cls: 'bg-red-100 text-red-700'         };
+      case 'LEAVE':          return { text: 'ลางาน',   cls: 'bg-blue-100 text-blue-700'       };
+      case 'LEAVE_APPROVED': return { text: 'ลา(มางาน)', cls: 'bg-emerald-100 text-emerald-700' };
+      default:               return { text: 'ไม่ทราบ', cls: 'bg-gray-100 text-gray-600'       };
     }
   };
 
@@ -401,7 +420,7 @@ export default function AdminDashboard() {
           {/* Map */}
           <div className="relative flex-1 min-h-0">
             {/* Map Controls overlay */}
-            <div className="absolute top-3 left-3 right-3 z-999 flex gap-2 flex-wrap">
+            <div className="absolute top-3 left-12 right-3 z-999 flex gap-2 flex-wrap">
               <div className="relative flex-1 min-w-52">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
@@ -414,23 +433,23 @@ export default function AdminDashboard() {
               </div>
               <div className="flex gap-1">
                 {(['all','location','event'] as FilterType[]).map(f => (
-                  <Button key={f} size="sm"
-                    variant={filterType === f ? 'default' : 'outline'}
+                  <Button key={f} size="sm" variant="ghost"
                     onClick={() => setFilterType(f)}
-                    className="bg-white/95 backdrop-blur-sm text-xs"
+                    style={filterType === f ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                    className="text-xs shadow-md border border-gray-300 rounded-md"
                   >
                     {{ all: 'ทั้งหมด', location: 'พื้นที่', event: 'กิจกรรม' }[f]}
                   </Button>
                 ))}
-                <Button size="sm"
-                  variant={mapType === 'default' ? 'default' : 'outline'}
+                <Button size="sm" variant="ghost"
                   onClick={() => setMapType('default')}
-                  className="bg-white/95 backdrop-blur-sm"
+                  style={mapType === 'default' ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                  className="shadow-md border border-gray-300 rounded-md"
                 ><MapIcon className="h-4 w-4" /></Button>
-                <Button size="sm"
-                  variant={mapType === 'satellite' ? 'default' : 'outline'}
+                <Button size="sm" variant="ghost"
                   onClick={() => setMapType('satellite')}
-                  className="bg-white/95 backdrop-blur-sm"
+                  style={mapType === 'satellite' ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                  className="shadow-md border border-gray-300 rounded-md"
                 ><Satellite className="h-4 w-4" /></Button>
               </div>
             </div>
@@ -476,6 +495,26 @@ export default function AdminDashboard() {
               </div>
             )}
           </div>
+
+          {/* Location Events Alert (endpoint #4) */}
+          {locationEvents.length > 0 && (
+            <div className="border-t-2 border-borderMain bg-amber-50 px-4 py-2 shrink-0">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span className="text-xs font-semibold text-amber-700">แจ้งเตือน: Check-in นอกพื้นที่ ({locationEvents.length} รายการ)</span>
+              </div>
+              <div className="space-y-1 max-h-24 overflow-y-auto">
+                {locationEvents.map((evt) => (
+                  <div key={evt.eventId} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1 border border-amber-200">
+                    <span className="text-textMain font-medium">{evt.employeeName}</span>
+                    <span className="text-textMain/60">{evt.expectedLocation}</span>
+                    <span className="text-amber-700 font-mono">{evt.actualDistance}m / {evt.allowedRadius}m</span>
+                    <span className="text-textMain/50">{evt.checkInTime}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Activity Log */}
           <div className="h-52 border-t-2 border-borderMain bg-white flex flex-col">
@@ -562,25 +601,33 @@ export default function AdminDashboard() {
           {/* Donut Chart */}
           <div className="px-4 py-3 shrink-0">
             <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={donutChartData}
-                    cx="50%" cy="50%"
-                    innerRadius={52} outerRadius={82}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {donutChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
-                    formatter={(value: number | undefined) => [(value ?? 0) + ' คน']}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              {donutChartData.every(d => d.value === 0) ? (
+                <div className="h-full flex flex-col items-center justify-center text-textMain/40">
+                  <div className="w-28 h-28 rounded-full border-8 border-gray-200 flex items-center justify-center">
+                    <span className="text-xs text-center">ยังไม่มี<br/>ข้อมูล</span>
+                  </div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={donutChartData}
+                      cx="50%" cy="50%"
+                      innerRadius={52} outerRadius={82}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {donutChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
+                      formatter={(value: number | undefined) => [(value ?? 0) + ' คน']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
@@ -632,6 +679,40 @@ export default function AdminDashboard() {
               <span className="font-bold text-emerald-600">{totalChart} คน</span>
             </div>
           </div>
+
+          {/* Branch Stats KPI (endpoint #5) */}
+          {branchStats && (
+            <>
+              <div className="border-t border-borderMain mx-4" />
+              <div className="px-4 py-3 shrink-0">
+                <h4 className="text-xs font-semibold text-primaryMain mb-2 flex items-center gap-1">
+                  <TrendingUp className="h-3.5 w-3.5" /> สถิติสาขา: {branchStats.name}
+                </h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-200">
+                    <Users className="h-4 w-4 mx-auto text-emerald-600 mb-0.5" />
+                    <p className="text-lg font-bold text-emerald-700">{branchStats.presentToday}</p>
+                    <p className="text-[10px] text-emerald-600">มาตรงเวลา</p>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg p-2 text-center border border-orange-200">
+                    <Clock className="h-4 w-4 mx-auto text-orange-600 mb-0.5" />
+                    <p className="text-lg font-bold text-orange-700">{branchStats.lateToday}</p>
+                    <p className="text-[10px] text-orange-600">มาสาย</p>
+                  </div>
+                  <div className="bg-red-50 rounded-lg p-2 text-center border border-red-200">
+                    <X className="h-4 w-4 mx-auto text-red-600 mb-0.5" />
+                    <p className="text-lg font-bold text-red-700">{branchStats.absentToday}</p>
+                    <p className="text-[10px] text-red-600">ขาดงาน</p>
+                  </div>
+                  <div className="bg-blue-50 rounded-lg p-2 text-center border border-blue-200">
+                    <TrendingUp className="h-4 w-4 mx-auto text-blue-600 mb-0.5" />
+                    <p className="text-lg font-bold text-blue-700">{branchStats.attendanceRate}%</p>
+                    <p className="text-[10px] text-blue-600">อัตราการเข้างาน</p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </main>
     </div>

@@ -21,7 +21,8 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     router.push('/login');
   };
 
-  const navigation = [
+  // ── ส่วนจัดการ (Admin) ──────────────────────────────────────
+  const adminNavigation = [
     {
       name: 'แดชบอร์ด',
       href: '/admin/dashboard',
@@ -146,7 +147,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         {/* Navigation Links */}
         <nav className="flex-1 overflow-y-auto p-4">
           <ul className="space-y-2">
-            {navigation.map((item) => {
+            {adminNavigation.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <li key={item.name}>

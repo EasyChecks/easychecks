@@ -21,7 +21,8 @@ export default function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
     router.push('/login');
   };
 
-  const navigation = [
+  // ── ส่วนจัดการ (SuperAdmin) ──────────────────────────────────────
+  const superadminNavigation = [
     {
       name: 'แดชบอร์ด',
       href: '/superadmin/dashboard',
@@ -117,7 +118,7 @@ export default function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
                 </div>
                 <div>
                   <h1 className="text-lg font-bold text-gray-800">EasyCheck</h1>
-                  <p className="text-xs text-gray-500">Admin Panel</p>
+                  <p className="text-xs text-gray-500">Super Admin Panel</p>
                 </div>
               </div>
             )}
@@ -146,7 +147,7 @@ export default function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
         {/* Navigation Links */}
         <nav className="flex-1 overflow-y-auto p-4">
           <ul className="space-y-2">
-            {navigation.map((item) => {
+            {superadminNavigation.map((item) => {
               const isActive = pathname === item.href;
               return (
                 <li key={item.name}>

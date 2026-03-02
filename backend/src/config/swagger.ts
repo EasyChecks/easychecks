@@ -29,8 +29,7 @@ const options: swaggerJsdoc.Options = {
         BearerAuth: {
           type: 'http',
           scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'ใส่ JWT Token ที่ได้จากการ Login',
+          description: 'ใส่ Session Token ที่ได้จากการ Login (accessToken) ใน Authorization: Bearer <token>',
         },
       },
       schemas: {
@@ -404,17 +403,40 @@ const options: swaggerJsdoc.Options = {
           properties: {
             accessToken: {
               type: 'string',
-              description: 'JWT Access Token (อายุ 15 นาที)',
-              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+              description: 'Session Token (อายุ 15 นาที) — ใช้ใน Authorization: Bearer <token>',
+              example: 'a3f8d2c1b5e9...',
             },
             refreshToken: {
               type: 'string',
-              description: 'Refresh Token (อายุ 7 วัน)',
-              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+              description: 'Refresh Token (อายุ 7 วัน) — ใช้ขอ accessToken ใหม่',
+              example: 'f7c4e6a2d1b8...',
+            },
+            expiresIn: {
+              type: 'integer',
+              description: 'อายุของ accessToken (วินาที)',
+              example: 900,
             },
             user: {
-              $ref: '#/components/schemas/UserProfile',
+              $ref: '#/components/schemas/LoginUser',
             },
+          },
+        },
+        LoginUser: {
+          type: 'object',
+          description: 'ข้อมูลผู้ใช้ที่ได้รับหลัง Login สำเร็จ',
+          properties: {
+            userId: { type: 'integer', example: 5 },
+            employeeId: { type: 'string', example: 'BKK001' },
+            firstName: { type: 'string', example: 'สมชาย' },
+            lastName: { type: 'string', example: 'ใจดี' },
+            email: { type: 'string', example: 'somchai@example.com' },
+            role: {
+              type: 'string',
+              enum: ['USER', 'MANAGER', 'ADMIN', 'SUPERADMIN'],
+              example: 'ADMIN',
+            },
+            avatarUrl: { type: 'string', nullable: true, example: 'https://xxx.supabase.co/storage/v1/object/public/avatars/male-1.png' },
+            branchId: { type: 'integer', nullable: true, example: 1 },
           },
         },
 
@@ -483,29 +505,12 @@ const options: swaggerJsdoc.Options = {
         CreateUserRequest: {
           type: 'object',
           required: [
-            'createdByUserId', 'creatorRole',
             'title', 'firstName', 'lastName', 'gender', 'nationalId',
             'emergent_tel', 'emergent_first_name', 'emergent_last_name',
             'emergent_relation', 'phone', 'email', 'password',
             'birthDate', 'branchId',
           ],
           properties: {
-            createdByUserId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัส Admin ที่สร้าง (audit log)',
-            },
-            creatorRole: {
-              type: 'string',
-              enum: ['ADMIN', 'SUPERADMIN'],
-              example: 'ADMIN',
-            },
-            creatorBranchId: {
-              type: 'integer',
-              nullable: true,
-              example: 1,
-              description: 'สาขาของ Admin (จำเป็นถ้า creatorRole=ADMIN)',
-            },
             title: {
               type: 'string',
               enum: ['MR', 'MRS', 'MISS'],
@@ -559,23 +564,7 @@ const options: swaggerJsdoc.Options = {
         },
         UpdateUserRequest: {
           type: 'object',
-          required: ['updatedByUserId', 'updaterRole'],
           properties: {
-            updatedByUserId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัส Admin ที่แก้ไข (audit log)',
-            },
-            updaterRole: {
-              type: 'string',
-              enum: ['ADMIN', 'SUPERADMIN'],
-              example: 'ADMIN',
-            },
-            updaterBranchId: {
-              type: 'integer',
-              nullable: true,
-              example: 1,
-            },
             firstName: { type: 'string', example: 'สมชาย' },
             lastName: { type: 'string', example: 'ใจดี' },
             nickname: { type: 'string', example: 'ชาย' },

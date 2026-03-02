@@ -48,23 +48,13 @@ import { parse } from 'csv-parse/sync';
  */
 export const createUser = async (req: Request, res: Response) => {
   try {
-    // ดึงข้อมูลจาก body (ตอนนี้ยังไม่มี auth)
-    // TODO: หลังจากเพื่อนทำ Auth เสร็จ เปลี่ยนเป็น req.user
-    const { 
-      createdByUserId, 
-      creatorRole, 
-      creatorBranchId,
-      ...userData 
-    } = req.body;
-
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!createdByUserId) {
-      return sendError(res, 'กรุณาระบุ createdByUserId (ผู้สร้าง)', 400);
+    // ดึงข้อมูล requester จาก token (ผ่าน authenticate middleware)
+    const requester = req.user!;
+    if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
+      return sendError(res, 'ไม่มีสิทธิ์สร้างผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
     }
 
-    if (!creatorRole || !['ADMIN', 'SUPERADMIN'].includes(creatorRole)) {
-      return sendError(res, 'กรุณาระบุ creatorRole ที่ถูกต้อง (ADMIN หรือ SUPERADMIN)', 400);
-    }
+    const { ...userData } = req.body;
 
     // Validate required fields (ไม่มี employeeId แล้ว เพราะ auto-generate)
     const requiredFields = ['title', 'firstName', 'lastName', 'gender', 'nationalId', 
@@ -94,9 +84,9 @@ export const createUser = async (req: Request, res: Response) => {
     const user = await userService.createUser({
       ...userData,
       branchId: parseInt(userData.branchId),
-      createdByUserId: parseInt(createdByUserId),
-      creatorRole,
-      creatorBranchId: creatorBranchId ? parseInt(creatorBranchId) : undefined,
+      createdByUserId: requester.userId,
+      creatorRole: requester.role,
+      creatorBranchId: requester.branchId,
     });
 
     // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Create สำเร็จ
@@ -111,43 +101,21 @@ export const createUser = async (req: Request, res: Response) => {
 /**
  * 📋 ดึงผู้ใช้ทั้งหมด (ตาม role และ branch)
  * GET /api/users
- * 
+ *
  * Query: {
- *   requesterId: number,     // (จำเป็น) ผู้ขอดูข้อมูล
- *   requesterRole: string,   // (จำเป็น) Role ของผู้ขอ
- *   requesterBranchId?: number,
- *   branchId?: number,       // (optional) กรองตามสาขา (SuperAdmin only)
- *   role?: string,           // (optional) กรองตาม role
- *   status?: string,         // (optional) กรองตาม status
- *   search?: string,         // (optional) ค้นหา
- *   page?: number,           // (optional) หน้า
- *   limit?: number           // (optional) จำนวนต่อหน้า
+ *   branchId?: number,  // (optional) กรองตามสาขา (SuperAdmin only)
+ *   role?: string,      // (optional) กรองตาม role
+ *   status?: string,    // (optional) กรองตาม status
+ *   search?: string,    // (optional) ค้นหา
+ *   page?: number,      // (optional) หน้า
+ *   limit?: number      // (optional) จำนวนต่อหน้า
  * }
  */
 export const getUsers = async (req: Request, res: Response) => {
   try {
-    // ดึงข้อมูลจาก query (ตอนนี้ยังไม่มี auth)
-    // TODO: หลังจากเพื่อนทำ Auth เสร็จ เปลี่ยนเป็น req.user
-    const { 
-      requesterId, 
-      requesterRole, 
-      requesterBranchId,
-      branchId,
-      role,
-      status,
-      search,
-      page,
-      limit
-    } = req.query;
-
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!requesterId) {
-      return sendError(res, 'กรุณาระบุ requesterId (ผู้ขอดูข้อมูล)', 400);
-    }
-
-    if (!requesterRole) {
-      return sendError(res, 'กรุณาระบุ requesterRole', 400);
-    }
+    // ดึงข้อมูล requester จาก token
+    const requester = req.user!;
+    const { branchId, role, status, search, page, limit } = req.query;
 
     // เตรียม filter
     const filters: any = {};
@@ -158,9 +126,9 @@ export const getUsers = async (req: Request, res: Response) => {
 
     // เรียก service
     const result = await userService.getUsers(
-      parseInt(requesterId as string),
-      requesterRole as string,
-      requesterBranchId ? parseInt(requesterBranchId as string) : undefined,
+      requester.userId,
+      requester.role,
+      requester.branchId,
       filters,
       page ? parseInt(page as string) : 1,
       limit ? parseInt(limit as string) : 20
@@ -190,14 +158,14 @@ export const getUserById = async (req: Request, res: Response) => {
       return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
     }
 
-    const { requesterId, requesterRole, requesterBranchId } = req.query;
+    const requester = req.user!;
 
     // เรียก service
     const user = await userService.getUserById(
       userId,
-      requesterId ? parseInt(requesterId as string) : undefined,
-      requesterRole as string | undefined,
-      requesterBranchId ? parseInt(requesterBranchId as string) : undefined
+      requester.userId,
+      requester.role,
+      requester.branchId
     );
 
     sendSuccess(res, user);
@@ -228,29 +196,20 @@ export const updateUser = async (req: Request, res: Response) => {
       return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
     }
 
-    // ดึงข้อมูลจาก body
-    const { 
-      updatedByUserId, 
-      updaterRole, 
-      updaterBranchId,
-      ...updateData 
-    } = req.body;
-
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!updatedByUserId) {
-      return sendError(res, 'กรุณาระบุ updatedByUserId (ผู้แก้ไข)', 400);
+    // ดึงข้อมูล requester จาก token
+    const requester = req.user!;
+    if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
+      return sendError(res, 'ไม่มีสิทธิ์แก้ไขผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
     }
 
-    if (!updaterRole) {
-      return sendError(res, 'กรุณาระบุ updaterRole', 400);
-    }
+    const { ...updateData } = req.body;
 
     // เรียก service
     const updatedUser = await userService.updateUser(
-      userId, 
-      parseInt(updatedByUserId), 
-      updaterRole,
-      updaterBranchId ? parseInt(updaterBranchId) : undefined,
+      userId,
+      requester.userId,
+      requester.role,
+      requester.branchId,
       updateData
     );
 
@@ -282,16 +241,12 @@ export const deleteUser = async (req: Request, res: Response) => {
       return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
     }
 
-    const { deletedByUserId, deleterRole, deleterBranchId, deleteReason } = req.body;
-
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!deletedByUserId) {
-      return sendError(res, 'กรุณาระบุ deletedByUserId (ผู้ลบ)', 400);
+    const requester = req.user!;
+    if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
+      return sendError(res, 'ไม่มีสิทธิ์ลบผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
     }
 
-    if (!deleterRole || !['ADMIN', 'SUPERADMIN'].includes(deleterRole)) {
-      return sendError(res, 'กรุณาระบุ deleterRole ที่ถูกต้อง (ADMIN หรือ SUPERADMIN)', 400);
-    }
+    const { deleteReason } = req.body;
 
     if (!deleteReason || deleteReason.trim().length === 0) {
       return sendError(res, 'กรุณาระบุเหตุผลในการลบ (deleteReason)', 400);
@@ -299,10 +254,10 @@ export const deleteUser = async (req: Request, res: Response) => {
 
     // เรียก service
     const result = await userService.deleteUser(
-      userId, 
-      parseInt(deletedByUserId), 
-      deleterRole,
-      deleterBranchId ? parseInt(deleterBranchId) : undefined,
+      userId,
+      requester.userId,
+      requester.role,
+      requester.branchId,
       deleteReason
     );
 
@@ -335,16 +290,11 @@ export const deleteUser = async (req: Request, res: Response) => {
  */
 export const bulkCreateUsers = async (req: Request, res: Response) => {
   try {
-    const { createdByUserId, creatorRole, creatorBranchId, csvData } = req.body;
-
-    // ตรวจสอบว่ามีข้อมูลที่จำเป็นมาไหม
-    if (!createdByUserId) {
-      return sendError(res, 'กรุณาระบุ createdByUserId (ผู้สร้าง)', 400);
+    const requester = req.user!;
+    if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
+      return sendError(res, 'ไม่มีสิทธิ์นำเข้าข้อมูล (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
     }
-
-    if (!creatorRole || !['ADMIN', 'SUPERADMIN'].includes(creatorRole)) {
-      return sendError(res, 'กรุณาระบุ creatorRole ที่ถูกต้อง (ADMIN หรือ SUPERADMIN)', 400);
-    }
+    const { csvData } = req.body;
 
     if (!csvData || typeof csvData !== 'string') {
       return sendError(res, 'กรุณาระบุ csvData', 400);
@@ -369,9 +319,9 @@ export const bulkCreateUsers = async (req: Request, res: Response) => {
     // เรียก service
     const result = await userService.bulkCreateUsers(
       users,
-      parseInt(createdByUserId),
-      creatorRole,
-      creatorBranchId ? parseInt(creatorBranchId) : undefined
+      requester.userId,
+      requester.role,
+      requester.branchId
     );
 
     // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Bulk Import สำเร็จ
@@ -400,15 +350,11 @@ export const bulkCreateUsers = async (req: Request, res: Response) => {
  */
 export const getUserStatistics = async (req: Request, res: Response) => {
   try {
-    const { requesterRole, requesterBranchId } = req.query;
-
-    if (!requesterRole) {
-      return sendError(res, 'กรุณาระบุ requesterRole', 400);
-    }
+    const requester = req.user!;
 
     const statistics = await userService.getUserStatistics(
-      requesterRole as string,
-      requesterBranchId ? parseInt(requesterBranchId as string) : undefined
+      requester.role,
+      requester.branchId
     );
 
     sendSuccess(res, statistics);

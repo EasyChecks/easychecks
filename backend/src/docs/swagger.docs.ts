@@ -31,6 +31,10 @@
  *       **ข้อมูล Login:**
  *       - username: `employeeId` เช่น BKK001
  *       - password: `nationalId` (เลขบัตรประชาชน) หรือรหัสผ่านที่เปลี่ยนแล้ว
+ *
+ *       **Dual Login (Admin/SuperAdmin):**
+ *       - ใช้ `adminPassword` → เข้าหน้า Admin/SuperAdmin Dashboard
+ *       - ใช้รหัสปกติ → เข้าหน้า User Dashboard
  *   - name: Users
  *     description: |
  *       API สำหรับจัดการผู้ใช้/พนักงาน
@@ -1117,12 +1121,20 @@
  *   post:
  *     summary: เข้าสู่ระบบ (Login)
  *     description: |
- *       ล็อกอินด้วย `employeeId` และ `password` (nationalId หรือรหัสที่เปลี่ยนแล้ว)
+ *       ล็อกอินด้วย `employeeId` และ `password`
  *
  *       **ข้อมูลที่ได้รับกลับ:**
  *       - `accessToken` — ใช้แนบใน `Authorization: Bearer <token>` ทุก request (อายุ 15 นาที)
  *       - `refreshToken` — ใช้ขอ accessToken ใหม่เมื่อหมดอายุ (อายุ 7 วัน)
+ *       - `expiresIn` — อายุ accessToken เป็นวินาที (900)
+ *       - `dashboardMode` — บอก frontend ว่าควร redirect ไป dashboard ไหน
  *       - `user` — ข้อมูลพนักงาน (userId, employeeId, role, branchId, ชื่อ ฯลฯ)
+ *
+ *       **Token เป็น random hex** ไม่ใช่ JWT — เก็บใน database (session-based)
+ *
+ *       **ระบบ Dual Login สำหรับ Admin/SuperAdmin:**
+ *       - ใส่ `adminPassword` → `dashboardMode: 'admin'` หรือ `'superadmin'` (เข้าหน้า Admin Dashboard)
+ *       - ใส่รหัสปกติ (nationalId / customPassword) → `dashboardMode: 'user'` (เข้าหน้า User Dashboard)
  *
  *       **Rate Limit:** 5 ครั้งต่อ 60 วินาที ต่อ IP
  *     tags:
@@ -1134,10 +1146,20 @@
  *           schema:
  *             $ref: '#/components/schemas/LoginRequest'
  *           examples:
- *             Login ปกติ:
- *               summary: Login ด้วย employeeId และ nationalId
+ *             Login ปกติ (User):
+ *               summary: Login ด้วย employeeId และ nationalId → dashboardMode user
  *               value:
  *                 employeeId: "BKK001"
+ *                 password: "1234567890123"
+ *             Login Admin ด้วย adminPassword:
+ *               summary: Admin ใช้ adminPassword → dashboardMode admin
+ *               value:
+ *                 employeeId: "BKK0001"
+ *                 password: "adm456"
+ *             Login Admin ด้วยรหัสปกติ:
+ *               summary: Admin ใส่ nationalId → dashboardMode user
+ *               value:
+ *                 employeeId: "BKK0001"
  *                 password: "1234567890123"
  *             Login หลังเปลี่ยนรหัส:
  *               summary: Login หลังเปลี่ยนรหัสผ่านแล้ว
@@ -1262,10 +1284,13 @@
  *   post:
  *     summary: เปลี่ยนรหัสผ่าน (Change Password)
  *     description: |
- *       เปลี่ยนรหัสผ่านของตัวเอง ต้องระบุรหัสปัจจุบันก่อนถึงจะเปลี่ยนได้
+ *       เปลี่ยนรหัสผ่านปกติของตัวเอง ต้องระบุรหัสปัจจุบันก่อนถึงจะเปลี่ยนได้
  *
  *       **รหัสผ่านเริ่มต้น** คือ `nationalId` (เลขบัตรประชาชน 13 หลัก)
  *       แนะนำให้เปลี่ยนหลัง login ครั้งแรก
+ *
+ *       > **หมายเหตุ:** API นี้เปลี่ยนเฉพาะรหัสปกติ (customPassword/nationalId)
+ *       > ไม่ใช่ `adminPassword` — สำหรับเข้าหน้า Admin Dashboard
  *
  *       **ข้อกำหนดรหัสผ่าน:**
  *       - ความยาวอย่างน้อย 6 ตัวอักษร
@@ -1335,27 +1360,6 @@
  *       - BearerAuth: []
  *     parameters:
  *       - in: query
- *         name: requesterId
- *         required: true
- *         schema:
- *           type: integer
- *         description: รหัสผู้ใช้ที่ขอดูข้อมูล
- *         example: 1
- *       - in: query
- *         name: requesterRole
- *         required: true
- *         schema:
- *           type: string
- *           enum: [USER, MANAGER, ADMIN, SUPERADMIN]
- *         description: Role ของผู้ขอ
- *         example: ADMIN
- *       - in: query
- *         name: requesterBranchId
- *         schema:
- *           type: integer
- *         description: สาขาของผู้ขอ (จำเป็นถ้าเป็น ADMIN)
- *         example: 1
- *       - in: query
  *         name: branchId
  *         schema:
  *           type: integer
@@ -1420,10 +1424,10 @@
  *                     totalPages:
  *                       type: integer
  *                       example: 3
- *       400:
- *         description: ไม่ระบุ requesterId หรือ requesterRole
  *       401:
- *         description: ไม่ได้ login
+ *         description: ไม่ได้ login หรือ token ไม่ถูกต้อง
+ *       403:
+ *         description: ไม่มีสิทธิ์เข้าถึง
  *
  *   post:
  *     summary: สร้างพนักงานใหม่ (Admin/SuperAdmin only)
@@ -1452,9 +1456,6 @@
  *             สร้างพนักงานใหม่:
  *               summary: สร้างพนักงานสาขากรุงเทพ
  *               value:
- *                 createdByUserId: 1
- *                 creatorRole: "ADMIN"
- *                 creatorBranchId: 1
  *                 title: "MR"
  *                 firstName: "สมชาย"
  *                 lastName: "ใจดี"
@@ -1512,21 +1513,6 @@
  *       - Users
  *     security:
  *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: requesterRole
- *         required: true
- *         schema:
- *           type: string
- *           enum: [ADMIN, SUPERADMIN]
- *         description: Role ของผู้ขอ
- *         example: ADMIN
- *       - in: query
- *         name: requesterBranchId
- *         schema:
- *           type: integer
- *         description: สาขาของผู้ขอ (จำเป็นถ้าเป็น ADMIN)
- *         example: 1
  *     responses:
  *       200:
  *         description: ข้อมูลสถิติพนักงาน
@@ -1716,25 +1702,6 @@
  *           type: integer
  *         description: รหัสพนักงานที่ต้องการดู
  *         example: 5
- *       - in: query
- *         name: requesterId
- *         schema:
- *           type: integer
- *         description: รหัสผู้ขอดูข้อมูล
- *         example: 1
- *       - in: query
- *         name: requesterRole
- *         schema:
- *           type: string
- *           enum: [USER, MANAGER, ADMIN, SUPERADMIN]
- *         description: Role ของผู้ขอ
- *         example: ADMIN
- *       - in: query
- *         name: requesterBranchId
- *         schema:
- *           type: integer
- *         description: สาขาของผู้ขอ
- *         example: 1
  *     responses:
  *       200:
  *         description: ข้อมูลพนักงาน
@@ -1786,16 +1753,11 @@
  *             แก้เบอร์โทร:
  *               summary: แก้ไขเบอร์โทรและอีเมล
  *               value:
- *                 updatedByUserId: 1
- *                 updaterRole: "ADMIN"
- *                 updaterBranchId: 1
  *                 phone: "0891234567"
  *                 email: "new-email@example.com"
  *             เปลี่ยน role:
  *               summary: เลื่อนตำแหน่งเป็น MANAGER
  *               value:
- *                 updatedByUserId: 1
- *                 updaterRole: "SUPERADMIN"
  *                 role: "MANAGER"
  *     responses:
  *       200:
@@ -1813,8 +1775,6 @@
  *                   example: "อัปเดตผู้ใช้เรียบร้อยแล้ว"
  *                 data:
  *                   $ref: '#/components/schemas/UserProfile'
- *       400:
- *         description: ไม่ระบุ updatedByUserId หรือ updaterRole
  *       401:
  *         description: ไม่ได้ login
  *       403:
@@ -1850,22 +1810,8 @@
  *           schema:
  *             type: object
  *             required:
- *               - deletedByUserId
- *               - deleterRole
  *               - deleteReason
  *             properties:
- *               deletedByUserId:
- *                 type: integer
- *                 example: 1
- *                 description: รหัส Admin ที่ทำการลบ (สำหรับ audit log)
- *               deleterRole:
- *                 type: string
- *                 enum: [ADMIN, SUPERADMIN]
- *                 example: "ADMIN"
- *               deleterBranchId:
- *                 type: integer
- *                 example: 1
- *                 description: สาขาของ Admin (จำเป็นถ้า deleterRole=ADMIN)
  *               deleteReason:
  *                 type: string
  *                 example: "พนักงานลาออกตามใจสมัคร"
@@ -1885,7 +1831,7 @@
  *                   type: string
  *                   example: "ลบผู้ใช้เรียบร้อยแล้ว"
  *       400:
- *         description: ไม่ระบุ deleteReason หรือ deleterRole ไม่ถูกต้อง
+ *         description: ไม่ระบุ deleteReason
  *       401:
  *         description: ไม่ได้ login
  *       403:
@@ -1968,12 +1914,26 @@
  *       properties:
  *         accessToken:
  *           type: string
- *           description: JWT Access Token (อายุ 15 นาที)
- *           example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *           description: Access Token แบบ random hex (อายุ 15 นาที)
+ *           example: "a3f9c2d1e4b8..."
  *         refreshToken:
  *           type: string
  *           description: Refresh Token (อายุ 7 วัน)
- *           example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *           example: "b7e1a4c3d9f2..."
+ *         expiresIn:
+ *           type: integer
+ *           description: อายุของ accessToken หน่วยเป็นวินาที
+ *           example: 900
+ *         dashboardMode:
+ *           type: string
+ *           enum: [superadmin, admin, manager, user]
+ *           description: |
+ *             บอก frontend ว่าควร redirect ไป dashboard ไหนหลัง login
+ *             - `superadmin` — SuperAdmin ใช้ adminPassword
+ *             - `admin` — Admin ใช้ adminPassword
+ *             - `manager` — Manager ใช้รหัสปกติ
+ *             - `user` — ทุก role ที่ใช้รหัสปกติ (รวม Admin/SuperAdmin)
+ *           example: "user"
  *         user:
  *           $ref: '#/components/schemas/UserProfile'
  *
@@ -2032,6 +1992,13 @@
  *           type: string
  *           nullable: true
  *           example: "https://xxx.supabase.co/storage/v1/object/public/avatars/male-1.png"
+ *         adminPassword:
+ *           type: string
+ *           nullable: true
+ *           description: |
+ *             รหัสผ่านสำหรับเข้าหน้า Admin Dashboard (เฉพาะ role ADMIN/SUPERADMIN)
+ *             ถ้าเป็น null = ไม่สามารถ login เป็น Admin ได้
+ *           example: "adm456"
  *         emergent_tel:
  *           type: string
  *           example: "0812345678"

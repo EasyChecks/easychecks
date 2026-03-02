@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
-import { useAuth } from '@/contexts/mock-contexts';
+import { useAuth } from '@/contexts/AuthContext';
+import { userService } from '@/services/user';
 import UserTable from '@/components/admin/UserTable';
 import AlertDialog from '@/components/common/AlertDialog';
 import { User, AlertDialogState, AttendanceEditData, AttendanceCheckData, CsvUserData, AttendanceRecord } from '@/types/user';
@@ -21,79 +22,6 @@ const UserEditModal = lazy(() => import('@/components/admin/UserEditModal'));
 const UserCreateModal = lazy(() => import('@/components/admin/UserCreateModal'));
 const CsvImportModal = lazy(() => import('@/components/admin/CsvImportModal'));
 
-// Mock users data
-const mockUsersData: User[] = [
-  {
-    id: 'user-1',
-    name: 'สมชาย ใจดี',
-    email: 'somchai@example.com',
-    phone: '0812345678',
-    employeeId: 'BKK0010001',
-    username: 'BKK0010001',
-    password: '1234',
-    role: 'admin',
-    department: 'IT',
-    position: 'Senior Developer',
-    status: 'active',
-    branch: 'BKK',
-    provinceCode: 'BKK',
-    branchCode: '001',
-    nationalId: '1234567890123',
-    birthDate: '1990-01-01',
-    age: 34,
-    bloodType: 'O',
-    address: '123 ถนนสาทร กรุงเทพฯ 10120',
-    emergencyContact: {
-      name: 'สมหญิง ใจดี',
-      phone: '0898765432',
-      relation: 'ภรรยา'
-    },
-    attendanceRecords: [
-      {
-        date: '15 ม.ค. 2568',
-        checkIn: {
-          time: '08:45',
-          location: 'สำนักงานกรุงเทพ',
-          status: 'onTime',
-          coordinates: { lat: 13.7563, lng: 100.5018 }
-        },
-        checkOut: {
-          time: '17:30',
-          location: 'สำนักงานกรุงเทพ',
-          coordinates: { lat: 13.7563, lng: 100.5018 }
-        }
-      }
-    ]
-  },
-  {
-    id: 'user-2',
-    name: 'สมหญิง สวยงาม',
-    email: 'somying@example.com',
-    phone: '0823456789',
-    employeeId: 'CNX0010002',
-    username: 'CNX0010002',
-    password: '1234',
-    role: 'user',
-    department: 'HR',
-    position: 'HR Manager',
-    status: 'active',
-    branch: 'CNX',
-    provinceCode: 'CNX',
-    branchCode: '001',
-    nationalId: '9876543210987',
-    birthDate: '1992-05-15',
-    age: 32,
-    bloodType: 'A',
-    address: '456 ถนนนิมมานเหมินท์ เชียงใหม่ 50200',
-    emergencyContact: {
-      name: 'สมชาย สวยงาม',
-      phone: '0887654321',
-      relation: 'สามี'
-    },
-    attendanceRecords: []
-  }
-];
-
 const branchOptions = [
   { value: 'all', label: 'สาขา: ทั้งหมด' },
   { value: 'BKK', label: 'BKK (กรุงเทพ)' },
@@ -103,8 +31,10 @@ const branchOptions = [
 
 export default function AdminManageUser() {
   const { user: currentUser } = useAuth();
-  
-  const [users, setUsers] = useState<User[]>(mockUsersData);
+
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   
   // Grouped: Modal visibility states (5 → 1)
@@ -150,6 +80,25 @@ export default function AdminManageUser() {
     deleteCandidate: null,
     selectedDate: ''
   });
+
+  // โหลดข้อมูลสมาชิกจาก API จริง
+  useEffect(() => {
+    if (!currentUser) return;
+    const load = async () => {
+      setIsLoading(true);
+      setApiError(null);
+      try {
+        const result = await userService.getManageUsers(currentUser);
+        setUsers(result.users);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'ไม่สามารถโหลดข้อมูลสมาชิกได้';
+        setApiError(msg);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
+  }, [currentUser]);
 
   // Debounce search term
   useEffect(() => {
@@ -634,6 +583,14 @@ export default function AdminManageUser() {
         </div>
 
         {/* User Table */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-10 h-10 border-b-2 border-orange-600 rounded-full animate-spin"></div>
+            <span className="ml-3 text-gray-500">กำลังโหลดข้อมูลสมาชิก...</span>
+          </div>
+        ) : apiError ? (
+          <div className="py-10 text-center text-red-500">{apiError}</div>
+        ) : (
         <UserTable 
           users={filteredUsers}
           onSelectUser={openDetail}
@@ -645,6 +602,7 @@ export default function AdminManageUser() {
           attendanceForm={editing.attendanceForm}
           onAttendanceFormChange={(form) => setEditing(prev => ({ ...prev, attendanceForm: form }))}
         />
+        )}
 
         {/* Footer legend */}
         <div className="p-4 mt-6 border border-gray-200 rounded-xl bg-gray-50">

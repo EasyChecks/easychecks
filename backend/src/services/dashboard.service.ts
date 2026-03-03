@@ -32,8 +32,8 @@ export interface User {
  * WHERE branchId = ? AND DATE(checkIn) = TODAY()
  * GROUP BY status;
  */
-export async function getAttendanceSummary(user: User, branchId?: number) {
-  const today = new Date();
+export async function getAttendanceSummary(user: User, branchId?: number, date?: string) {
+  const today = date ? new Date(date) : new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -109,8 +109,8 @@ export async function getAttendanceSummary(user: User, branchId?: number) {
  * WHERE u.branchId = ? AND DATE(a.checkIn) = TODAY()
  * ORDER BY a.checkIn DESC;
  */
-export async function getEmployeesToday(user: User, branchId?: number) {
-  const today = new Date();
+export async function getEmployeesToday(user: User, branchId?: number, date?: string) {
+  const today = date ? new Date(date) : new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -287,8 +287,8 @@ export async function getBranchesMap(user: User) {
  *   AND u.branchId = ?
  *   AND DATE(a.checkIn) = TODAY();
  */
-export async function getLocationEvents(user: User, branchId?: number) {
-  const today = new Date();
+export async function getLocationEvents(user: User, branchId?: number, date?: string) {
+  const today = date ? new Date(date) : new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -362,8 +362,8 @@ export async function getLocationEvents(user: User, branchId?: number) {
  * WHERE b.branchId = ?
  * GROUP BY b.branchId;
  */
-export async function getBranchStats(user: User, branchId?: number) {
-  const today = new Date();
+export async function getBranchStats(user: User, branchId?: number, date?: string) {
+  const today = date ? new Date(date) : new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);

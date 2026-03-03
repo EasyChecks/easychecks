@@ -59,6 +59,7 @@ export interface EventItem {
   updatedBy?: EventCreator | null;
   deletedBy?: EventCreator | null;
   participants?: EventParticipant[];
+  event_participants?: { branchId: number | null }[];
   _count?: {
     event_participants?: number;
     attendance?: number;
@@ -120,6 +121,7 @@ export interface EventListParams {
   endDate?: string;
   skip?: number;
   take?: number;
+  branchId?: number;
 }
 
 // ── Service Methods ──

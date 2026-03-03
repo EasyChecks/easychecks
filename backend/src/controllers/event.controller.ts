@@ -90,6 +90,7 @@ export const getAllEvents = asyncHandler(async (req: Request, res: Response) => 
     : undefined;
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 20;
+  const branchId = req.query.branchId ? parseInt(req.query.branchId as string, 10) : undefined;
 
   const result = await EventUserActions.getAllEvents({
     search,
@@ -99,6 +100,7 @@ export const getAllEvents = asyncHandler(async (req: Request, res: Response) => 
     endDate,
     skip,
     take,
+    branchId,
   });
 
   sendSuccess(res, result, 'ดึงรายการกิจกรรมสำเร็จ');

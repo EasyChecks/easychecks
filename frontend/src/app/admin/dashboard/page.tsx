@@ -11,12 +11,16 @@ import {
   Map as MapIcon,
   Satellite,
   AlertTriangle,
-  TrendingUp,
-  Users,
-  Clock
+  CalendarIcon
 } from "lucide-react";
-import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, LocationEvent, BranchStats } from "@/services/dashboardService";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { th } from "date-fns/locale";
+import { useAuth } from "@/contexts/AuthContext";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, LocationEvent } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
+import { BranchMapItem } from "@/services/dashboardService";
 import locationService, { LocationItem } from "@/services/locationService";
 import type L from "leaflet";
 
@@ -119,6 +123,8 @@ const CHART_COLORS = {
 };
 
 export default function AdminDashboard() {
+  const { user } = useAuth();
+
   // States
   const [statsType, setStatsType] = useState<StatsType>("attendance");
   const mapRef = useRef<L.Map | null>(null);
@@ -138,35 +144,40 @@ export default function AdminDashboard() {
   const [employeesToday, setEmployeesToday] = useState<EmployeeToday[]>([]);
   const [apiEvents, setApiEvents] = useState<ApiEventItem[]>([]);
   const [apiLocations, setApiLocations] = useState<LocationItem[]>([]);
+  const [branchesMap, setBranchesMap] = useState<BranchMapItem[]>([]);
   const [locationEvents, setLocationEvents] = useState<LocationEvent[]>([]);
-  const [branchStats, setBranchStats] = useState<BranchStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   // ── Fetch dashboard data ──
   useEffect(() => {
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
+    const dateParam = isToday ? undefined : dateStr;
+
     const fetchData = async () => {
       setIsLoading(true);
       try {
         // ดึงข้อมูลหลัก (ถ้าพังจะไม่แสดงอะไรเลย)
-        const [summary, employees, , eventsResp, locations] = await Promise.all([
-          dashboardService.getAttendanceSummary(undefined),
-          dashboardService.getEmployeesToday(undefined),
+        const [summary, employees, branchesResp, eventsResp, locations] = await Promise.all([
+          dashboardService.getAttendanceSummary(undefined, dateParam),
+          dashboardService.getEmployeesToday(undefined, dateParam),
           dashboardService.getBranchesMap(),
-          eventService.getAll({ take: 100 }),
+          eventService.getAll({ take: 100, branchId: user?.branchId ?? undefined }),
           locationService.getAll(),
         ]);
         setDashboardSummary(summary);
         setEmployeesToday(employees.data);
+        setBranchesMap(branchesResp.data);
         setApiEvents(eventsResp.data);
         setApiLocations(locations);
 
         // ดึงข้อมูลเสริม (ถ้าพังไม่กระทบข้อมูลหลัก)
-        const [locEventsResult, statsResult] = await Promise.allSettled([
-          dashboardService.getLocationEvents(undefined),
-          dashboardService.getBranchStats(undefined),
+        const [locEventsResult] = await Promise.allSettled([
+          dashboardService.getLocationEvents(undefined, dateParam),
         ]);
         if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
-        if (statsResult.status === 'fulfilled') setBranchStats(statsResult.value);
       } catch (err) {
         console.error('[Dashboard] Failed to fetch data:', err);
       } finally {
@@ -175,7 +186,7 @@ export default function AdminDashboard() {
     };
 
     fetchData();
-  }, []);
+  }, [selectedDate, user?.branchId]);
 
   // ── Map API employees → AttendanceStats ──
   const attendanceStats = useMemo((): AttendanceStats => {
@@ -227,6 +238,51 @@ export default function AdminDashboard() {
       lateEventUsers:       [],
     };
   }, [apiEvents]);
+
+  // ── Filter events for display in the event list ──
+  // วันนี้ → แสดงเฉพาะ ongoing/upcoming (ไม่โชว์ที่สิ้นสุดแล้ว) เรียงจากใกล้ปัจจุบันสูงสุด
+  // วันอื่น → แสดงกิจกรรมที่ overlap กับวันนั้น เรียง startDateTime
+  const displayedEvents = useMemo(() => {
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const selectedStr = format(selectedDate, 'yyyy-MM-dd');
+    const isToday = todayStr === selectedStr;
+
+    let filtered: ApiEventItem[];
+
+    if (isToday) {
+      // ซ่อนกิจกรรมที่สิ้นสุดแล้ว
+      filtered = apiEvents.filter(e => new Date(e.endDateTime) >= now);
+    } else {
+      // แสดงกิจกรรมที่เกิดขึ้นในวันนั้น (start <= dayEnd && end >= dayStart)
+      const dayStart = new Date(selectedDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(selectedDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      filtered = apiEvents.filter(e => {
+        const start = new Date(e.startDateTime);
+        const end = new Date(e.endDateTime);
+        return start <= dayEnd && end >= dayStart;
+      });
+    }
+
+    // กรองตามสาขาของ Admin: เทียบจาก location ของกิจกรรมกับชื่อสาขาของ Admin
+    const adminBranchId = user?.branchId;
+    if (adminBranchId) {
+      const adminBranch = branchesMap.find(b => b.branchId === adminBranchId);
+      if (adminBranch) {
+        filtered = filtered.filter(e => {
+          const locName = e.location?.locationName || '';
+          return locName.includes(adminBranch.name) || adminBranch.name.includes(locName);
+        });
+      }
+    }
+
+    // เรียงจากวันที่ใกล้ปัจจุบันมากที่สุด
+    return filtered.sort(
+      (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+    );
+  }, [apiEvents, selectedDate, user?.branchId, branchesMap]);
 
   // Combine locations from API data
   const mappingLocations: LocationWithStatus[] = apiLocations.map((loc) => ({
@@ -516,49 +572,98 @@ export default function AdminDashboard() {
             </div>
           )}
 
-          {/* Activity Log */}
+          {/* Activity Log — สลับตาม tab การเข้างาน / กิจกรรม */}
           <div className="h-52 border-t-2 border-borderMain bg-white flex flex-col">
             <div className="px-4 py-2 border-b border-borderMain flex items-center justify-between shrink-0">
-              <h3 className="text-sm font-semibold text-primaryMain">บันทึกกิจกรรม (Activity Log)</h3>
-              <span className="text-xs text-textMain/60">{employeesToday.length} รายการ</span>
+              <h3 className="text-sm font-semibold text-primaryMain">
+                {statsType === 'attendance' ? 'บันทึกการเข้างาน' : 'รายการกิจกรรม'}
+              </h3>
+              <span className="text-xs text-textMain/60">
+                {statsType === 'attendance' ? employeesToday.length : displayedEvents.length} รายการ
+              </span>
             </div>
             <div className="overflow-y-auto flex-1">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-borderMain/50">
-                  {employeesToday.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
-                  ) : (
-                    employeesToday.map((emp) => {
-                      const nameParts = emp.name.split(' ');
-                      const firstName = nameParts[0] ?? emp.name;
-                      const lastName  = nameParts.slice(1).join(' ');
-                      const sl = statusLabel(emp.status);
-                      return (
-                        <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
-                          <td className="px-3 py-2 text-textMain">{firstName}</td>
-                          <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
-                          <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
-                          <td className="px-3 py-2">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
-                              {sl.text}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              {statsType === 'attendance' ? (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderMain/50">
+                    {employeesToday.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
+                    ) : (
+                      employeesToday.map((emp) => {
+                        const nameParts = emp.name.split(' ');
+                        const firstName = nameParts[0] ?? emp.name;
+                        const lastName  = nameParts.slice(1).join(' ');
+                        const sl = statusLabel(emp.status);
+                        return (
+                          <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
+                            <td className="px-3 py-2 text-textMain">{firstName}</td>
+                            <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
+                            <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
+                                {sl.text}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อกิจกรรม</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานที่</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">เริ่ม</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สิ้นสุด</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderMain/50">
+                    {displayedEvents.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบกิจกรรม</td></tr>
+                    ) : (
+                      displayedEvents.map((evt) => {
+                        const now = new Date();
+                        const start = new Date(evt.startDateTime);
+                        const end = new Date(evt.endDateTime);
+                        const isOngoing = evt.isActive && start <= now && end >= now;
+                        const isUpcoming = start > now;
+                        const evtStatus = isOngoing
+                          ? { text: 'กำลังดำเนินการ', cls: 'bg-green-100 text-green-700' }
+                          : isUpcoming
+                            ? { text: 'กำลังจะมาถึง', cls: 'bg-blue-100 text-blue-700' }
+                            : { text: 'สิ้นสุดแล้ว', cls: 'bg-gray-100 text-gray-600' };
+                        return (
+                          <tr key={evt.eventId} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-3 py-2 text-textMain font-medium">{evt.eventName}</td>
+                            <td className="px-3 py-2 text-textMain/70">{evt.location?.locationName || '-'}</td>
+                            <td className="px-3 py-2 text-textMain/70">{format(start, 'd MMM yy HH:mm', { locale: th })}</td>
+                            <td className="px-3 py-2 text-textMain/70">{format(end, 'd MMM yy HH:mm', { locale: th })}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${evtStatus.cls}`}>
+                                {evtStatus.text}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
@@ -590,12 +695,29 @@ export default function AdminDashboard() {
             </button>
           </div>
 
-          {/* Date range / info */}
+          {/* Date picker */}
           <div className="px-4 py-2 bg-gray-50 border-b border-borderMain shrink-0">
-            <p className="text-xs text-textMain/60">เลือกช่วงเวลาหรือวันที่เพื่อดูข้อมูล</p>
-            <p className="text-xs font-medium text-primaryMain mt-0.5">
-              {new Date().toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            </p>
+            <p className="text-xs text-textMain/60 mb-1">เลือกวันที่เพื่อดูข้อมูล</p>
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+              <PopoverTrigger asChild>
+                <button className="flex items-center gap-2 w-full px-3 py-1.5 bg-white border border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain transition-colors">
+                  <CalendarIcon className="h-4 w-4 text-primaryMain/60" />
+                  <span>{format(selectedDate, 'EEEE d MMMM yyyy', { locale: th })}</span>
+                  {format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd') && (
+                    <span className="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">วันนี้</span>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(day) => { if (day) { setSelectedDate(day); setCalendarOpen(false); } }}
+                  disabled={{ after: new Date() }}
+                  defaultMonth={selectedDate}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Donut Chart */}
@@ -679,40 +801,6 @@ export default function AdminDashboard() {
               <span className="font-bold text-emerald-600">{totalChart} คน</span>
             </div>
           </div>
-
-          {/* Branch Stats KPI (endpoint #5) */}
-          {branchStats && (
-            <>
-              <div className="border-t border-borderMain mx-4" />
-              <div className="px-4 py-3 shrink-0">
-                <h4 className="text-xs font-semibold text-primaryMain mb-2 flex items-center gap-1">
-                  <TrendingUp className="h-3.5 w-3.5" /> สถิติสาขา: {branchStats.name}
-                </h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-200">
-                    <Users className="h-4 w-4 mx-auto text-emerald-600 mb-0.5" />
-                    <p className="text-lg font-bold text-emerald-700">{branchStats.presentToday}</p>
-                    <p className="text-[10px] text-emerald-600">มาตรงเวลา</p>
-                  </div>
-                  <div className="bg-orange-50 rounded-lg p-2 text-center border border-orange-200">
-                    <Clock className="h-4 w-4 mx-auto text-orange-600 mb-0.5" />
-                    <p className="text-lg font-bold text-orange-700">{branchStats.lateToday}</p>
-                    <p className="text-[10px] text-orange-600">มาสาย</p>
-                  </div>
-                  <div className="bg-red-50 rounded-lg p-2 text-center border border-red-200">
-                    <X className="h-4 w-4 mx-auto text-red-600 mb-0.5" />
-                    <p className="text-lg font-bold text-red-700">{branchStats.absentToday}</p>
-                    <p className="text-[10px] text-red-600">ขาดงาน</p>
-                  </div>
-                  <div className="bg-blue-50 rounded-lg p-2 text-center border border-blue-200">
-                    <TrendingUp className="h-4 w-4 mx-auto text-blue-600 mb-0.5" />
-                    <p className="text-lg font-bold text-blue-700">{branchStats.attendanceRate}%</p>
-                    <p className="text-[10px] text-blue-600">อัตราการเข้างาน</p>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
         </div>
       </main>
     </div>

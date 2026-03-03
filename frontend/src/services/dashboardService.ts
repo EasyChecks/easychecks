@@ -64,8 +64,10 @@ export const dashboardService = {
    * GET /api/dashboard/attendance-summary
    * สรุป attendance วันนี้ (Donut Chart)
    */
-  async getAttendanceSummary(branchId?: number): Promise<AttendanceSummary> {
-    const params = branchId ? { branchId } : {};
+  async getAttendanceSummary(branchId?: number, date?: string): Promise<AttendanceSummary> {
+    const params: Record<string, string | number> = {};
+    if (branchId) params.branchId = branchId;
+    if (date) params.date = date;
     const res = await api.get('/dashboard/attendance-summary', { params });
     return res.data.data;
   },
@@ -74,8 +76,10 @@ export const dashboardService = {
    * GET /api/dashboard/employees-today
    * รายชื่อพนักงานพร้อมสถานะวันนี้ (Table)
    */
-  async getEmployeesToday(branchId?: number): Promise<{ data: EmployeeToday[]; total: number }> {
-    const params = branchId ? { branchId } : {};
+  async getEmployeesToday(branchId?: number, date?: string): Promise<{ data: EmployeeToday[]; total: number }> {
+    const params: Record<string, string | number> = {};
+    if (branchId) params.branchId = branchId;
+    if (date) params.date = date;
     const res = await api.get('/dashboard/employees-today', { params });
     return { data: res.data.data, total: res.data.total };
   },
@@ -93,8 +97,10 @@ export const dashboardService = {
    * GET /api/dashboard/location-events
    * พนักงานที่ check-in นอกพื้นที่ (Alert List)
    */
-  async getLocationEvents(branchId?: number): Promise<{ data: LocationEvent[]; total: number }> {
-    const params = branchId ? { branchId } : {};
+  async getLocationEvents(branchId?: number, date?: string): Promise<{ data: LocationEvent[]; total: number }> {
+    const params: Record<string, string | number> = {};
+    if (branchId) params.branchId = branchId;
+    if (date) params.date = date;
     const res = await api.get('/dashboard/location-events', { params });
     return { data: res.data.data, total: res.data.total };
   },
@@ -103,8 +109,10 @@ export const dashboardService = {
    * GET /api/dashboard/branch-stats
    * สถิติ KPI ของสาขา (Stats Cards)
    */
-  async getBranchStats(branchId?: number): Promise<BranchStats> {
-    const params = branchId ? { branchId } : {};
+  async getBranchStats(branchId?: number, date?: string): Promise<BranchStats> {
+    const params: Record<string, string | number> = {};
+    if (branchId) params.branchId = branchId;
+    if (date) params.date = date;
     const res = await api.get('/dashboard/branch-stats', { params });
     return res.data.data;
   },

@@ -51,6 +51,7 @@ export interface SearchEventParams {
   endDate?: Date;
   skip?: number;
   take?: number;
+  branchId?: number; // กรองกิจกรรมตามสาขา (ALL หรือ BRANCH ที่มี branchId นี้)
 }
 
 // ========================================================================================
@@ -271,6 +272,22 @@ async function getAllEvents(params: SearchEventParams): Promise<{
     }
   }
 
+  // กรองตามสาขา: แสดง ALL + BRANCH ที่มี branchId นี้เป็น participant
+  if (params.branchId) {
+    if (!where.AND) where.AND = [];
+    where.AND.push({
+      OR: [
+        { participantType: 'ALL' },
+        {
+          participantType: 'BRANCH',
+          event_participants: {
+            some: { branchId: params.branchId },
+          },
+        },
+      ],
+    });
+  }
+
   // ⚡ ใช้ Promise.all เพื่อ query ข้อมูลและนับสถิติแบบ parallel
   // ทำพร้อมกันเพื่อลดเวลารอ (ถ้าทำทีละอันจะช้ากว่า)
   // SQL: ทำ 4 queries พร้อมกัน:
@@ -313,6 +330,11 @@ async function getAllEvents(params: SearchEventParams): Promise<{
           select: {
             event_participants: true,
             attendance: true,
+          },
+        },
+        event_participants: {
+          select: {
+            branchId: true,
           },
         },
       },

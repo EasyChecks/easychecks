@@ -269,7 +269,10 @@ model Event {
   eventId                                Int                  @id @default(autoincrement()) @map("event_id")
   eventName                              String               @map("event_name")
   description                            String?
-  locationId                             Int                  @map("location_id")
+  locationId                             Int?                 @map("location_id")
+  venueName                              String?              @map("venue_name")
+  venueLatitude                          Float?               @map("venue_latitude")
+  venueLongitude                         Float?               @map("venue_longitude")
   startDateTime                          DateTime             @map("start_date_time")
   endDateTime                            DateTime             @map("end_date_time")
   participantType                        EventParticipantType @default(ALL) @map("participant_type")
@@ -285,7 +288,7 @@ model Event {
   event_participants                     EventParticipant[]
   creator                                User                 @relation("events_created_by_user_idTousers", fields: [createdByUserId], references: [userId], onDelete: Cascade)
   deletedBy                              User?                @relation("events_deleted_by_user_idTousers", fields: [deletedByUserId], references: [userId])
-  location                               Location             @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
+  location                               Location?            @relation(fields: [locationId], references: [locationId], onDelete: SetNull)
   updatedBy                              User?                @relation("events_updated_by_user_idTousers", fields: [updatedByUserId], references: [userId])
 
   @@map("events")

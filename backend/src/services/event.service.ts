@@ -10,7 +10,12 @@ export interface CreateEventDTO {
   userId: number; // ผู้สร้าง (Admin/SuperAdmin)
   eventName: string;
   description?: string;
-  locationId: number;
+  // Mode A: link to existing check-in location
+  locationId?: number;
+  // Mode B: custom venue (name + coordinates)
+  venueName?: string;
+  venueLatitude?: number;
+  venueLongitude?: number;
   startDateTime: Date;
   endDateTime: Date;
   participantType: EventParticipantType;
@@ -25,6 +30,10 @@ export interface CreateEventDTO {
 export interface UpdateEventDTO {
   eventName?: string;
   description?: string;
+  locationId?: number | null; // null = clear location (switch to custom)
+  venueName?: string;
+  venueLatitude?: number;
+  venueLongitude?: number;
   startDateTime?: Date;
   endDateTime?: Date;
   participantType?: EventParticipantType;
@@ -104,7 +113,10 @@ async function createEvent(data: CreateEventDTO): Promise<events> {
     data: {
       eventName: data.eventName,
       description: data.description,
-      locationId: data.locationId,
+      locationId: data.locationId ?? null,
+      venueName: data.venueName ?? null,
+      venueLatitude: data.venueLatitude ?? null,
+      venueLongitude: data.venueLongitude ?? null,
       startDateTime,
       endDateTime,
       participantType: data.participantType,
@@ -356,9 +368,9 @@ async function getEventById(eventId: number): Promise<events | null> {
           lastName: true,
         },
       },
-      participants: {
+      event_participants: {
         include: {
-          user: {
+          users: {
             select: {
               userId: true,
               firstName: true,
@@ -366,7 +378,7 @@ async function getEventById(eventId: number): Promise<events | null> {
               email: true,
             },
           },
-          branch: {
+          branches: {
             select: {
               branchId: true,
               name: true,
@@ -377,7 +389,7 @@ async function getEventById(eventId: number): Promise<events | null> {
       },
       _count: {
         select: {
-          attendances: true,
+          attendance: true,
         },
       },
     },
@@ -439,6 +451,10 @@ async function updateEvent(
     data: {
       eventName: data.eventName,
       description: data.description,
+      locationId: data.locationId, // undefined = no change, null = clear
+      venueName: data.venueName,
+      venueLatitude: data.venueLatitude,
+      venueLongitude: data.venueLongitude,
       startDateTime: data.startDateTime,
       endDateTime: data.endDateTime,
       participantType: data.participantType,
@@ -637,21 +653,21 @@ async function getMyEvents(userId: number): Promise<events[]> {
         {
           // กิจกรรมที่ระบุรายบุคคล
           participantType: 'INDIVIDUAL',
-          participants: {
+          event_participants: {
             some: { userId },
           },
         },
         {
           // กิจกรรมที่ระบุตามสาขา
           participantType: 'BRANCH',
-          participants: {
+          event_participants: {
             some: { branchId: user.branchId },
           },
         },
         {
           // กิจกรรมที่ระบุตามบทบาท
           participantType: 'ROLE',
-          participants: {
+          event_participants: {
             some: { role: user.role },
           },
         },
@@ -671,7 +687,7 @@ async function getMyEvents(userId: number): Promise<events[]> {
       },
       _count: {
         select: {
-          attendances: true,
+          attendance: true,
         },
       },
     },

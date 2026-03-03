@@ -45,7 +45,11 @@ export interface EventItem {
   eventId: number;
   eventName: string;
   description?: string;
-  locationId?: number;
+  locationId?: number | null;
+  // custom venue (Mode B)
+  venueName?: string | null;
+  venueLatitude?: number | null;
+  venueLongitude?: number | null;
   participantType: ParticipantType;
   isActive: boolean;
   startDateTime: string;
@@ -86,7 +90,12 @@ export interface EventStatistics {
 export interface CreateEventRequest {
   eventName: string;
   description?: string;
-  locationId: number;
+  // Mode A: existing check-in location
+  locationId?: number;
+  // Mode B: custom venue
+  venueName?: string;
+  venueLatitude?: number;
+  venueLongitude?: number;
   startDateTime: string;
   endDateTime: string;
   participantType: ParticipantType;
@@ -100,7 +109,10 @@ export interface CreateEventRequest {
 export interface UpdateEventRequest {
   eventName?: string;
   description?: string;
-  locationId?: number;
+  locationId?: number | null;
+  venueName?: string;
+  venueLatitude?: number;
+  venueLongitude?: number;
   startDateTime?: string;
   endDateTime?: string;
   participantType?: ParticipantType;

@@ -150,7 +150,7 @@ export default function AdminDashboard() {
         setDashboardSummary(summary);
         setEmployeesToday(employees.data);
         setApiEvents(eventsResp.data);
-        setApiLocations(locations);
+        setApiLocations(Array.isArray(locations) ? locations : (locations.data ?? []));
       } catch (err) {
         console.error('[Dashboard] Failed to fetch data:', err);
       } finally {

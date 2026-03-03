@@ -32,21 +32,28 @@ export const createEvent = asyncHandler(async (req: Request, res: Response) => {
     eventName,
     description,
     locationId,
+    venueName,
+    venueLatitude,
+    venueLongitude,
     startDateTime,
     endDateTime,
     participantType,
     participants,
   } = req.body;
 
+  // ต้องการ locationId (Mode A) หรือ venueName + พิกัด (Mode B) อย่างใดอย่างหนึ่ง
+  const hasCheckinVenue = !!locationId;
+  const hasCustomVenue = !!venueName && venueLatitude != null && venueLongitude != null;
+
   if (
     !eventName ||
-    !locationId ||
+    (!hasCheckinVenue && !hasCustomVenue) ||
     !startDateTime ||
     !endDateTime ||
     !participantType
   ) {
     throw new BadRequestError(
-      'กรุณาระบุ eventName, locationId, startDateTime, endDateTime, participantType'
+      'กรุณาระบุ eventName, startDateTime, endDateTime, participantType และ locationId (หรือ venueName + venueLatitude + venueLongitude)'
     );
   }
 
@@ -61,7 +68,10 @@ export const createEvent = asyncHandler(async (req: Request, res: Response) => {
     userId,
     eventName,
     description,
-    locationId: parseInt(locationId),
+    locationId: locationId ? parseInt(locationId) : undefined,
+    venueName,
+    venueLatitude: venueLatitude != null ? parseFloat(venueLatitude) : undefined,
+    venueLongitude: venueLongitude != null ? parseFloat(venueLongitude) : undefined,
     startDateTime: new Date(startDateTime),
     endDateTime: new Date(endDateTime),
     participantType,
@@ -177,6 +187,10 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
   const {
     eventName,
     description,
+    locationId,
+    venueName,
+    venueLatitude,
+    venueLongitude,
     startDateTime,
     endDateTime,
     participantType,
@@ -187,6 +201,10 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
   const updatedEvent = await EventAdminActions.updateEvent(eventId, {
     eventName,
     description,
+    locationId: locationId !== undefined ? (locationId === null ? null : parseInt(locationId)) : undefined,
+    venueName,
+    venueLatitude: venueLatitude != null ? parseFloat(venueLatitude) : venueLatitude,
+    venueLongitude: venueLongitude != null ? parseFloat(venueLongitude) : venueLongitude,
     startDateTime: startDateTime ? new Date(startDateTime) : undefined,
     endDateTime: endDateTime ? new Date(endDateTime) : undefined,
     participantType,

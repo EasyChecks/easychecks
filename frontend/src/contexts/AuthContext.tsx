@@ -15,7 +15,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { AuthUser, UserRole, LoginCredentials, AuthContextType, MOCK_CREDENTIALS, MOCK_USERS } from '@/types/auth';
+import { AuthUser, UserRole, LoginCredentials, AuthContextType } from '@/types/auth';
 import { authService } from '@/services/authService';
 
 // ─── สร้าง Context (ค่าเริ่มต้น undefined เพื่อตรวจว่าถูก wrap ด้วย Provider หรือเปล่า) ───
@@ -49,14 +49,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /**
    * login() — รับ credentials แล้วคืน role ของผู้ที่ login สำเร็จ
    *
-   * มี 2 เส้นทาง:
-   *
-   * [1] Mock Login — ตรวจ username/password กับ MOCK_CREDENTIALS ใน types/auth.ts
-   *     ใช้สำหรับทดสอบโดยไม่ต้องมี backend จริง (dev only)
-   *     accounts: user/user123, admin/admin123, superadmin/superadmin123
-   *
-   * [2] Real API Login — เรียก authService.login() → POST /api/auth/login
-   *     ใช้กับ Supabase account จริง โดยส่ง employeeId เป็น username
+   * Real API Login — เรียก authService.login() → POST /api/auth/login
+   * ใช้กับ Supabase account จริง โดยส่ง employeeId เป็น username
    *
    * หลัง login สำเร็จ:
    *  - setUser(userData)               → update global state
@@ -68,43 +62,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
-      let finalRole: UserRole = 'user';
+      // Real API: ส่ง employeeId (= username ที่กรอก) ไปยัง backend
+      const response = await authService.login({
+        employeeId: credentials.username,
+        password: credentials.password
+      });
 
-      // ── [1] ตรวจ mock credentials ก่อนเสมอ ──
-      const mockCred = Object.values(MOCK_CREDENTIALS).find(
-        cred => cred.username === credentials.username && cred.password === credentials.password
-      );
+      const userData = response.user; // authService map backend response → AuthUser แล้ว
 
-      if (mockCred) {
-        // Mock login: จำลอง network delay 500ms
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        const userData = MOCK_USERS[mockCred.role];
-        if (!userData) throw new Error('ไม่พบข้อมูลผู้ใช้');
-        if (userData.status === 'suspended') throw new Error('บัญชีของคุณถูกระงับชั่วคราว');
-        if (userData.status === 'leave') throw new Error('บัญชีของคุณอยู่ในสถานะลาออก');
-
-        setUser(userData);
-        sessionStorage.setItem('authUser', JSON.stringify(userData));
-        // token ปลอม เพื่อให้ api.ts แนบกับ request (backend จะ reject แต่ใช้ทดสอบ UI ได้)
-        sessionStorage.setItem('token', `mock-token-${mockCred.role}-${Date.now()}`);
-        finalRole = mockCred.role;
-      } else {
-        // ── [2] Real API: ส่ง employeeId (= username ที่กรอก) ไปยัง backend ──
-        const response = await authService.login({
-          employeeId: credentials.username,
-          password: credentials.password
-        });
-
-        const userData = response.user; // authService map backend response → AuthUser แล้ว
-
-        setUser(userData);
-        sessionStorage.setItem('authUser', JSON.stringify(userData));
-        sessionStorage.setItem('token', response.accessToken);  // JWT จริงจาก backend
-        if (response.refreshToken) {
-          sessionStorage.setItem('refreshToken', response.refreshToken);
-        }
-        finalRole = userData.role;
+      setUser(userData);
+      sessionStorage.setItem('authUser', JSON.stringify(userData));
+      sessionStorage.setItem('token', response.accessToken);  // JWT จริงจาก backend
+      if (response.refreshToken) {
+        sessionStorage.setItem('refreshToken', response.refreshToken);
       }
 
       // บันทึก username ถ้าผู้ใช้ติ๊ก "จดจำฉันไว้"
@@ -114,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionStorage.removeItem('rememberedUsername');
       }
 
-      return finalRole; // login/page.tsx ใช้ค่านี้ตัดสิน redirect
+      return response.dashboardMode as UserRole; // dashboardMode บอก redirect target ที่ถูกต้อง
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ';
       setError(errorMessage);

@@ -31,12 +31,29 @@ export const authService = {
         throw new Error('ไม่พบพนักงาน (employeeId ไม่ถูกต้อง)');
       }
 
-      // 2. เช็ค password
-      // ถ้าผู้ใช้เคยเปลี่ยนรหัสผ่านเองแล้ว → ใช้ customPassword
-      // ถ้ายังไม่เคยเปลี่ยน → fallback ไปใช้ nationalId (รหัสเริ่มต้น)
-      const validPassword = user.customPassword ?? user.nationalId;
-      if (password !== validPassword) {
-        throw new Error('รหัสผ่านไม่ถูกต้อง');
+      // 2. เช็ค password และกำหนด dashboardMode
+      // - Admin/SuperAdmin ที่มี adminPassword และใส่ adminPassword → เข้า Admin/SuperAdmin Dashboard
+      // - ทุก role ที่ใส่รหัสผ่านปกติ (customPassword หรือ nationalId) → เข้า User Dashboard
+      //   ยกเว้น Manager → เข้า Manager Dashboard
+      let dashboardMode: 'superadmin' | 'admin' | 'manager' | 'user';
+
+      const isAdminRole = user.role === 'ADMIN' || user.role === 'SUPERADMIN';
+      const hasAdminPassword = isAdminRole && user.adminPassword !== null && user.adminPassword !== undefined;
+
+      if (hasAdminPassword && password === user.adminPassword) {
+        // ใส่ adminPassword → เข้า Admin/SuperAdmin Dashboard
+        dashboardMode = user.role === 'SUPERADMIN' ? 'superadmin' : 'admin';
+      } else {
+        // ใส่รหัสผ่านปกติ
+        const validPassword = user.customPassword ?? user.nationalId;
+        if (password !== validPassword) {
+          throw new Error('รหัสผ่านไม่ถูกต้อง');
+        }
+        if (user.role === 'MANAGER') {
+          dashboardMode = 'manager';
+        } else {
+          dashboardMode = 'user'; // รวมถึง Admin/SuperAdmin ที่ login ด้วยรหัสปกติ
+        }
       }
 
       // 3. สร้าง tokens
@@ -60,6 +77,7 @@ export const authService = {
         accessToken: session.token,
         refreshToken: session.refreshToken,
         expiresIn: Math.floor(ACCESS_TOKEN_EXPIRY / 1000), // seconds
+        dashboardMode, // 'superadmin' | 'admin' | 'manager' | 'user'
         user: {
           userId: user.userId,
           employeeId: user.employeeId,
@@ -67,7 +85,8 @@ export const authService = {
           lastName: user.lastName,
           email: user.email,
           role: user.role,
-          avatarUrl: user.avatarUrl
+          avatarUrl: user.avatarUrl,
+          branchId: user.branchId ?? undefined
         }
       };
 

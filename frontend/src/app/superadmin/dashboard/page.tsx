@@ -9,10 +9,18 @@ import {
   X,
   Search,
   Map as MapIcon,
-  Satellite
+  Satellite,
+  AlertTriangle,
+  Users,
+  Clock,
+  CalendarIcon
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem } from "@/services/dashboardService";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { th } from "date-fns/locale";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem, LocationEvent } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
 import type L from "leaflet";
@@ -38,6 +46,7 @@ const Popup = dynamic(
   () => import("react-leaflet").then((mod) => mod.Popup),
   { ssr: false }
 );
+
 
 // Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
 if (typeof window !== "undefined") {
@@ -126,7 +135,6 @@ export default function AdminDashboard() {
   const [selectedBranch, setSelectedBranch] = useState("all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
   const [expandedLocationIds, setExpandedLocationIds] = useState<string[]>([]);
-  const mapRef = useRef<L.Map | null>(null);
 
   // Modal states
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -144,7 +152,12 @@ export default function AdminDashboard() {
   const [branchesMap, setBranchesMap] = useState<BranchMapItem[]>([]);
   const [apiEvents, setApiEvents] = useState<ApiEventItem[]>([]);
   const [apiLocations, setApiLocations] = useState<LocationItem[]>([]);
+  const [locationEvents, setLocationEvents] = useState<LocationEvent[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   // Branch options: dynamic from API
   const branchOptions: BranchOption[] = useMemo(() => [
@@ -152,35 +165,52 @@ export default function AdminDashboard() {
     ...branchesMap.map(b => ({ code: String(b.branchId), name: b.name })),
   ], [branchesMap]);
 
-  // ── Fetch dashboard data when branch changes ──
+  // ── Fetch dashboard data when branch or date changes ──
   useEffect(() => {
     const branchIdNum =
       selectedBranch !== "all" ? parseInt(selectedBranch, 10) : undefined;
+    // format date as YYYY-MM-DD for API
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
+    const dateParam = isToday ? undefined : dateStr;
 
     const fetchData = async () => {
-      setIsLoading(true);
+      // ครั้งแรกแสดง spinner เต็มหน้า, ครั้งหลังไม่ unmount หน้า
+      if (!dashboardSummary) {
+        setIsLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
       try {
+        // ดึงข้อมูลหลัก (ถ้าพังจะไม่แสดงอะไรเลย)
         const [summary, employees, branches, eventsResp, locations] = await Promise.all([
-          dashboardService.getAttendanceSummary(branchIdNum),
-          dashboardService.getEmployeesToday(branchIdNum),
+          dashboardService.getAttendanceSummary(branchIdNum, dateParam),
+          dashboardService.getEmployeesToday(branchIdNum, dateParam),
           dashboardService.getBranchesMap(),
-          eventService.getAll({ take: 100 }),
+          eventService.getAll({ take: 100, branchId: branchIdNum }),
           locationService.getAll(),
         ]);
         setDashboardSummary(summary);
         setEmployeesToday(employees.data);
         setBranchesMap(branches.data);
         setApiEvents(eventsResp.data);
-        setApiLocations(Array.isArray(locations) ? locations : (locations.data ?? []));
+        setApiLocations(locations.data);
+
+        // ดึงข้อมูลเสริม (ถ้าพังไม่กระทบข้อมูลหลัก)
+        const [locEventsResult] = await Promise.allSettled([
+          dashboardService.getLocationEvents(branchIdNum, dateParam),
+        ]);
+        if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
       } catch (err) {
         console.error('[Dashboard] Failed to fetch data:', err);
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     };
 
     fetchData();
-  }, [selectedBranch]);
+  }, [selectedBranch, selectedDate]);
 
   // ── Map API employees → AttendanceStats ──
   const attendanceStats = useMemo((): AttendanceStats => {
@@ -195,15 +225,16 @@ export default function AdminDashboard() {
     });
     const absentUsers = employeesToday.filter(e => e.status === 'ABSENT').map(toUser);
     const lateUsers   = employeesToday.filter(e => e.status === 'LATE').map(toUser);
-    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME').map(toUser);
+    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME' || e.status === 'LEAVE_APPROVED').map(toUser);
+    const leaveUsers  = employeesToday.filter(e => e.status === 'LEAVE').map(toUser);
     return {
       totalEmployees: dashboardSummary?.total ?? employeesToday.length,
       absentCount:    dashboardSummary?.absent ?? absentUsers.length,
-      leaveCount:     0,
+      leaveCount:     dashboardSummary?.leave ?? leaveUsers.length,
       lateCount:      dashboardSummary?.late ?? lateUsers.length,
       onTimeCount:    dashboardSummary?.onTime ?? onTimeUsers.length,
       absentUsers,
-      leaveUsers:     [],
+      leaveUsers,
       lateUsers,
       onTimeUsers,
     };
@@ -231,6 +262,47 @@ export default function AdminDashboard() {
       lateEventUsers:       [],
     };
   }, [apiEvents]);
+
+  // ── Filter events for display (date + branch) ──
+  // วันนี้ → แสดงเฉพาะ ongoing/upcoming เรียงใกล้สุด
+  // วันอื่น → แสดงกิจกรรมที่ overlap กับวันนั้น
+  const displayedEvents = useMemo(() => {
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const selectedStr = format(selectedDate, 'yyyy-MM-dd');
+    const isToday = todayStr === selectedStr;
+
+    let filtered: ApiEventItem[];
+
+    if (isToday) {
+      filtered = apiEvents.filter(e => new Date(e.endDateTime) >= now);
+    } else {
+      const dayStart = new Date(selectedDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(selectedDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      filtered = apiEvents.filter(e => {
+        const start = new Date(e.startDateTime);
+        const end = new Date(e.endDateTime);
+        return start <= dayEnd && end >= dayStart;
+      });
+    }
+
+    // กรองตามสาขาที่เลือก โดยเทียบจาก location ของกิจกรรมกับชื่อสาขา
+    if (selectedBranch !== 'all') {
+      const branch = branchesMap.find(b => String(b.branchId) === selectedBranch);
+      if (branch) {
+        filtered = filtered.filter(e => {
+          const locName = e.location?.locationName || '';
+          return locName.includes(branch.name) || branch.name.includes(locName);
+        });
+      }
+    }
+
+    return filtered.sort(
+      (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+    );
+  }, [apiEvents, selectedDate, selectedBranch, branchesMap]);
 
   // Combine locations from API data
   const mappingLocations: LocationWithStatus[] = apiLocations.map((loc) => ({
@@ -273,6 +345,21 @@ export default function AdminDashboard() {
     return location.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
            location.description?.toLowerCase().includes(searchQuery.toLowerCase());
   });
+
+  // ── คำนวณจุดกลางแผนที่ตามสาขาที่เลือก ──
+  const mapCenter: [number, number] = useMemo(() => {
+    if (selectedBranch !== "all" && branchesMap.length > 0 && apiLocations.length > 0) {
+      const branch = branchesMap.find(b => String(b.branchId) === selectedBranch);
+      if (branch) {
+        const matchedLoc = apiLocations.find(
+          loc => loc.locationName.includes(branch.name) || branch.name.includes(loc.locationName)
+        );
+        if (matchedLoc) return [matchedLoc.latitude, matchedLoc.longitude] as [number, number];
+      }
+    }
+    // fallback: กรุงเทพ (สำนักงานใหญ่)
+    return [13.7563, 100.5018] as [number, number];
+  }, [selectedBranch, branchesMap, apiLocations]);
 
   // Donut chart data
   const donutChartData = useMemo(() => {
@@ -354,10 +441,12 @@ export default function AdminDashboard() {
 
   const statusLabel = (status: string) => {
     switch (status) {
-      case 'ON_TIME': return { text: 'ตรงเวลา', cls: 'bg-emerald-100 text-emerald-700' };
-      case 'LATE':    return { text: 'มาสาย',   cls: 'bg-orange-100 text-orange-700'   };
-      case 'ABSENT':  return { text: 'ขาดงาน',  cls: 'bg-red-100 text-red-700'         };
-      default:        return { text: 'ไม่ทราบ', cls: 'bg-gray-100 text-gray-600'       };
+      case 'ON_TIME':        return { text: 'ตรงเวลา', cls: 'bg-emerald-100 text-emerald-700' };
+      case 'LATE':           return { text: 'มาสาย',   cls: 'bg-orange-100 text-orange-700'   };
+      case 'ABSENT':         return { text: 'ขาดงาน',  cls: 'bg-red-100 text-red-700'         };
+      case 'LEAVE':          return { text: 'ลางาน',   cls: 'bg-blue-100 text-blue-700'       };
+      case 'LEAVE_APPROVED': return { text: 'ลา(มางาน)', cls: 'bg-emerald-100 text-emerald-700' };
+      default:               return { text: 'ไม่ทราบ', cls: 'bg-gray-100 text-gray-600'       };
     }
   };
 
@@ -428,6 +517,9 @@ export default function AdminDashboard() {
               <option key={b.code} value={b.code}>{b.name}</option>
             ))}
           </select>
+          {isRefreshing && (
+            <div className="w-5 h-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+          )}
         </div>
       </div>
 
@@ -440,7 +532,7 @@ export default function AdminDashboard() {
           {/* Map */}
           <div className="relative flex-1 min-h-0">
             {/* Map Controls overlay */}
-            <div className="absolute top-3 left-3 right-3 z-999 flex gap-2 flex-wrap">
+            <div className="absolute top-3 left-12 right-3 z-999 flex gap-2 flex-wrap">
               <div className="relative flex-1 min-w-52">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
@@ -453,23 +545,23 @@ export default function AdminDashboard() {
               </div>
               <div className="flex gap-1">
                 {(['all','location','event'] as FilterType[]).map(f => (
-                  <Button key={f} size="sm"
-                    variant={filterType === f ? 'default' : 'outline'}
+                  <Button key={f} size="sm" variant="ghost"
                     onClick={() => setFilterType(f)}
-                    className="bg-white/95 backdrop-blur-sm text-xs"
+                    style={filterType === f ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                    className="text-xs shadow-md border border-gray-300 rounded-md"
                   >
                     {{ all: 'ทั้งหมด', location: 'พื้นที่', event: 'กิจกรรม' }[f]}
                   </Button>
                 ))}
-                <Button size="sm"
-                  variant={mapType === 'default' ? 'default' : 'outline'}
+                <Button size="sm" variant="ghost"
                   onClick={() => setMapType('default')}
-                  className="bg-white/95 backdrop-blur-sm"
+                  style={mapType === 'default' ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                  className="shadow-md border border-gray-300 rounded-md"
                 ><MapIcon className="h-4 w-4" /></Button>
-                <Button size="sm"
-                  variant={mapType === 'satellite' ? 'default' : 'outline'}
+                <Button size="sm" variant="ghost"
                   onClick={() => setMapType('satellite')}
-                  className="bg-white/95 backdrop-blur-sm"
+                  style={mapType === 'satellite' ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                  className="shadow-md border border-gray-300 rounded-md"
                 ><Satellite className="h-4 w-4" /></Button>
               </div>
             </div>
@@ -477,10 +569,10 @@ export default function AdminDashboard() {
             {/* Map itself */}
             {typeof window !== 'undefined' && filteredLocations.length > 0 ? (
               <MapContainer
-                center={[filteredLocations[0].latitude, filteredLocations[0].longitude]}
-                zoom={13}
+                key={`map-${selectedBranch}`}
+                center={mapCenter}
+                zoom={selectedBranch !== "all" ? 15 : 13}
                 className="h-full w-full"
-                ref={mapRef}
               >
                 <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
                 {filteredLocations.map((location) => (
@@ -516,49 +608,118 @@ export default function AdminDashboard() {
             )}
           </div>
 
-          {/* Activity Log */}
+          {/* Location Events Alert (endpoint #4) */}
+          {locationEvents.length > 0 && (
+            <div className="border-t-2 border-borderMain bg-amber-50 px-4 py-2 shrink-0">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span className="text-xs font-semibold text-amber-700">แจ้งเตือน: Check-in นอกพื้นที่ ({locationEvents.length} รายการ)</span>
+              </div>
+              <div className="space-y-1 max-h-24 overflow-y-auto">
+                {locationEvents.map((evt) => (
+                  <div key={evt.eventId} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1 border border-amber-200">
+                    <span className="text-textMain font-medium">{evt.employeeName}</span>
+                    <span className="text-textMain/60">{evt.expectedLocation}</span>
+                    <span className="text-amber-700 font-mono">{evt.actualDistance}m / {evt.allowedRadius}m</span>
+                    <span className="text-textMain/50">{evt.checkInTime}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Activity Log — สลับตาม tab การเข้างาน / กิจกรรม */}
           <div className="h-52 border-t-2 border-borderMain bg-white flex flex-col">
             <div className="px-4 py-2 border-b border-borderMain flex items-center justify-between shrink-0">
-              <h3 className="text-sm font-semibold text-primaryMain">บันทึกกิจกรรม (Activity Log)</h3>
-              <span className="text-xs text-textMain/60">{employeesToday.length} รายการ</span>
+              <h3 className="text-sm font-semibold text-primaryMain">
+                {statsType === 'attendance' ? 'บันทึกการเข้างาน' : 'รายการกิจกรรม'}
+              </h3>
+              <span className="text-xs text-textMain/60">
+                {statsType === 'attendance' ? employeesToday.length : displayedEvents.length} รายการ
+              </span>
             </div>
             <div className="overflow-y-auto flex-1">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
-                    <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-borderMain/50">
-                  {employeesToday.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
-                  ) : (
-                    employeesToday.map((emp) => {
-                      const nameParts = emp.name.split(' ');
-                      const firstName = nameParts[0] ?? emp.name;
-                      const lastName  = nameParts.slice(1).join(' ');
-                      const sl = statusLabel(emp.status);
-                      return (
-                        <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
-                          <td className="px-3 py-2 text-textMain">{firstName}</td>
-                          <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
-                          <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
-                          <td className="px-3 py-2">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
-                              {sl.text}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+              {statsType === 'attendance' ? (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderMain/50">
+                    {employeesToday.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
+                    ) : (
+                      employeesToday.map((emp) => {
+                        const nameParts = emp.name.split(' ');
+                        const firstName = nameParts[0] ?? emp.name;
+                        const lastName  = nameParts.slice(1).join(' ');
+                        const sl = statusLabel(emp.status);
+                        return (
+                          <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
+                            <td className="px-3 py-2 text-textMain">{firstName}</td>
+                            <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
+                            <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
+                                {sl.text}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อกิจกรรม</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานที่</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">เริ่ม</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สิ้นสุด</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderMain/50">
+                    {displayedEvents.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบกิจกรรม</td></tr>
+                    ) : (
+                      displayedEvents.map((evt) => {
+                        const now = new Date();
+                        const start = new Date(evt.startDateTime);
+                        const end = new Date(evt.endDateTime);
+                        const isOngoing = evt.isActive && start <= now && end >= now;
+                        const isUpcoming = start > now;
+                        const evtStatus = isOngoing
+                          ? { text: 'กำลังดำเนินการ', cls: 'bg-green-100 text-green-700' }
+                          : isUpcoming
+                            ? { text: 'กำลังจะมาถึง', cls: 'bg-blue-100 text-blue-700' }
+                            : { text: 'สิ้นสุดแล้ว', cls: 'bg-gray-100 text-gray-600' };
+                        return (
+                          <tr key={evt.eventId} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-3 py-2 text-textMain font-medium">{evt.eventName}</td>
+                            <td className="px-3 py-2 text-textMain/70">{evt.location?.locationName || '-'}</td>
+                            <td className="px-3 py-2 text-textMain/70">{format(start, 'd MMM yy HH:mm', { locale: th })}</td>
+                            <td className="px-3 py-2 text-textMain/70">{format(end, 'd MMM yy HH:mm', { locale: th })}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${evtStatus.cls}`}>
+                                {evtStatus.text}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
@@ -590,36 +751,61 @@ export default function AdminDashboard() {
             </button>
           </div>
 
-          {/* Date range / info */}
+          {/* Date picker */}
           <div className="px-4 py-2 bg-gray-50 border-b border-borderMain shrink-0">
-            <p className="text-xs text-textMain/60">เลือกช่วงเวลาหรือวันที่เพื่อดูข้อมูล</p>
-            <p className="text-xs font-medium text-primaryMain mt-0.5">
-              {new Date().toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-            </p>
+            <p className="text-xs text-textMain/60 mb-1">เลือกวันที่เพื่อดูข้อมูล</p>
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+              <PopoverTrigger asChild>
+                <button className="flex items-center gap-2 w-full px-3 py-1.5 bg-white border border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain transition-colors">
+                  <CalendarIcon className="h-4 w-4 text-primaryMain/60" />
+                  <span>{format(selectedDate, 'EEEE d MMMM yyyy', { locale: th })}</span>
+                  {format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd') && (
+                    <span className="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">วันนี้</span>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(day) => { if (day) { setSelectedDate(day); setCalendarOpen(false); } }}
+                  disabled={{ after: new Date() }}
+                  defaultMonth={selectedDate}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Donut Chart */}
           <div className="px-4 py-3 shrink-0">
             <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={donutChartData}
-                    cx="50%" cy="50%"
-                    innerRadius={52} outerRadius={82}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {donutChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
-                    formatter={(value: number | undefined) => [(value ?? 0) + ' คน']}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              {donutChartData.every(d => d.value === 0) ? (
+                <div className="h-full flex flex-col items-center justify-center text-textMain/40">
+                  <div className="w-28 h-28 rounded-full border-8 border-gray-200 flex items-center justify-center">
+                    <span className="text-xs text-center">ยังไม่มี<br/>ข้อมูล</span>
+                  </div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={donutChartData}
+                      cx="50%" cy="50%"
+                      innerRadius={52} outerRadius={82}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {donutChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
+                      formatter={(value: number | undefined) => [(value ?? 0) + ' คน']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 

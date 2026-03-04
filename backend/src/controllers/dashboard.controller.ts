@@ -52,7 +52,8 @@ export async function handleAttendanceSummary(req: Request, res: Response): Prom
      * ข้อมูล return:
      * { present: 15, late: 3, absent: 2, leave: 1 }
      */
-    const summary = await getAttendanceSummary(user, branchId ? parseInt(branchId as string) : undefined);
+    const date = req.query.date as string | undefined;
+    const summary = await getAttendanceSummary(user, branchId ? parseInt(branchId as string) : undefined, date);
 
     res.status(200).json({
       success: true,
@@ -105,7 +106,7 @@ export async function handleEmployeesToday(req: Request, res: Response): Promise
      * AND (branchId IS NULL OR e.branchId = branchId)
      * ORDER BY e.firstName;
      */
-    const employees = await getEmployeesToday(user, branchId ? parseInt(branchId as string) : undefined);
+    const employees = await getEmployeesToday(user, branchId ? parseInt(branchId as string) : undefined, req.query.date as string | undefined);
 
     res.status(200).json({
       success: true,
@@ -212,7 +213,7 @@ export async function handleLocationEvents(req: Request, res: Response): Promise
      * AND (user.role = 'SUPERADMIN' OR e.branchId = user.branchId)
      * ORDER BY a.createdDate DESC;
      */
-    const events = await getLocationEvents(user, branchId ? parseInt(branchId as string) : undefined);
+    const events = await getLocationEvents(user, branchId ? parseInt(branchId as string) : undefined, req.query.date as string | undefined);
 
     res.status(200).json({
       success: true,
@@ -272,7 +273,7 @@ export async function handleBranchStats(req: Request, res: Response): Promise<vo
      * LEFT JOIN attendance a ON e.employeeId = a.employeeId AND DATE(a.createdDate) = TODAY()
      * GROUP BY b.branchId;
      */
-    const stats = await getBranchStats(user, branchId ? parseInt(branchId as string) : undefined);
+    const stats = await getBranchStats(user, branchId ? parseInt(branchId as string) : undefined, req.query.date as string | undefined);
 
     res.status(200).json({
       success: true,

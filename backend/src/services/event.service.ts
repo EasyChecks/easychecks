@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
-import type { events, EventParticipantType, Role } from '@prisma/client';
+import type { Event, EventParticipantType, Role } from '@prisma/client';
+import { getDistance } from 'geolib';
 import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
@@ -61,6 +62,8 @@ export interface SearchEventParams {
   skip?: number;
   take?: number;
   branchId?: number; // กรองกิจกรรมตามสาขา (ALL หรือ BRANCH ที่มี branchId นี้)
+  includeDeleted?: boolean; // รวมกิจกรรมที่ถูกลบ (soft delete) ด้วย
+  onlyDeleted?: boolean; // แสดงเฉพาะกิจกรรมที่ถูกลบ
 }
 
 // ========================================================================================
@@ -75,7 +78,7 @@ export interface SearchEventParams {
  * 💡 เหตุผล: ต้องตรวจสอบสถานที่และวันเวลาก่อนเพื่อป้องกันการสร้างกิจกรรมที่ไม่สมบูรณ์
  *            แยกการเพิ่มผู้เข้าร่วมออกมาเพราะมีหลายประเภท (ALL, INDIVIDUAL, BRANCH, ROLE)
  */
-async function createEvent(data: CreateEventDTO): Promise<events> {
+async function createEvent(data: CreateEventDTO): Promise<Event> {
   // 🔍 ตรวจสอบว่าสถานที่มีอยู่จริงและยังไม่ถูกลบ
   // เพราะต้องการป้องกันการสร้างกิจกรรมในสถานที่ที่ไม่มีหรือถูกลบแล้ว
   // SQL: SELECT * FROM Location WHERE locationId = ? AND deletedAt IS NULL
@@ -246,15 +249,20 @@ async function addEventParticipants(
  *            กรอง deletedAt: null เพื่อไม่แสดงที่ถูก soft delete
  */
 async function getAllEvents(params: SearchEventParams): Promise<{
-  data: events[];
+  data: Event[];
   total: number;
   active: number;
   inactive: number;
 }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const where: any = {
-    deletedAt: null, // 🚫 กรองเฉพาะที่ยังไม่ถูก soft delete (deletedAt IS NULL)
-  };
+  const where: any = {};
+
+  // กรอง deleted events ตาม parameter
+  if (params.onlyDeleted) {
+    where.deletedAt = { not: null }; // แสดงเฉพาะที่ถูกลบ
+  } else if (!params.includeDeleted) {
+    where.deletedAt = null; // 🚫 กรองเฉพาะที่ยังไม่ถูก soft delete (deletedAt IS NULL)
+  }
 
   // 🔍 เพิ่มเงื่อนไขค้นหาแบบ OR เพื่อค้นหาจากหลายฟิลด์
   // ใช้ mode: 'insensitive' เพื่อให้ไม่สนใจตัวพิมพ์เล็ก-ใหญ่
@@ -329,6 +337,7 @@ async function getAllEvents(params: SearchEventParams): Promise<{
             userId: true,
             firstName: true,
             lastName: true,
+            branchId: true,
           },
         },
         updatedBy: {
@@ -336,6 +345,7 @@ async function getAllEvents(params: SearchEventParams): Promise<{
             userId: true,
             firstName: true,
             lastName: true,
+            branchId: true,
           },
         },
         _count: {
@@ -362,7 +372,7 @@ async function getAllEvents(params: SearchEventParams): Promise<{
 /**
  * ดึงกิจกรรมด้วย ID พร้อมรายชื่อผู้เข้าร่วม
  */
-async function getEventById(eventId: number): Promise<events | null> {
+async function getEventById(eventId: number): Promise<Event | null> {
   const event = await prisma.event.findUnique({
     where: { eventId },
     include: {
@@ -426,7 +436,7 @@ async function getEventById(eventId: number): Promise<events | null> {
 async function updateEvent(
   eventId: number,
   data: UpdateEventDTO
-): Promise<events> {
+): Promise<Event> {
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -521,7 +531,7 @@ async function updateEvent(
 async function deleteEvent(
   eventId: number,
   data: DeleteEventDTO
-): Promise<events> {
+): Promise<Event> {
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -582,7 +592,7 @@ async function deleteEvent(
 /**
  * กู้คืนกิจกรรมที่ถูกลบ
  */
-async function restoreEvent(eventId: number, restoredByUserId?: number): Promise<events> {
+async function restoreEvent(eventId: number, restoredByUserId?: number): Promise<Event> {
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -635,7 +645,7 @@ async function restoreEvent(eventId: number, restoredByUserId?: number): Promise
  *            ใช้ OR conditions เพื่อครอบคลุมทั้ง 4 ประเภท (ALL, INDIVIDUAL, BRANCH, ROLE)
  *            กรองเฉพาะกิจกรรมที่ยังไม่สิ้นสุด (endDateTime >= now)
  */
-async function getMyEvents(userId: number): Promise<events[]> {
+async function getMyEvents(userId: number): Promise<Event[]> {
   // 🔎 ดึงข้อมูล branch และ role ของผู้ใช้ก่อนเพื่อสร้าง where condition
   // จำเป็นเพราะใช้ในการกรอง participantType BRANCH และ ROLE
   // SQL: SELECT branchId, role FROM User WHERE userId = ?
@@ -797,6 +807,256 @@ async function getEventStatistics(): Promise<{
 }
 
 // ========================================================================================
+// USER EVENT CHECK-IN/CHECK-OUT — การเข้าร่วมกิจกรรมของพนักงาน
+// ========================================================================================
+
+export interface EventCheckInDTO {
+  userId: number;
+  eventId: number;
+  photo?: string;       // Base64 selfie
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+}
+
+export interface EventCheckOutDTO {
+  userId: number;
+  eventId: number;
+  photo?: string;
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+}
+
+/**
+ * ตรวจสอบว่า user เป็นผู้เข้าร่วมกิจกรรมที่ eligible หรือไม่
+ */
+async function isEligibleParticipant(userId: number, eventId: number): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { userId },
+    select: { branchId: true, role: true },
+  });
+  if (!user) return false;
+
+  const event = await prisma.event.findUnique({
+    where: { eventId },
+    select: { participantType: true },
+  });
+  if (!event) return false;
+
+  if (event.participantType === 'ALL') return true;
+
+  if (event.participantType === 'INDIVIDUAL') {
+    const participant = await prisma.eventParticipant.findFirst({
+      where: { eventId, userId },
+    });
+    return participant !== null;
+  }
+
+  if (event.participantType === 'BRANCH') {
+    const participant = await prisma.eventParticipant.findFirst({
+      where: { eventId, branchId: user.branchId },
+    });
+    return participant !== null;
+  }
+
+  if (event.participantType === 'ROLE') {
+    const participant = await prisma.eventParticipant.findFirst({
+      where: { eventId, role: user.role },
+    });
+    return participant !== null;
+  }
+
+  return false;
+}
+
+/**
+ * ✅ Event Check-in — เข้าร่วมกิจกรรม
+ *
+ * Flow:
+ * 1. ตรวจสอบว่ากิจกรรมมีอยู่, active, และอยู่ในช่วงเวลา
+ * 2. ตรวจสอบว่า user เป็น eligible participant
+ * 3. ตรวจสอบว่ายังไม่ได้ check-in กิจกรรมนี้
+ * 4. ตรวจสอบ GPS ว่าอยู่ในรัศมี
+ * 5. สร้าง Attendance record โดยใส่ eventId (ไม่ใช้ shiftId)
+ */
+async function eventCheckIn(data: EventCheckInDTO) {
+  const { userId, eventId, photo, latitude, longitude, address } = data;
+
+  // 1. ตรวจสอบกิจกรรม
+  const event = await prisma.event.findUnique({
+    where: { eventId },
+    include: { location: true },
+  });
+
+  if (!event) throw new Error('ไม่พบกิจกรรม');
+  if (event.deletedAt) throw new Error('กิจกรรมนี้ถูกลบแล้ว');
+  if (!event.isActive) throw new Error('กิจกรรมนี้ถูกปิดใช้งานแล้ว');
+
+  const now = new Date();
+  if (now < event.startDateTime) throw new Error('กิจกรรมยังไม่เริ่ม');
+  if (now > event.endDateTime) throw new Error('กิจกรรมสิ้นสุดแล้ว');
+
+  // 2. ตรวจสอบสิทธิ์การเข้าร่วม
+  const eligible = await isEligibleParticipant(userId, eventId);
+  if (!eligible) throw new Error('คุณไม่ได้รับมอบหมายให้เข้าร่วมกิจกรรมนี้');
+
+  // 3. ตรวจสอบ check-in ซ้ำ
+  const existingAttendance = await prisma.attendance.findFirst({
+    where: { userId, eventId },
+  });
+  if (existingAttendance) throw new Error('คุณได้ check-in กิจกรรมนี้ไปแล้ว');
+
+  // 4. ตรวจสอบ GPS — ใช้ location ของ event หรือ custom venue
+  let distance: number | null = null;
+  let locationId: number | null = null;
+
+  if (event.location && latitude != null && longitude != null) {
+    // Mode A: ใช้ location จาก check-in location
+    distance = getDistance(
+      { latitude, longitude },
+      { latitude: event.location.latitude, longitude: event.location.longitude },
+    );
+    if (distance > event.location.radius) {
+      throw new Error(
+        `คุณอยู่นอกพื้นที่ (ห่าง ${distance.toFixed(0)} ม., อนุญาตสูงสุด ${event.location.radius} ม.)`
+      );
+    }
+    locationId = event.location.locationId;
+  } else if (event.venueLatitude != null && event.venueLongitude != null && latitude != null && longitude != null) {
+    // Mode B: ใช้ custom venue coordinates (ใช้ radius default 500m)
+    const venueRadius = 500;
+    distance = getDistance(
+      { latitude, longitude },
+      { latitude: event.venueLatitude, longitude: event.venueLongitude },
+    );
+    if (distance > venueRadius) {
+      throw new Error(
+        `คุณอยู่นอกพื้นที่ (ห่าง ${distance.toFixed(0)} ม., อนุญาตสูงสุด ${venueRadius} ม.)`
+      );
+    }
+  }
+
+  // 5. สร้าง Attendance record
+  const attendance = await prisma.attendance.create({
+    data: {
+      userId,
+      eventId,
+      locationId,
+      shiftId: null,              // event check-in ไม่ใช้ shiftId
+      checkInPhoto: photo ?? null,
+      checkInLat: latitude ?? null,
+      checkInLng: longitude ?? null,
+      checkInAddress: address ?? null,
+      checkInDistance: distance ?? null,
+      status: 'ON_TIME',         // event check-in ถือว่า ON_TIME เสมอ (ไม่มี grace period)
+      lateMinutes: 0,
+      note: `เข้าร่วมกิจกรรม: ${event.eventName}`,
+    },
+    include: {
+      user: { select: { userId: true, firstName: true, lastName: true, employeeId: true } },
+      event: { select: { eventId: true, eventName: true } },
+      location: true,
+    },
+  });
+
+  await createAuditLog({
+    userId,
+    action: AuditAction.EVENT_CHECK_IN,
+    targetTable: 'attendance',
+    targetId: attendance.attendanceId,
+    newValues: { eventId, eventName: event.eventName },
+  });
+
+  return attendance;
+}
+
+/**
+ * 🚪 Event Check-out — ออกจากกิจกรรม
+ */
+async function eventCheckOut(data: EventCheckOutDTO) {
+  const { userId, eventId, photo, latitude, longitude, address } = data;
+
+  // หา check-in record ที่ยังไม่ได้ check-out
+  const attendance = await prisma.attendance.findFirst({
+    where: { userId, eventId, checkOut: null },
+    include: { location: true, event: true },
+  });
+
+  if (!attendance) throw new Error('ไม่พบการ check-in กิจกรรมนี้ที่ยังไม่ได้ check-out');
+
+  // ตรวจสอบ GPS (ถ้ามี location)
+  let distance: number | null = null;
+  if (attendance.location && latitude != null && longitude != null) {
+    distance = getDistance(
+      { latitude, longitude },
+      { latitude: attendance.location.latitude, longitude: attendance.location.longitude },
+    );
+    if (distance > attendance.location.radius) {
+      throw new Error(
+        `คุณอยู่นอกพื้นที่ (ห่าง ${distance.toFixed(0)} ม., อนุญาตสูงสุด ${attendance.location.radius} ม.)`
+      );
+    }
+  }
+
+  const updatedAttendance = await prisma.attendance.update({
+    where: { attendanceId: attendance.attendanceId },
+    data: {
+      checkOut: new Date(),
+      checkOutPhoto: photo ?? null,
+      checkOutLat: latitude ?? null,
+      checkOutLng: longitude ?? null,
+      checkOutAddress: address ?? null,
+      checkOutDistance: distance ?? null,
+    },
+    include: {
+      user: { select: { userId: true, firstName: true, lastName: true, employeeId: true } },
+      event: { select: { eventId: true, eventName: true } },
+      location: true,
+    },
+  });
+
+  await createAuditLog({
+    userId,
+    action: AuditAction.EVENT_CHECK_OUT,
+    targetTable: 'attendance',
+    targetId: updatedAttendance.attendanceId,
+    newValues: { eventId },
+  });
+
+  return updatedAttendance;
+}
+
+/**
+ * 📋 ดึงสถานะการเข้าร่วมกิจกรรมของ user
+ */
+async function getMyEventAttendance(userId: number, eventId: number) {
+  const attendance = await prisma.attendance.findFirst({
+    where: { userId, eventId },
+    include: {
+      location: true,
+    },
+  });
+
+  if (!attendance) {
+    return { checkedIn: false, checkedOut: false, attendance: null };
+  }
+
+  return {
+    checkedIn: true,
+    checkedOut: attendance.checkOut !== null,
+    attendance: {
+      attendanceId: attendance.attendanceId,
+      checkIn: attendance.checkIn,
+      checkOut: attendance.checkOut,
+      checkInPhoto: attendance.checkInPhoto,
+      checkOutPhoto: attendance.checkOutPhoto,
+      status: attendance.status,
+    },
+  };
+}
+
+// ========================================================================================
 // EXPORTS - แยก exports เป็น 2 กลุ่มตามหน้าที่
 // ========================================================================================
 
@@ -804,9 +1064,12 @@ async function getEventStatistics(): Promise<{
  * User Actions - ใช้โดยผู้ใช้ทั่วไป
  */
 export const EventUserActions = {
-  getMyEvents, // ดูกิจกรรมที่ตัวเองเข้าร่วมได้
-  getAllEvents, // ดูรายการกิจกรรมทั้งหมด
-  getEventById, // ดูรายละเอียดกิจกรรม
+  getMyEvents,
+  getAllEvents,
+  getEventById,
+  eventCheckIn,
+  eventCheckOut,
+  getMyEventAttendance,
 };
 
 /**

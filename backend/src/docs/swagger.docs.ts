@@ -87,14 +87,13 @@
  *       - **Admin**: เห็นเฉพาะข้อมูลสาขาตัวเอง
  *       - **SuperAdmin**: เห็นทั้งองค์กร (สามารถ filter branchId ได้)
  *
- *       **Endpoints (5 endpoints):**
+ *       **Endpoints (4 endpoints):**
  *       | Endpoint | ใช้ทำอะไร |
  *       |----------|----------|
  *       | attendance-summary | Donut Chart สรุปสถานะวันนี้ |
  *       | employees-today | ตารางพนักงาน + สถานะ check-in |
  *       | branches-map | Map pins ของแต่ละสาขา |
  *       | location-events | Alert พนักงาน check-in นอกพื้นที่ |
- *       | branch-stats | KPI สถิติของสาขา |
  *   - name: Events
  *     description: |
  *       🎉 API สำหรับจัดการกิจกรรม/อีเวนต์
@@ -2194,8 +2193,15 @@
  *   get:
  *     summary: สรุป Attendance วันนี้ (Donut Chart)
  *     description: |
- *       ดึงจำนวนพนักงานแยกตามสถานะ (ON_TIME, LATE, ABSENT) ของวันนี้
+ *       ดึงจำนวนพนักงานแยกตามสถานะ (ON_TIME, LATE, ABSENT, LEAVE) ของวันที่ระบุ
  *       สำหรับแสดง Donut Chart บน Dashboard
+ *
+ *       **การนับ:**
+ *       - `onTime` — สถานะ ON_TIME + LEAVE_APPROVED
+ *       - `late` — สถานะ LATE
+ *       - `absent` — สถานะ ABSENT
+ *       - `leave` — มีใบลาอนุมัติ (leaveRequest status=APPROVED)
+ *       - `total` — attendance + leave (ไม่ซ้ำกัน)
  *
  *       **Role-based:**
  *       - ADMIN → เห็นเฉพาะสาขาตัวเอง
@@ -2213,6 +2219,14 @@
  *         description: |
  *           Filter เฉพาะสาขา (SUPERADMIN only)
  *           ADMIN จะใช้ branchId ของตัวเองอัตโนมัติ
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         required: false
+ *         description: วันที่ต้องการดู (default = วันนี้) เช่น 2026-03-05
+ *         example: "2026-03-05"
  *     responses:
  *       200:
  *         description: สรุป attendance สำเร็จ
@@ -2225,7 +2239,36 @@
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   $ref: '#/components/schemas/AttendanceSummary'
+ *                   type: object
+ *                   properties:
+ *                     onTime:
+ *                       type: integer
+ *                       example: 15
+ *                       description: จำนวนพนักงานมาตรงเวลา (ON_TIME + LEAVE_APPROVED)
+ *                     late:
+ *                       type: integer
+ *                       example: 3
+ *                       description: จำนวนพนักงานมาสาย
+ *                     absent:
+ *                       type: integer
+ *                       example: 2
+ *                       description: จำนวนพนักงานขาดงาน
+ *                     leave:
+ *                       type: integer
+ *                       example: 1
+ *                       description: จำนวนพนักงานที่มีใบลาอนุมัติ
+ *                     total:
+ *                       type: integer
+ *                       example: 21
+ *                       description: จำนวนรวมทั้งหมด (attendance + leave)
+ *             example:
+ *               success: true
+ *               data:
+ *                 onTime: 15
+ *                 late: 3
+ *                 absent: 2
+ *                 leave: 1
+ *                 total: 21
  *       401:
  *         description: ไม่ได้ login
  *         content:
@@ -2246,14 +2289,17 @@
  *   get:
  *     summary: รายชื่อพนักงานพร้อมสถานะวันนี้ (Table)
  *     description: |
- *       ดึงรายชื่อพนักงานทั้งหมดพร้อมสถานะ check-in/check-out ของวันนี้
+ *       ดึงรายชื่อพนักงานทั้งหมดพร้อมสถานะ check-in/check-out ของวันที่ระบุ
  *       สำหรับแสดงเป็น Table บน Dashboard
  *
  *       **ข้อมูลที่ได้:**
- *       - ชื่อ-นามสกุล, สาขา
- *       - สถานะ (ON_TIME / LATE / ABSENT)
- *       - เวลาเข้า-ออก
+ *       - employeeId, ชื่อ-นามสกุล, สาขา
+ *       - สถานะ (ON_TIME / LATE / ABSENT / LEAVE)
+ *       - เวลาเข้า-ออก (format HH:mm 24 ชม.)
  *       - จำนวนนาทีที่สาย
+ *
+ *       **หมายเหตุ:** พนักงานที่ลาจะแสดง status = "LEAVE"
+ *       โดย checkIn/checkOut เป็น null
  *     tags:
  *       - Dashboard
  *     security:
@@ -2265,6 +2311,14 @@
  *           type: integer
  *         required: false
  *         description: Filter เฉพาะสาขา (SUPERADMIN only)
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         required: false
+ *         description: วันที่ต้องการดู (default = วันนี้)
+ *         example: "2026-03-05"
  *     responses:
  *       200:
  *         description: ดึงข้อมูลพนักงานวันนี้สำเร็จ
@@ -2279,7 +2333,38 @@
  *                 data:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/EmployeeToday'
+ *                     type: object
+ *                     properties:
+ *                       employeeId:
+ *                         type: string
+ *                         example: "BKK001"
+ *                       name:
+ *                         type: string
+ *                         example: "สมชาย ใจดี"
+ *                         description: firstName + lastName
+ *                       branch:
+ *                         type: string
+ *                         example: "สาขากรุงเทพ"
+ *                       status:
+ *                         type: string
+ *                         enum: [ON_TIME, LATE, ABSENT, LEAVE]
+ *                         example: "ON_TIME"
+ *                         description: |
+ *                           สถานะจาก attendance หรือ "LEAVE" ถ้ามีใบลาอนุมัติ
+ *                       checkIn:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "08:30"
+ *                         description: เวลาเข้างาน (HH:mm 24h, null ถ้ายังไม่ check-in หรือลา)
+ *                       checkOut:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "17:30"
+ *                         description: เวลาออกงาน (HH:mm 24h, null ถ้ายังไม่ check-out)
+ *                       lateMinutes:
+ *                         type: integer
+ *                         example: 0
+ *                         description: จำนวนนาทีที่สาย (0 ถ้า ON_TIME หรือ LEAVE)
  *                 total:
  *                   type: integer
  *                   example: 25
@@ -2327,7 +2412,28 @@
  *                 data:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/BranchMap'
+ *                     type: object
+ *                     properties:
+ *                       branchId:
+ *                         type: integer
+ *                         example: 1
+ *                       name:
+ *                         type: string
+ *                         example: "สำนักงานใหญ่"
+ *                       latitude:
+ *                         type: number
+ *                         example: 13.7563
+ *                       longitude:
+ *                         type: number
+ *                         example: 100.5018
+ *                       totalEmployees:
+ *                         type: integer
+ *                         example: 25
+ *                         description: จำนวนพนักงานในสาขา (จาก _count.users)
+ *                       address:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "123 ถนนสาทร กรุงเทพฯ"
  *                 total:
  *                   type: integer
  *                   example: 3
@@ -2354,9 +2460,8 @@
  *       ดึงรายชื่อพนักงานที่ check-in จากตำแหน่งที่อยู่นอก radius ที่กำหนด
  *       ใช้สำหรับ security monitoring / fraud detection
  *
- *       **ตัวอย่างเหตุการณ์:**
- *       พนักงาน check-in ห่างจากสาขา 1,500 เมตร (radius กำหนด 200 เมตร)
- *       → ถูก flag เป็น location event
+ *       **Logic:** กรอง attendance วันที่ระบุ
+ *       ที่มี location แต่ `checkInDistance > location.radius`
  *     tags:
  *       - Dashboard
  *     security:
@@ -2368,6 +2473,14 @@
  *           type: integer
  *         required: false
  *         description: Filter เฉพาะสาขา (SUPERADMIN only)
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         required: false
+ *         description: วันที่ต้องการดู (default = วันนี้)
+ *         example: "2026-03-05"
  *     responses:
  *       200:
  *         description: ดึงเหตุการณ์นอกพื้นที่สำเร็จ
@@ -2382,56 +2495,39 @@
  *                 data:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/LocationEvent'
+ *                     type: object
+ *                     properties:
+ *                       eventId:
+ *                         type: integer
+ *                         example: 42
+ *                         description: attendanceId ของ record นั้น (ชื่อ field เป็น eventId)
+ *                       employeeName:
+ *                         type: string
+ *                         example: "สมชาย ใจดี"
+ *                       checkInTime:
+ *                         type: string
+ *                         example: "08:45"
+ *                         description: เวลา check-in (HH:mm 24h)
+ *                       expectedLocation:
+ *                         type: string
+ *                         example: "สำนักงานใหญ่"
+ *                         description: ชื่อ location ที่ควรอยู่
+ *                       actualDistance:
+ *                         type: number
+ *                         example: 350
+ *                         description: ระยะห่างจริง (เมตร)
+ *                       allowedRadius:
+ *                         type: number
+ *                         example: 100
+ *                         description: รัศมีที่อนุญาต (เมตร)
+ *                       timestamp:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2026-03-05T01:45:00.000Z"
+ *                         description: createdAt ของ attendance record
  *                 total:
  *                   type: integer
  *                   example: 2
- *       401:
- *         description: ไม่ได้ login
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-
-/**
- * @swagger
- * /api/dashboard/branch-stats:
- *   get:
- *     summary: สถิติ KPI ของสาขา (Statistics Cards)
- *     description: |
- *       ดึงสถิติสาขา ได้แก่ จำนวนพนักงาน, มาตรงเวลา, มาสาย, ขาดงาน, อัตราการมา (%)
- *       ใช้สำหรับแสดง KPI cards บน Dashboard
- *     tags:
- *       - Dashboard
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: branchId
- *         schema:
- *           type: integer
- *         required: false
- *         description: Filter เฉพาะสาขา (SUPERADMIN only)
- *     responses:
- *       200:
- *         description: ดึงสถิติสาขาสำเร็จ
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/BranchStats'
  *       401:
  *         description: ไม่ได้ login
  *         content:
@@ -2458,6 +2554,11 @@
  *     description: |
  *       สร้างกิจกรรมใหม่พร้อมกำหนดสถานที่, ช่วงเวลา, ผู้เข้าร่วม
  *
+ *       **สถานที่จัดกิจกรรม (2 โหมด):**
+ *       - **Mode A** (Location ที่มีอยู่): ส่ง `locationId` → ใช้พิกัดจาก Location table
+ *       - **Mode B** (Custom venue): ส่ง `venueName` + `venueLatitude` + `venueLongitude`
+ *       - ต้องเลือกอย่างน้อย 1 โหมด
+ *
  *       **participantType rules:**
  *       - `ALL` → ไม่ต้องส่ง participants (ทุกคนเข้าร่วมได้)
  *       - `INDIVIDUAL` → ส่ง `participants.userIds`
@@ -2465,8 +2566,9 @@
  *       - `ROLE` → ส่ง `participants.roles`
  *
  *       **Validation:**
- *       - สถานที่ (locationId) ต้องมีอยู่จริงและยังไม่ถูกลบ
+ *       - ต้องระบุ eventName, startDateTime, endDateTime, participantType
  *       - startDateTime ต้องน้อยกว่า endDateTime
+ *       - Location (mode A) ต้องมีอยู่จริงและยังไม่ถูกลบ
  *     tags:
  *       - Events
  *     security:
@@ -2476,7 +2578,102 @@
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/CreateEventRequest'
+ *             type: object
+ *             required:
+ *               - eventName
+ *               - startDateTime
+ *               - endDateTime
+ *               - participantType
+ *             properties:
+ *               eventName:
+ *                 type: string
+ *                 example: "ประชุมประจำเดือน"
+ *               description:
+ *                 type: string
+ *                 example: "ประชุมสรุปผลงานประจำเดือนมีนาคม"
+ *               locationId:
+ *                 type: integer
+ *                 description: Mode A — Location ที่มีอยู่ (FK → locations)
+ *                 example: 5
+ *               venueName:
+ *                 type: string
+ *                 description: Mode B — ชื่อสถานที่แบบ custom
+ *                 example: "ห้องประชุม A ชั้น 3"
+ *               venueLatitude:
+ *                 type: number
+ *                 description: Mode B — ละติจูด custom venue
+ *                 example: 13.7563
+ *               venueLongitude:
+ *                 type: number
+ *                 description: Mode B — ลองจิจูด custom venue
+ *                 example: 100.5018
+ *               startDateTime:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-03-10T09:00:00.000Z"
+ *               endDateTime:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-03-10T17:00:00.000Z"
+ *               participantType:
+ *                 type: string
+ *                 enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
+ *                 example: "ALL"
+ *               participants:
+ *                 type: object
+ *                 description: ผู้เข้าร่วม (ไม่ต้องส่งถ้า participantType=ALL)
+ *                 properties:
+ *                   userIds:
+ *                     type: array
+ *                     items:
+ *                       type: integer
+ *                     description: สำหรับ INDIVIDUAL
+ *                     example: [5, 10, 15]
+ *                   branchIds:
+ *                     type: array
+ *                     items:
+ *                       type: integer
+ *                     description: สำหรับ BRANCH
+ *                     example: [1, 2]
+ *                   roles:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *                       enum: [USER, MANAGER, ADMIN, SUPERADMIN]
+ *                     description: สำหรับ ROLE
+ *                     example: ["MANAGER", "ADMIN"]
+ *           examples:
+ *             งาน ALL กับ Location:
+ *               summary: กิจกรรมทุกคนเข้าร่วม (ใช้ Location ที่มีอยู่)
+ *               value:
+ *                 eventName: "กิจกรรม Team Building"
+ *                 description: "กิจกรรมสร้างทีมประจำปี"
+ *                 locationId: 5
+ *                 startDateTime: "2026-03-10T09:00:00.000Z"
+ *                 endDateTime: "2026-03-10T17:00:00.000Z"
+ *                 participantType: "ALL"
+ *             งาน BRANCH กับ Custom Venue:
+ *               summary: กิจกรรมเฉพาะสาขา (ใช้ custom venue)
+ *               value:
+ *                 eventName: "ประชุมสาขา BKK"
+ *                 venueName: "ห้องประชุม A ชั้น 3"
+ *                 venueLatitude: 13.7563
+ *                 venueLongitude: 100.5018
+ *                 startDateTime: "2026-03-10T09:00:00.000Z"
+ *                 endDateTime: "2026-03-10T12:00:00.000Z"
+ *                 participantType: "BRANCH"
+ *                 participants:
+ *                   branchIds: [1]
+ *             งาน INDIVIDUAL:
+ *               summary: กิจกรรมเฉพาะบุคคล
+ *               value:
+ *                 eventName: "อบรม Leadership"
+ *                 locationId: 5
+ *                 startDateTime: "2026-03-15T09:00:00.000Z"
+ *                 endDateTime: "2026-03-15T16:00:00.000Z"
+ *                 participantType: "INDIVIDUAL"
+ *                 participants:
+ *                   userIds: [5, 10, 15]
  *     responses:
  *       201:
  *         description: สร้างกิจกรรมสำเร็จ
@@ -2488,13 +2685,18 @@
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/Event'
  *                 message:
  *                   type: string
- *                   example: สร้างกิจกรรมเรียบร้อยแล้ว
+ *                   example: "สร้างกิจกรรมเรียบร้อยแล้ว"
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
  *       400:
- *         description: ข้อมูลไม่ครบหรือไม่ถูกต้อง
+ *         description: |
+ *           ข้อมูลไม่ครบหรือไม่ถูกต้อง:
+ *           - ไม่ระบุ eventName, startDateTime, endDateTime, participantType
+ *           - ไม่ระบุสถานที่ (ต้องมี locationId หรือ venueName)
+ *           - startDateTime >= endDateTime
+ *           - ไม่พบ location ที่ระบุ
  *         content:
  *           application/json:
  *             schema:
@@ -2505,11 +2707,16 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin/SuperAdmin)
+ *
  *   get:
  *     summary: ดึงรายการกิจกรรมทั้งหมด (Authenticated)
  *     description: |
  *       ดึงกิจกรรมทั้งหมด (ที่ยังไม่ถูก soft delete) พร้อม pagination, search, filter
  *       ส่งคืนข้อมูลพร้อมสถิติ total/active/inactive
+ *
+ *       **Response data structure:** `data.data` = array กิจกรรม, `data.total/active/inactive` = สถิติ
  *     tags:
  *       - Events
  *     security:
@@ -2529,7 +2736,8 @@
  *       - in: query
  *         name: isActive
  *         schema:
- *           type: boolean
+ *           type: string
+ *           enum: ["true", "false"]
  *         description: กรองตามสถานะ (true = active, false = inactive)
  *       - in: query
  *         name: startDate
@@ -2555,6 +2763,11 @@
  *           type: integer
  *           default: 20
  *         description: จำนวนต่อหน้า
+ *       - in: query
+ *         name: branchId
+ *         schema:
+ *           type: integer
+ *         description: กรองเฉพาะ Event ที่ participantType=ALL หรือ BRANCH ที่ตรงกับ branchId
  *     responses:
  *       200:
  *         description: ดึงรายการกิจกรรมสำเร็จ
@@ -2566,11 +2779,28 @@
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/EventListResponse'
  *                 message:
  *                   type: string
- *                   example: ดึงรายการกิจกรรมสำเร็จ
+ *                   example: "ดึงรายการกิจกรรมสำเร็จ"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/EventListItem'
+ *                     total:
+ *                       type: integer
+ *                       example: 25
+ *                       description: จำนวนกิจกรรมทั้งหมด (ไม่รวมที่ถูกลบ)
+ *                     active:
+ *                       type: integer
+ *                       example: 20
+ *                       description: จำนวนกิจกรรมที่ active
+ *                     inactive:
+ *                       type: integer
+ *                       example: 5
+ *                       description: จำนวนกิจกรรมที่ inactive
  *       401:
  *         description: ไม่ได้ login
  *         content:
@@ -2591,7 +2821,8 @@
  *       - `BRANCH` → แสดงเฉพาะที่ branchId ตรง
  *       - `ROLE` → แสดงเฉพาะที่ role ตรง
  *
- *       แสดงเฉพาะกิจกรรมที่ **ยังไม่จบ** (endDateTime >= now)
+ *       แสดงเฉพาะกิจกรรมที่ **ยังไม่จบ** (endDateTime >= now), active, ไม่ถูกลบ
+ *       เรียงตาม startDateTime ใกล้ที่สุดก่อน (ASC)
  *     tags:
  *       - Events
  *     security:
@@ -2607,13 +2838,55 @@
  *                 success:
  *                   type: boolean
  *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "ดึงกิจกรรมที่เข้าร่วมสำเร็จ"
  *                 data:
  *                   type: array
  *                   items:
- *                     $ref: '#/components/schemas/Event'
- *                 message:
- *                   type: string
- *                   example: ดึงกิจกรรมที่เข้าร่วมสำเร็จ
+ *                     type: object
+ *                     properties:
+ *                       eventId:
+ *                         type: integer
+ *                         example: 1
+ *                       eventName:
+ *                         type: string
+ *                         example: "กิจกรรม Team Building"
+ *                       startDateTime:
+ *                         type: string
+ *                         format: date-time
+ *                       endDateTime:
+ *                         type: string
+ *                         format: date-time
+ *                       participantType:
+ *                         type: string
+ *                         enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
+ *                       isActive:
+ *                         type: boolean
+ *                       location:
+ *                         type: object
+ *                         nullable: true
+ *                         properties:
+ *                           locationId:
+ *                             type: integer
+ *                           locationName:
+ *                             type: string
+ *                           address:
+ *                             type: string
+ *                             nullable: true
+ *                           latitude:
+ *                             type: number
+ *                           longitude:
+ *                             type: number
+ *                           radius:
+ *                             type: number
+ *                       _count:
+ *                         type: object
+ *                         properties:
+ *                           attendance:
+ *                             type: integer
+ *                             example: 12
+ *                             description: จำนวน attendance records ของกิจกรรมนี้
  *       401:
  *         description: ไม่ได้ login
  *         content:
@@ -2628,9 +2901,14 @@
  *   get:
  *     summary: สถิติกิจกรรมภาพรวม (Admin/SuperAdmin only)
  *     description: |
- *       คำนวณสถิติกิจกรรมทั้งหมด:
- *       - จำนวนกิจกรรมทั้งหมด / active / upcoming / ongoing / past / deleted
- *       - จัดกลุ่มตาม participantType
+ *       คำนวณสถิติกิจกรรมทั้งหมด (7 parallel queries):
+ *       - `totalEvents` — จำนวนกิจกรรมที่ยังไม่ถูกลบ
+ *       - `activeEvents` — isActive=true และไม่ถูกลบ
+ *       - `upcomingEvents` — startDateTime > now
+ *       - `ongoingEvents` — startDateTime <= now <= endDateTime
+ *       - `pastEvents` — endDateTime < now
+ *       - `deletedEvents` — deletedAt != null
+ *       - `byParticipantType` — groupBy participantType (เฉพาะไม่ถูกลบ)
  *
  *       ใช้แสดง Stats Cards + Pie Chart บนหน้า Event Management
  *     tags:
@@ -2648,17 +2926,57 @@
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/EventStatistics'
  *                 message:
  *                   type: string
- *                   example: ดึงสถิติกิจกรรมสำเร็จ
+ *                   example: "ดึงสถิติกิจกรรมสำเร็จ"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalEvents:
+ *                       type: integer
+ *                       example: 50
+ *                     activeEvents:
+ *                       type: integer
+ *                       example: 35
+ *                     upcomingEvents:
+ *                       type: integer
+ *                       example: 10
+ *                     ongoingEvents:
+ *                       type: integer
+ *                       example: 5
+ *                     pastEvents:
+ *                       type: integer
+ *                       example: 20
+ *                     deletedEvents:
+ *                       type: integer
+ *                       example: 3
+ *                     byParticipantType:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           type:
+ *                             type: string
+ *                             enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
+ *                           count:
+ *                             type: integer
+ *                       example:
+ *                         - type: ALL
+ *                           count: 20
+ *                         - type: BRANCH
+ *                           count: 15
+ *                         - type: INDIVIDUAL
+ *                           count: 10
+ *                         - type: ROLE
+ *                           count: 5
  *       401:
  *         description: ไม่ได้ login
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin/SuperAdmin)
  */
 
 /**
@@ -2668,10 +2986,11 @@
  *     summary: ดึงรายละเอียดกิจกรรมด้วย ID (Authenticated)
  *     description: |
  *       ดึงข้อมูลกิจกรรมแบบละเอียด รวมถึง:
- *       - สถานที่จัดกิจกรรม (location)
- *       - ผู้สร้าง, ผู้แก้ไข, ผู้ลบ
- *       - รายชื่อผู้เข้าร่วม (participants) พร้อม user/branch detail
- *       - จำนวน attendance
+ *       - สถานที่จัดกิจกรรม (location) — full object
+ *       - ผู้สร้าง (creator) พร้อม email, role
+ *       - ผู้แก้ไข (updatedBy), ผู้ลบ (deletedBy)
+ *       - รายชื่อผู้เข้าร่วม (event_participants) พร้อม user/branch detail
+ *       - จำนวน attendance (_count.attendance)
  *     tags:
  *       - Events
  *     security:
@@ -2695,7 +3014,7 @@
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   $ref: '#/components/schemas/Event'
+ *                   $ref: '#/components/schemas/EventDetail'
  *       404:
  *         description: ไม่พบกิจกรรม
  *         content:
@@ -2708,7 +3027,8 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- *   patch:
+ *
+ *   put:
  *     summary: แก้ไขกิจกรรม (Admin/SuperAdmin only)
  *     description: |
  *       แก้ไขข้อมูลกิจกรรม ส่งเฉพาะ field ที่ต้องการแก้ไข
@@ -2716,7 +3036,8 @@
  *       **ข้อจำกัด:**
  *       - ไม่สามารถแก้กิจกรรมที่ถูก soft delete แล้ว
  *       - ถ้าเปลี่ยน participantType หรือ participants → ลบผู้เข้าร่วมเดิมและเพิ่มใหม่
- *       - startDateTime ต้องน้อยกว่า endDateTime
+ *       - startDateTime ต้องน้อยกว่า endDateTime (ถ้าส่งมาเปลี่ยน)
+ *       - `locationId: null` จะล้าง location ออก
  *     tags:
  *       - Events
  *     security:
@@ -2733,7 +3054,56 @@
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/UpdateEventRequest'
+ *             type: object
+ *             properties:
+ *               eventName:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               locationId:
+ *                 type: integer
+ *                 nullable: true
+ *                 description: null = ล้าง location, undefined = ไม่เปลี่ยน
+ *               venueName:
+ *                 type: string
+ *               venueLatitude:
+ *                 type: number
+ *               venueLongitude:
+ *                 type: number
+ *               startDateTime:
+ *                 type: string
+ *                 format: date-time
+ *               endDateTime:
+ *                 type: string
+ *                 format: date-time
+ *               participantType:
+ *                 type: string
+ *                 enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
+ *               isActive:
+ *                 type: boolean
+ *               participants:
+ *                 type: object
+ *                 properties:
+ *                   userIds:
+ *                     type: array
+ *                     items:
+ *                       type: integer
+ *                   branchIds:
+ *                     type: array
+ *                     items:
+ *                       type: integer
+ *                   roles:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *           examples:
+ *             แก้ชื่อและวันที่:
+ *               value:
+ *                 eventName: "ประชุมประจำเดือน (แก้ไข)"
+ *                 endDateTime: "2026-03-10T18:00:00.000Z"
+ *             ปิดกิจกรรม:
+ *               value:
+ *                 isActive: false
  *     responses:
  *       200:
  *         description: แก้ไขกิจกรรมสำเร็จ
@@ -2745,13 +3115,13 @@
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/Event'
  *                 message:
  *                   type: string
- *                   example: แก้ไขกิจกรรมเรียบร้อยแล้ว
+ *                   example: "แก้ไขกิจกรรมเรียบร้อยแล้ว"
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
  *       400:
- *         description: ข้อมูลไม่ถูกต้อง
+ *         description: ข้อมูลไม่ถูกต้อง หรือกิจกรรมถูก soft delete แล้ว
  *         content:
  *           application/json:
  *             schema:
@@ -2764,18 +3134,17 @@
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: ไม่ได้ login
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin/SuperAdmin)
+ *
  *   delete:
  *     summary: ลบกิจกรรม — Soft Delete (Admin/SuperAdmin only)
  *     description: |
- *       Soft delete กิจกรรม (set deletedAt + ปิด isActive)
+ *       Soft delete กิจกรรม (set deletedAt + isActive=false)
  *
  *       **ข้อจำกัด:**
  *       - ไม่สามารถลบกิจกรรมที่กำลังดำเนินการอยู่ (startDateTime <= now <= endDateTime)
- *       - กิจกรรมที่ลบแล้วจะไม่ปรากฏใน getAllEvents
+ *       - ไม่สามารถลบกิจกรรมที่ถูก soft delete แล้ว
  *       - สามารถกู้คืนได้ด้วย POST /api/events/:id/restore
  *     tags:
  *       - Events
@@ -2792,7 +3161,12 @@
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/DeleteEventRequest'
+ *             type: object
+ *             properties:
+ *               deleteReason:
+ *                 type: string
+ *                 example: "ยกเลิกกิจกรรมเนื่องจากสถานที่ไม่พร้อม"
+ *                 description: เหตุผลในการลบ (optional)
  *     responses:
  *       200:
  *         description: ลบกิจกรรมสำเร็จ
@@ -2804,13 +3178,13 @@
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/Event'
  *                 message:
  *                   type: string
- *                   example: ลบกิจกรรมเรียบร้อยแล้ว
+ *                   example: "ลบกิจกรรมเรียบร้อยแล้ว"
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
  *       400:
- *         description: ไม่สามารถลบกิจกรรมที่กำลังดำเนินการ
+ *         description: ไม่สามารถลบกิจกรรมที่กำลังดำเนินการ หรือถูกลบแล้ว
  *         content:
  *           application/json:
  *             schema:
@@ -2823,10 +3197,8 @@
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: ไม่ได้ login
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin/SuperAdmin)
  */
 
 /**
@@ -2836,9 +3208,9 @@
  *     summary: กู้คืนกิจกรรมที่ถูกลบ (Admin/SuperAdmin only)
  *     description: |
  *       กู้คืนกิจกรรมที่ถูก soft delete กลับมา
- *       (set deletedAt = null, ลบ deleteReason)
+ *       (set deletedAt=null, deletedByUserId=null, deleteReason=null)
  *
- *       **หมายเหตุ:** isActive ไม่เปลี่ยน — ต้อง PATCH แยกถ้าต้องการเปิดใช้งาน
+ *       **หมายเหตุ:** isActive จะยังเป็น false — ต้อง PUT แยกถ้าต้องการเปิดใช้งาน
  *     tags:
  *       - Events
  *     security:
@@ -2861,11 +3233,11 @@
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/Event'
  *                 message:
  *                   type: string
- *                   example: กู้คืนกิจกรรมเรียบร้อยแล้ว
+ *                   example: "กู้คืนกิจกรรมเรียบร้อยแล้ว"
+ *                 data:
+ *                   $ref: '#/components/schemas/Event'
  *       400:
  *         description: กิจกรรมนี้ยังไม่ถูกลบ
  *         content:
@@ -2878,6 +3250,286 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin/SuperAdmin)
+ */
+
+/**
+ * @swagger
+ * /api/events/{id}/checkin:
+ *   post:
+ *     summary: เข้าร่วมกิจกรรม — Event Check-In (Authenticated)
+ *     description: |
+ *       บันทึกเวลาเข้าร่วมกิจกรรมพร้อม GPS และรูปภาพ
+ *
+ *       **Flow การทำงาน:**
+ *       1. ตรวจสอบว่ากิจกรรม active, ไม่ถูกลบ, อยู่ในช่วงเวลา (start ≤ now ≤ end)
+ *       2. ตรวจสอบว่าผู้ใช้มีสิทธิ์เข้าร่วม (ตาม participantType)
+ *       3. ตรวจสอบว่ายังไม่เคย check-in กิจกรรมนี้ (1 user : 1 check-in per event)
+ *       4. ตรวจสอบ GPS (ถ้ามีสถานที่):
+ *          - **Mode A** (locationId): ใช้พิกัดและ radius จาก Location table
+ *          - **Mode B** (custom venue): ใช้ venueLatitude/venueLongitude, radius=500m
+ *       5. สร้าง Attendance record (eventId, shiftId=null, status=ON_TIME, lateMinutes=0)
+ *       6. สร้าง audit log
+ *
+ *       **Attendance status:** จะเป็น `ON_TIME` เสมอ (เพราะ event ไม่มี concept ของ late)
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Event ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               photo:
+ *                 type: string
+ *                 description: Base64 encoded selfie image
+ *               latitude:
+ *                 type: number
+ *                 example: 13.7563
+ *                 description: GPS latitude
+ *               longitude:
+ *                 type: number
+ *                 example: 100.5018
+ *                 description: GPS longitude
+ *               address:
+ *                 type: string
+ *                 example: "อาคาร A ชั้น 3, กรุงเทพฯ"
+ *                 description: ที่อยู่ text
+ *           examples:
+ *             พร้อม GPS:
+ *               summary: Check-in พร้อม GPS
+ *               value:
+ *                 latitude: 13.7563
+ *                 longitude: 100.5018
+ *                 address: "อาคาร A ชั้น 3, กรุงเทพฯ"
+ *             ไม่มี GPS:
+ *               summary: Check-in อย่างง่าย (ไม่ต้องตรวจ GPS)
+ *               value: {}
+ *     responses:
+ *       201:
+ *         description: เข้าร่วมกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "เข้าร่วมกิจกรรมสำเร็จ"
+ *                 data:
+ *                   $ref: '#/components/schemas/EventAttendance'
+ *       400:
+ *         description: |
+ *           สาเหตุที่เป็นไปได้:
+ *           - กิจกรรมไม่ active หรือถูกลบ
+ *           - ยังไม่ถึงเวลาหรือเลยเวลากิจกรรม
+ *           - ผู้ใช้ไม่มีสิทธิ์เข้าร่วม
+ *           - check-in ซ้ำ (เคย check-in แล้ว)
+ *           - อยู่นอกพื้นที่ GPS (distance > radius)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: ไม่พบกิจกรรม
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/events/{id}/checkout:
+ *   post:
+ *     summary: ออกจากกิจกรรม — Event Check-Out (Authenticated)
+ *     description: |
+ *       บันทึกเวลาออกจากกิจกรรม โดยอัปเดต attendance record ที่ check-in ไว้
+ *
+ *       **Logic:**
+ *       1. หา attendance ที่ checkOut=null สำหรับ user+event นี้
+ *       2. ตรวจสอบ GPS (ถ้า attendance เดิมมี locationId) — ใช้ radius เดียวกับ check-in
+ *       3. อัปเดต checkOut fields
+ *
+ *       **หมายเหตุ:** Custom venue (Mode B) ไม่ตรวจ GPS ตอน checkout
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Event ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               photo:
+ *                 type: string
+ *                 description: Base64 encoded selfie image
+ *               latitude:
+ *                 type: number
+ *                 example: 13.7563
+ *               longitude:
+ *                 type: number
+ *                 example: 100.5018
+ *               address:
+ *                 type: string
+ *                 example: "อาคาร A ชั้น 3, กรุงเทพฯ"
+ *     responses:
+ *       200:
+ *         description: ออกจากกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "ออกจากกิจกรรมสำเร็จ"
+ *                 data:
+ *                   $ref: '#/components/schemas/EventAttendance'
+ *       400:
+ *         description: |
+ *           สาเหตุที่เป็นไปได้:
+ *           - ยังไม่เคย check-in กิจกรรมนี้
+ *           - check-out ไปแล้ว
+ *           - อยู่นอกพื้นที่ GPS
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: ไม่พบกิจกรรม หรือไม่พบ attendance record
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/events/{id}/my-attendance:
+ *   get:
+ *     summary: ดูสถานะการเข้าร่วมกิจกรรมของตัวเอง (Authenticated)
+ *     description: |
+ *       ตรวจสอบว่าผู้ใช้ปัจจุบัน check-in/check-out กิจกรรมนี้แล้วหรือยัง
+ *       ใช้สำหรับแสดงปุ่ม Check-in / Check-out ในหน้า Event Detail
+ *
+ *       **Response:**
+ *       - `checkedIn: false` → แสดงปุ่ม Check-in
+ *       - `checkedIn: true, checkedOut: false` → แสดงปุ่ม Check-out
+ *       - `checkedIn: true, checkedOut: true` → แสดง "เข้าร่วมแล้ว"
+ *     tags:
+ *       - Events
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Event ID
+ *     responses:
+ *       200:
+ *         description: ดึงสถานะสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     checkedIn:
+ *                       type: boolean
+ *                       example: true
+ *                       description: true = เคย check-in แล้ว
+ *                     checkedOut:
+ *                       type: boolean
+ *                       example: false
+ *                       description: true = เคย check-out แล้ว
+ *                     attendance:
+ *                       type: object
+ *                       nullable: true
+ *                       description: null ถ้ายังไม่เคย check-in
+ *                       properties:
+ *                         attendanceId:
+ *                           type: integer
+ *                           example: 100
+ *                         checkIn:
+ *                           type: string
+ *                           format: date-time
+ *                         checkOut:
+ *                           type: string
+ *                           format: date-time
+ *                           nullable: true
+ *                         checkInPhoto:
+ *                           type: string
+ *                           nullable: true
+ *                         checkOutPhoto:
+ *                           type: string
+ *                           nullable: true
+ *                         status:
+ *                           type: string
+ *                           example: "ON_TIME"
+ *             examples:
+ *               ยังไม่ check-in:
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     checkedIn: false
+ *                     checkedOut: false
+ *                     attendance: null
+ *               check-in แล้ว:
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     checkedIn: true
+ *                     checkedOut: false
+ *                     attendance:
+ *                       attendanceId: 100
+ *                       checkIn: "2026-03-05T08:00:00.000+07:00"
+ *                       checkOut: null
+ *                       checkInPhoto: null
+ *                       checkOutPhoto: null
+ *                       status: "ON_TIME"
+ *               check-out แล้ว:
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     checkedIn: true
+ *                     checkedOut: true
+ *                     attendance:
+ *                       attendanceId: 100
+ *                       checkIn: "2026-03-05T08:00:00.000+07:00"
+ *                       checkOut: "2026-03-05T17:00:00.000+07:00"
+ *                       checkInPhoto: null
+ *                       checkOutPhoto: null
+ *                       status: "ON_TIME"
  *       401:
  *         description: ไม่ได้ login
  *         content:
@@ -3501,4 +4153,343 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+// ════════════════════════════════════════════════════════════
+// 📐 COMPONENT SCHEMAS — Dashboard, Events, Shared
+// ════════════════════════════════════════════════════════════
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     ErrorResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *           example: false
+ *         error:
+ *           type: string
+ *           example: "ข้อมูลไม่ถูกต้อง"
+ *
+ *     Event:
+ *       type: object
+ *       description: |
+ *         ข้อมูลกิจกรรม (base) — ส่งกลับจาก create/update/delete/restore
+ *         `sendSuccess()` จะแปลง dates เป็นเวลาไทย (UTC+7)
+ *       properties:
+ *         eventId:
+ *           type: integer
+ *           example: 1
+ *         eventName:
+ *           type: string
+ *           example: "กิจกรรม Team Building"
+ *         description:
+ *           type: string
+ *           nullable: true
+ *           example: "กิจกรรมสร้างทีมประจำปี"
+ *         locationId:
+ *           type: integer
+ *           nullable: true
+ *           example: 5
+ *           description: FK → Location (null ถ้าใช้ custom venue)
+ *         venueName:
+ *           type: string
+ *           nullable: true
+ *           example: "ห้องประชุม A ชั้น 3"
+ *           description: ชื่อสถานที่แบบ custom (null ถ้าใช้ locationId)
+ *         venueLatitude:
+ *           type: number
+ *           nullable: true
+ *           example: 13.7563
+ *         venueLongitude:
+ *           type: number
+ *           nullable: true
+ *           example: 100.5018
+ *         startDateTime:
+ *           type: string
+ *           format: date-time
+ *           example: "2026-03-10T09:00:00.000+07:00"
+ *         endDateTime:
+ *           type: string
+ *           format: date-time
+ *           example: "2026-03-10T17:00:00.000+07:00"
+ *         participantType:
+ *           type: string
+ *           enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
+ *           example: "ALL"
+ *         isActive:
+ *           type: boolean
+ *           example: true
+ *         createdByUserId:
+ *           type: integer
+ *           example: 1
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         updatedByUserId:
+ *           type: integer
+ *           nullable: true
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *         deletedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         deletedByUserId:
+ *           type: integer
+ *           nullable: true
+ *         deleteReason:
+ *           type: string
+ *           nullable: true
+ *         location:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             locationId:
+ *               type: integer
+ *             locationName:
+ *               type: string
+ *             address:
+ *               type: string
+ *               nullable: true
+ *             latitude:
+ *               type: number
+ *             longitude:
+ *               type: number
+ *             radius:
+ *               type: number
+ *               description: รัศมีที่อนุญาต (เมตร)
+ *         creator:
+ *           type: object
+ *           properties:
+ *             userId:
+ *               type: integer
+ *             firstName:
+ *               type: string
+ *             lastName:
+ *               type: string
+ *         updatedBy:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             userId:
+ *               type: integer
+ *             firstName:
+ *               type: string
+ *             lastName:
+ *               type: string
+ *
+ *     EventListItem:
+ *       type: object
+ *       description: |
+ *         กิจกรรมใน list (GET /api/events) — ข้อมูลเหมือน Event
+ *         แต่เพิ่ม _count และ event_participants สำหรับ filtering
+ *       allOf:
+ *         - $ref: '#/components/schemas/Event'
+ *         - type: object
+ *           properties:
+ *             _count:
+ *               type: object
+ *               properties:
+ *                 event_participants:
+ *                   type: integer
+ *                   example: 5
+ *                   description: จำนวนผู้เข้าร่วมที่กำหนดไว้
+ *                 attendance:
+ *                   type: integer
+ *                   example: 12
+ *                   description: จำนวน attendance records
+ *             event_participants:
+ *               type: array
+ *               description: branchId จากผู้เข้าร่วม (ใช้กรอง branch)
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   branchId:
+ *                     type: integer
+ *                     nullable: true
+ *
+ *     EventDetail:
+ *       type: object
+ *       description: |
+ *         กิจกรรมแบบละเอียด (GET /api/events/:id)
+ *         เพิ่ม event_participants แบบเต็ม, creator พร้อม email/role, deletedBy
+ *       allOf:
+ *         - $ref: '#/components/schemas/Event'
+ *         - type: object
+ *           properties:
+ *             creator:
+ *               type: object
+ *               properties:
+ *                 userId:
+ *                   type: integer
+ *                 firstName:
+ *                   type: string
+ *                 lastName:
+ *                   type: string
+ *                 email:
+ *                   type: string
+ *                 role:
+ *                   type: string
+ *                   enum: [USER, MANAGER, ADMIN, SUPERADMIN]
+ *             deletedBy:
+ *               type: object
+ *               nullable: true
+ *               properties:
+ *                 userId:
+ *                   type: integer
+ *                 firstName:
+ *                   type: string
+ *                 lastName:
+ *                   type: string
+ *             event_participants:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   users:
+ *                     type: object
+ *                     nullable: true
+ *                     description: ข้อมูล user (participantType=INDIVIDUAL)
+ *                     properties:
+ *                       userId:
+ *                         type: integer
+ *                       firstName:
+ *                         type: string
+ *                       lastName:
+ *                         type: string
+ *                       email:
+ *                         type: string
+ *                   branches:
+ *                     type: object
+ *                     nullable: true
+ *                     description: ข้อมูล branch (participantType=BRANCH)
+ *                     properties:
+ *                       branchId:
+ *                         type: integer
+ *                       name:
+ *                         type: string
+ *                       code:
+ *                         type: string
+ *             _count:
+ *               type: object
+ *               properties:
+ *                 attendance:
+ *                   type: integer
+ *                   example: 12
+ *
+ *     EventAttendance:
+ *       type: object
+ *       description: |
+ *         Attendance record ของ event check-in/check-out
+ *         dates ถูกแปลงเป็นเวลาไทย (UTC+7) โดย sendSuccess()
+ *       properties:
+ *         attendanceId:
+ *           type: integer
+ *           example: 100
+ *         userId:
+ *           type: integer
+ *           example: 5
+ *         eventId:
+ *           type: integer
+ *           example: 1
+ *         locationId:
+ *           type: integer
+ *           nullable: true
+ *           example: 5
+ *         shiftId:
+ *           type: integer
+ *           nullable: true
+ *           description: เป็น null เสมอสำหรับ event attendance
+ *         checkIn:
+ *           type: string
+ *           format: date-time
+ *           example: "2026-03-05T08:00:00.000+07:00"
+ *         checkInPhoto:
+ *           type: string
+ *           nullable: true
+ *           description: Base64 selfie ตอนเข้าร่วม
+ *         checkInLat:
+ *           type: number
+ *           nullable: true
+ *           example: 13.7563
+ *         checkInLng:
+ *           type: number
+ *           nullable: true
+ *           example: 100.5018
+ *         checkInAddress:
+ *           type: string
+ *           nullable: true
+ *         checkInDistance:
+ *           type: number
+ *           nullable: true
+ *           example: 45.3
+ *           description: ระยะห่างจาก location/venue center (เมตร)
+ *         checkOut:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *           example: "2026-03-05T17:00:00.000+07:00"
+ *         checkOutPhoto:
+ *           type: string
+ *           nullable: true
+ *         checkOutLat:
+ *           type: number
+ *           nullable: true
+ *         checkOutLng:
+ *           type: number
+ *           nullable: true
+ *         checkOutAddress:
+ *           type: string
+ *           nullable: true
+ *         checkOutDistance:
+ *           type: number
+ *           nullable: true
+ *         status:
+ *           type: string
+ *           example: "ON_TIME"
+ *           description: เป็น ON_TIME เสมอสำหรับ event check-in
+ *         lateMinutes:
+ *           type: integer
+ *           example: 0
+ *           description: เป็น 0 เสมอสำหรับ event check-in
+ *         note:
+ *           type: string
+ *           nullable: true
+ *           example: "เข้าร่วมกิจกรรม: กิจกรรม Team Building"
+ *         user:
+ *           type: object
+ *           properties:
+ *             userId:
+ *               type: integer
+ *             firstName:
+ *               type: string
+ *             lastName:
+ *               type: string
+ *             employeeId:
+ *               type: string
+ *         event:
+ *           type: object
+ *           properties:
+ *             eventId:
+ *               type: integer
+ *             eventName:
+ *               type: string
+ *         location:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             locationId:
+ *               type: integer
+ *             locationName:
+ *               type: string
+ *             latitude:
+ *               type: number
+ *             longitude:
+ *               type: number
+ *             radius:
+ *               type: number
  */

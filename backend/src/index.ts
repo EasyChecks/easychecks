@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
+import { parse } from 'url';
 import mainRouter from './routes/index.js';
 import { setupAttendanceWebSocket } from './websocket/attendance.websocket.js';
+import { setupEventWebSocket } from './websocket/event.websocket.js';
 import { setupSwagger } from './config/swagger.js';
 
 const app = express();
@@ -39,13 +41,14 @@ app.use((req, res) => {
 });
 
 // Error Handler
-app.use((err: any, req: any, res: any, next: any) => {
+import type { Request, Response, NextFunction } from 'express';
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
   res.status(500).json({
     success: false,
     error: err.message || 'Internal server error'
   });
-}); 
+});
 
 // Health Check (เอาไว้เทสว่า Server ดับไหม)
 app.get('/', (req, res) => {
@@ -64,8 +67,28 @@ app.get('/api/test', (req, res) => {
 // สร้าง HTTP server สำหรับ WebSocket
 const server = createServer(app);
 
-// Setup WebSocket สำหรับ real-time attendance
-setupAttendanceWebSocket(server);
+// Setup WebSocket servers (แต่ละตัวจะ register upgrade handler ของตัวเอง)
+const attendanceWss = setupAttendanceWebSocket(server);
+const eventWss = setupEventWebSocket(server);
+
+// แทนที่ upgrade handlers แยกกัน ด้วย centralized routing ตัวเดียว
+// เพราะ attendance handler ทำ socket.destroy() กับ path ที่ไม่ใช่ /ws/attendance
+// ทำให้ /ws/events ถูกปิดก่อนจะถึง event handler
+server.removeAllListeners('upgrade');
+server.on('upgrade', (request, socket, head) => {
+  const { pathname } = parse(request.url || '');
+  if (pathname === '/ws/attendance') {
+    attendanceWss.handleUpgrade(request, socket, head, (ws) => {
+      attendanceWss.emit('connection', ws, request);
+    });
+  } else if (pathname === '/ws/events') {
+    eventWss.handleUpgrade(request, socket, head, (ws) => {
+      eventWss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 server.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);

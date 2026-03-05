@@ -341,111 +341,11 @@ export async function getLocationEvents(user: User, branchId?: number, date?: st
   return outsideEvents;
 }
 
-/**
- * ดึงสถิติสาขา (Branch Statistics)
- * 
- * ทำไมต้องแยก function นี้?
- * - Admin ต้องเห็นอัตราการมาของพนักงาน (Overall) ในสาขาตัวเอง
- * - ต้อง focus ที่จำนวนคนมาแล้ว vs ทั้งหมด (เป็น percentage)
- * 
- * SQL ที่ใช้:
- * SELECT 
- *   b.branchId, b.name, 
- *   COUNT(DISTINCT u.userId) as totalEmployees,
- *   SUM(CASE WHEN a.status = 'ON_TIME' THEN 1 ELSE 0 END) as presentToday,
- *   SUM(CASE WHEN a.status = 'LATE' THEN 1 ELSE 0 END) as lateToday,
- *   SUM(CASE WHEN a.status = 'ABSENT' THEN 1 ELSE 0 END) as absentToday,
- *   (presentToday / totalEmployees * 100) as attendanceRate
- * FROM branch b
- * LEFT JOIN user u ON b.branchId = u.branchId
- * LEFT JOIN attendance a ON u.userId = a.userId AND DATE(a.checkIn) = TODAY()
- * WHERE b.branchId = ?
- * GROUP BY b.branchId;
- */
-export async function getBranchStats(user: User, branchId?: number, date?: string) {
-  const today = date ? new Date(date) : new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
-
-  // กรณี SUPERADMIN เลือก "ทั้งหมด" (ไม่ระบุ branchId) → aggregate ทุกสาขา
-  if (queryBranchId == null) {
-    const [totalEmployees, attendances] = await Promise.all([
-      prisma.user.count({ where: { status: 'ACTIVE' } }),
-      prisma.attendance.findMany({
-        where: {
-          checkIn: { gte: today, lt: tomorrow },
-        },
-      }),
-    ]);
-
-    return {
-      branchId: 0,
-      name: 'ทุกสาขา',
-      totalEmployees,
-      presentToday: attendances.filter((a) => a.status === 'ON_TIME').length,
-      lateToday: attendances.filter((a) => a.status === 'LATE').length,
-      absentToday: attendances.filter((a) => a.status === 'ABSENT').length,
-      attendanceRate:
-        totalEmployees > 0
-          ? Math.round((attendances.length / totalEmployees) * 100)
-          : 0,
-    };
-  }
-
-  // ดึงข้อมูลเฉพาะของ branch (ชื่อ, ที่อยู่, จำนวนพนักงาน)
-  const branch = await prisma.branch.findUnique({
-    where: { branchId: queryBranchId },
-    include: {
-      _count: {
-        select: { users: true },
-      },
-    },
-  });
-
-  if (!branch) {
-    throw new Error('Branch not found');
-  }
-
-  // ดึง attendance วันนี้
-  const attendances = await prisma.attendance.findMany({
-    where: {
-      user: {
-        branchId: queryBranchId,
-      },
-      checkIn: {
-        gte: today,
-        lt: tomorrow,
-      },
-    },
-  });
-
-  const stats = {
-    branchId: branch.branchId,
-    name: branch.name,
-    totalEmployees: branch._count.users,
-    presentToday: attendances.filter((a) => a.status === 'ON_TIME').length,
-    lateToday: attendances.filter((a) => a.status === 'LATE').length,
-    absentToday: attendances.filter((a) => a.status === 'ABSENT').length,
-    attendanceRate:
-      branch._count.users > 0
-        ? Math.round(
-          ((attendances.length / branch._count.users) * 100 * 100) / 100
-        )
-        : 0,
-  };
-
-  return stats;
-}
-
 export const dashboardService = {
   getAttendanceSummary,
   getEmployeesToday,
   getBranchesMap,
   getLocationEvents,
-  getBranchStats,
 };
 
 export default dashboardService;

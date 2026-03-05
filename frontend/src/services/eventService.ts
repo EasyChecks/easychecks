@@ -26,6 +26,7 @@ export interface EventCreator {
   lastName: string;
   email?: string;
   role?: string;
+  branchId?: number;
 }
 
 export interface EventParticipant {
@@ -34,6 +35,7 @@ export interface EventParticipant {
     firstName: string;
     lastName: string;
     email: string;
+    role?: string;
   };
   branch?: {
     branchId: number;
@@ -134,6 +136,21 @@ export interface EventListParams {
   skip?: number;
   take?: number;
   branchId?: number;
+  includeDeleted?: boolean;
+  onlyDeleted?: boolean;
+}
+
+export interface EventAttendanceStatus {
+  checkedIn: boolean;
+  checkedOut: boolean;
+  attendance: {
+    attendanceId: number;
+    checkIn: string;
+    checkOut: string | null;
+    checkInPhoto: string | null;
+    checkOutPhoto: string | null;
+    status: string;
+  } | null;
 }
 
 // ── Service Methods ──
@@ -180,10 +197,10 @@ export const eventService = {
   },
 
   /**
-   * PATCH /api/events/:id - แก้ไขกิจกรรม (Admin/SuperAdmin)
+   * PUT /api/events/:id - แก้ไขกิจกรรม (Admin/SuperAdmin)
    */
   async update(id: number, data: UpdateEventRequest): Promise<EventItem> {
-    const res = await api.patch(`/events/${id}`, data);
+    const res = await api.put(`/events/${id}`, data);
     return res.data.data;
   },
 
@@ -200,6 +217,32 @@ export const eventService = {
    */
   async restore(id: number): Promise<EventItem> {
     const res = await api.post(`/events/${id}/restore`);
+    return res.data.data;
+  },
+
+  // ── User Event Participation ──
+
+  /**
+   * POST /api/events/:id/checkin - เข้าร่วมกิจกรรม
+   */
+  async checkIn(eventId: number, data: { latitude?: number; longitude?: number; photo?: string; address?: string }) {
+    const res = await api.post(`/events/${eventId}/checkin`, data);
+    return res.data.data;
+  },
+
+  /**
+   * POST /api/events/:id/checkout - ออกจากกิจกรรม
+   */
+  async checkOut(eventId: number, data: { latitude?: number; longitude?: number; photo?: string; address?: string }) {
+    const res = await api.post(`/events/${eventId}/checkout`, data);
+    return res.data.data;
+  },
+
+  /**
+   * GET /api/events/:id/my-attendance - ดึงสถานะการเข้าร่วมของตัวเอง
+   */
+  async getMyAttendance(eventId: number): Promise<EventAttendanceStatus> {
+    const res = await api.get(`/events/${eventId}/my-attendance`);
     return res.data.data;
   },
 };

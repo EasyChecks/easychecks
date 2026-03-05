@@ -170,8 +170,8 @@ async function handleEventSubscription(ws: AuthenticatedWebSocket, message: Even
 
     ws.send(JSON.stringify({
       type: 'success',
-      message: `Subscribed to event: ${event.event_name}`,
-      data: { eventId, eventName: event.event_name }
+      message: `Subscribed to event: ${event.eventName}`,
+      data: { eventId, eventName: event.eventName }
     } as SuccessResponse));
 
     console.log(`✅ User ${ws.employeeId} subscribed to event ${eventId}`);

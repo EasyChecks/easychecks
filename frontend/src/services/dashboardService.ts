@@ -47,15 +47,6 @@ export interface LocationEvent {
   timestamp: string;
 }
 
-export interface BranchStats {
-  branchId: number;
-  name: string;
-  totalEmployees: number;
-  presentToday: number;
-  lateToday: number;
-  absentToday: number;
-  attendanceRate: number;
-}
 
 // ── Service Methods ──
 
@@ -103,18 +94,6 @@ export const dashboardService = {
     if (date) params.date = date;
     const res = await api.get('/dashboard/location-events', { params });
     return { data: res.data.data, total: res.data.total };
-  },
-
-  /**
-   * GET /api/dashboard/branch-stats
-   * สถิติ KPI ของสาขา (Stats Cards)
-   */
-  async getBranchStats(branchId?: number, date?: string): Promise<BranchStats> {
-    const params: Record<string, string | number> = {};
-    if (branchId) params.branchId = branchId;
-    if (date) params.date = date;
-    const res = await api.get('/dashboard/branch-stats', { params });
-    return res.data.data;
   },
 };
 

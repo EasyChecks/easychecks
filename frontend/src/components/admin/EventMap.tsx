@@ -290,6 +290,8 @@ interface EventMapProps {
   flyOnClick?: boolean;
   /** Imperatively fly to a position. Increment `seq` each time to trigger. */
   flyTo?: { lat: number; lng: number; zoom?: number; seq: number };
+  /** Custom default center for map */
+  defaultCenter?: { lat: number; lng: number };
 }
 
 function MapCapture({ onMap }: { onMap: (m: L.Map) => void }) {
@@ -328,8 +330,15 @@ export default function EventMap({
   onPendingMarkerClick,
   flyOnClick,
   flyTo,
+  defaultCenter: customDefaultCenter,
 }: EventMapProps) {
-  const defaultCenter: [number, number] = [13.7606, 100.5034];
+  const defaultCenter: [number, number] = customDefaultCenter &&
+    typeof customDefaultCenter.lat === 'number' &&
+    typeof customDefaultCenter.lng === 'number' &&
+    !isNaN(customDefaultCenter.lat) &&
+    !isNaN(customDefaultCenter.lng)
+    ? [customDefaultCenter.lat, customDefaultCenter.lng]
+    : [13.7606, 100.5034];
 
   const allPoints: [number, number][] = [
     ...events.map(e => [Number(e.latitude), Number(e.longitude)] as [number, number]),

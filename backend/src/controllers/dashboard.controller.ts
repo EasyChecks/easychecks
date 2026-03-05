@@ -4,7 +4,6 @@ import {
   getEmployeesToday,
   getBranchesMap,
   getLocationEvents,
-  getBranchStats,
 } from '../services/dashboard.service.js';
 
 /**
@@ -15,12 +14,11 @@ import {
  * - Service handle business logic (query, aggregate, filter)
  * - แยกกัน ทำให้ code maintainable, testable, reusable
  * 
- * Dashboard ประกอบด้วย 5 endpoints:
+ * Dashboard ประกอบด้วย 4 endpoints:
  * 1. attendance-summary - Donut chart (present/late/absent/leave)
  * 2. employees-today - List ของ employee พร้อม status
  * 3. branches-map - Location pins ของ branch ทั้งหมด
  * 4. location-events - Alert ของคนออก commit นอก branch
- * 5. branch-stats - % present, on-time, etc.
  */
 
 /**
@@ -219,65 +217,6 @@ export async function handleLocationEvents(req: Request, res: Response): Promise
       success: true,
       data: events,
       total: events.length,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Internal server error';
-    console.error('❌ Error:', message);
-    res.status(500).json({ success: false, error: message });
-  }
-}
-
-/**
- * GET /api/dashboard/branch-stats
- * ดึง Branch Statistics (Aggregate Data)
- * 
- * ทำไมต้อง endpoint นี้?
- * - KPI dashboard: แสดง % on-time, % present, % productivity
- * - Management overview: ผู้บริหารต้องรู้ performance ของแต่ละ branch
- * - Comparison: เปรียบเทียบ branch ไหนดีสุด
- * 
- * Data return:
- * - branchId, name
- * - presentCount, lateCount, absentCount, onLeaveCount
- * - onTimePercentage, presentPercentage
- * - employeeCount (active)
- * 
- * Query param:
- * - branchId (optional): filter เฉพาะ branch นี้
- */
-export async function handleBranchStats(req: Request, res: Response): Promise<void> {
-  try {
-    const user = req.user;
-    if (!user) {
-      res.status(401).json({ success: false, error: 'Unauthorized' });
-      return;
-    }
-
-    const { branchId } = req.query;
-    console.log('📈 Fetching branch stats for:', { userId: user.userId, branchId });
-
-    /**
-     * เรียก service เพื่อ calculate statistics
-     * 
-     * SQL (Pseudo-code):
-     * SELECT 
-     *   b.branchId, b.name,
-     *   COUNT(a.attendanceId) as totalRecords,
-     *   SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) as presentCount,
-     *   SUM(CASE WHEN a.status = 'LATE' THEN 1 ELSE 0 END) as lateCount,
-     *   SUM(CASE WHEN a.status = 'ABSENT' THEN 1 ELSE 0 END) as absentCount,
-     *   SUM(CASE WHEN a.status = 'ON_LEAVE' THEN 1 ELSE 0 END) as onLeaveCount,
-     *   ROUND(SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) / COUNT(a.attendanceId) * 100, 2) as presentPercentage
-     * FROM branch b
-     * LEFT JOIN employee e ON b.branchId = e.branchId
-     * LEFT JOIN attendance a ON e.employeeId = a.employeeId AND DATE(a.createdDate) = TODAY()
-     * GROUP BY b.branchId;
-     */
-    const stats = await getBranchStats(user, branchId ? parseInt(branchId as string) : undefined, req.query.date as string | undefined);
-
-    res.status(200).json({
-      success: true,
-      data: stats,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Internal server error';

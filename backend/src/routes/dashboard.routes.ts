@@ -5,7 +5,6 @@ import {
   handleEmployeesToday,
   handleBranchesMap,
   handleLocationEvents,
-  handleBranchStats,
 } from '../controllers/dashboard.controller.js';
 
 /**
@@ -14,7 +13,7 @@ import {
  * ทำไมต้อง Dashboard routes?
  * - Frontend ต้อง fetch ข้อมูล dashboard เพื่อ render charts/tables
  * - ต้อง authorize เฉพาะ ADMIN/SUPERADMIN (sensitive data)
- * - 5 endpoints รวม: attendance summary, employees today, branches map, location events, branch stats
+ * - 4 endpoints รวม: attendance summary, employees today, branches map, location events
  * 
  * Role-based access:
  * - ADMIN: เห็นเฉพาะ branch ของตัวเอง (check ใน controller/service)
@@ -158,38 +157,6 @@ router.get(
 router.get(
   '/location-events-test',
   handleLocationEvents
-);
-
-/**
- * GET /api/dashboard/branch-stats - Statistics (KPI) ของแต่ละ branch
- * 
- * ทำไมต้อง endpoint นี้?
- * - Management dashboard ต้อง KPI metrics (% on-time, % present, productivity)
- * - Comparison: ทำให้ branch ไหนแขนงได้ดี การ identify ปัญหา
- * - Trend analysis: follow performance over time
- * 
- * Response: [{ branchId, name, presentCount, lateCount, absentCount, onTimePercentage, ... }]
- * 
- * Query Parameters:
- * - branchId (optional): filter เฉพาะ branch นี้ (SUPERADMIN only)
- * 
- * Security: requireRole(['ADMIN', 'SUPERADMIN'])
- */
-router.get(
-  '/branch-stats',
-  requireRole(['ADMIN', 'SUPERADMIN']),
-  handleBranchStats
-);
-
-/**
- * GET /api/dashboard/branch-stats-test - Branch statistics (TEST)
- * 
- * ทำไม -test endpoint?
- * - Test route ไม่มี middleware
- */
-router.get(
-  '/branch-stats-test',
-  handleBranchStats
 );
 
 export default router;

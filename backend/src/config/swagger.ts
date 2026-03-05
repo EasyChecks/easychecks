@@ -647,19 +647,6 @@ const options: swaggerJsdoc.Options = {
             timestamp: { type: 'string', format: 'date-time' },
           },
         },
-        BranchStats: {
-          type: 'object',
-          description: 'สถิติ KPI ของสาขา',
-          properties: {
-            branchId: { type: 'integer', example: 1 },
-            name: { type: 'string', example: 'สำนักงานใหญ่' },
-            totalEmployees: { type: 'integer', example: 50 },
-            presentToday: { type: 'integer', example: 40 },
-            lateToday: { type: 'integer', example: 5 },
-            absentToday: { type: 'integer', example: 5 },
-            attendanceRate: { type: 'integer', example: 80, description: 'อัตราการมา (%)' },
-          },
-        },
 
         // ──────────────────────────────────────────────
         // Event Schemas

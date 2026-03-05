@@ -101,6 +101,8 @@ export const getAllEvents = asyncHandler(async (req: Request, res: Response) => 
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 20;
   const branchId = req.query.branchId ? parseInt(req.query.branchId as string, 10) : undefined;
+  const includeDeleted = req.query.includeDeleted === 'true';
+  const onlyDeleted = req.query.onlyDeleted === 'true';
 
   const result = await EventUserActions.getAllEvents({
     search,
@@ -111,6 +113,8 @@ export const getAllEvents = asyncHandler(async (req: Request, res: Response) => 
     skip,
     take,
     branchId,
+    includeDeleted,
+    onlyDeleted,
   });
 
   sendSuccess(res, result, 'ดึงรายการกิจกรรมสำเร็จ');
@@ -164,8 +168,8 @@ export const getEventById = asyncHandler(async (req: Request, res: Response) => 
 });
 
 /**
- * PATCH /api/events/:id
- * แก้ไขกิจกรรม (Admin only)
+ * PUT /api/events/:id
+ * แก้ไขกิจกรรม (Admin/SuperAdmin only)
  */
 export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
@@ -272,4 +276,73 @@ export const restoreEvent = asyncHandler(async (req: Request, res: Response) => 
   const restoredEvent = await EventAdminActions.restoreEvent(eventId, userId);
 
   sendSuccess(res, restoredEvent, 'กู้คืนกิจกรรมเรียบร้อยแล้ว');
+});
+
+/**
+ * POST /api/events/:id/checkin
+ * เข้าร่วมกิจกรรม (ทุก role ที่เป็น eligible participant)
+ */
+export const eventCheckIn = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const { id } = req.params;
+  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
+
+  if (!userId) throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
+  if (!eventId) throw new BadRequestError('ID กิจกรรมไม่ถูกต้อง');
+
+  const { photo, latitude, longitude, address } = req.body;
+
+  const attendance = await EventUserActions.eventCheckIn({
+    userId,
+    eventId,
+    photo,
+    latitude: latitude != null ? parseFloat(latitude) : undefined,
+    longitude: longitude != null ? parseFloat(longitude) : undefined,
+    address,
+  });
+
+  sendSuccess(res, attendance, 'เข้าร่วมกิจกรรมสำเร็จ', 201);
+});
+
+/**
+ * POST /api/events/:id/checkout
+ * ออกจากกิจกรรม
+ */
+export const eventCheckOut = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const { id } = req.params;
+  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
+
+  if (!userId) throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
+  if (!eventId) throw new BadRequestError('ID กิจกรรมไม่ถูกต้อง');
+
+  const { photo, latitude, longitude, address } = req.body;
+
+  const attendance = await EventUserActions.eventCheckOut({
+    userId,
+    eventId,
+    photo,
+    latitude: latitude != null ? parseFloat(latitude) : undefined,
+    longitude: longitude != null ? parseFloat(longitude) : undefined,
+    address,
+  });
+
+  sendSuccess(res, attendance, 'ออกจากกิจกรรมสำเร็จ');
+});
+
+/**
+ * GET /api/events/:id/my-attendance
+ * ดึงสถานะการเข้าร่วมกิจกรรมของตัวเอง
+ */
+export const getMyEventAttendance = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  const { id } = req.params;
+  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
+
+  if (!userId) throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
+  if (!eventId) throw new BadRequestError('ID กิจกรรมไม่ถูกต้อง');
+
+  const result = await EventUserActions.getMyEventAttendance(userId, eventId);
+
+  sendSuccess(res, result);
 });

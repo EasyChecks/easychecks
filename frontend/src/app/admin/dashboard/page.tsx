@@ -11,16 +11,15 @@ import {
   Map as MapIcon,
   Satellite,
   AlertTriangle,
-  CalendarIcon
+  CalendarIcon,
 } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
 import { useAuth } from "@/contexts/AuthContext";
-import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, LocationEvent } from "@/services/dashboardService";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, LocationEvent, BranchMapItem } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
-import { BranchMapItem } from "@/services/dashboardService";
 import locationService, { LocationItem } from "@/services/locationService";
 import type L from "leaflet";
 

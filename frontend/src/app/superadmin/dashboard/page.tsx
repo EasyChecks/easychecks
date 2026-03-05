@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,9 +11,7 @@ import {
   Map as MapIcon,
   Satellite,
   AlertTriangle,
-  Users,
-  Clock,
-  CalendarIcon
+  CalendarIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -23,7 +21,7 @@ import { th } from "date-fns/locale";
 import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem, LocationEvent } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
-import type L from "leaflet";
+
 
 // Dynamic import for Map components (client-side only)
 const MapContainer = dynamic(
@@ -129,12 +127,11 @@ const CHART_COLORS = {
 };
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
+  useAuth();
 
   // States
   const [selectedBranch, setSelectedBranch] = useState("all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
-  const [expandedLocationIds, setExpandedLocationIds] = useState<string[]>([]);
 
   // Modal states
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -210,6 +207,7 @@ export default function AdminDashboard() {
     };
 
     fetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranch, selectedDate]);
 
   // ── Map API employees → AttendanceStats ──
@@ -405,14 +403,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const toggleLocationDetails = (locationId: string) => {
-    const wasExpanded = expandedLocationIds.includes(locationId);
-    if (wasExpanded) {
-      setExpandedLocationIds(prev => prev.filter(id => id !== locationId));
-    } else {
-      setExpandedLocationIds(prev => [...prev, locationId]);
-    }
-  };
+
 
   const getTileLayerUrl = () => {
     if (mapType === "satellite") {

@@ -6,13 +6,35 @@ import {
   ShiftListParams,
 } from '@/types/attendance';
 
+/**
+ * แปลง Shift จาก backend (shiftId) → frontend (id)
+ * Backend Prisma model ใช้ shiftId, locationId เป็น PK
+ * แต่ Frontend type ใช้ id
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapShift(raw: any): Shift {
+  return {
+    ...raw,
+    id: raw.shiftId ?? raw.id,
+    location: raw.location ? {
+      ...raw.location,
+      id: raw.location.locationId ?? raw.location.id,
+    } : undefined,
+    user: raw.user ? {
+      ...raw.user,
+      id: raw.user.userId ?? raw.user.id,
+      name: raw.user.name ?? `${raw.user.firstName ?? ''} ${raw.user.lastName ?? ''}`.trim(),
+    } : undefined,
+  };
+}
+
 export const shiftService = {
   /**
    * Create a new shift (Admin only)
    */
   async create(data: CreateShiftRequest): Promise<Shift> {
     const response = await api.post('/shifts', data);
-    return response.data.data;
+    return mapShift(response.data.data);
   },
 
   /**
@@ -20,15 +42,16 @@ export const shiftService = {
    */
   async getAll(params?: ShiftListParams): Promise<Shift[]> {
     const response = await api.get('/shifts', { params });
-    return response.data.data;
+    return (response.data.data ?? []).map(mapShift);
   },
 
   /**
-   * Get shifts available today
+   * Get shifts available today for a specific user
+   * GET /api/shifts/today/:userId
    */
-  async getToday(): Promise<Shift[]> {
-    const response = await api.get('/shifts/today');
-    return response.data.data;
+  async getTodayByUserId(userId: number): Promise<Shift[]> {
+    const response = await api.get(`/shifts/today/${userId}`);
+    return (response.data.data ?? []).map(mapShift);
   },
 
   /**
@@ -36,7 +59,7 @@ export const shiftService = {
    */
   async getById(id: number): Promise<Shift> {
     const response = await api.get(`/shifts/${id}`);
-    return response.data.data;
+    return mapShift(response.data.data);
   },
 
   /**
@@ -44,7 +67,7 @@ export const shiftService = {
    */
   async update(id: number, data: UpdateShiftRequest): Promise<Shift> {
     const response = await api.put(`/shifts/${id}`, data);
-    return response.data.data;
+    return mapShift(response.data.data);
   },
 
   /**
@@ -59,7 +82,7 @@ export const shiftService = {
    */
   async getByUserId(userId: number): Promise<Shift[]> {
     const response = await api.get('/shifts', { params: { userId } });
-    return response.data.data;
+    return (response.data.data ?? []).map(mapShift);
   },
 
   /**
@@ -67,7 +90,7 @@ export const shiftService = {
    */
   async getActive(): Promise<Shift[]> {
     const response = await api.get('/shifts', { params: { isActive: true } });
-    return response.data.data;
+    return (response.data.data ?? []).map(mapShift);
   },
 };
 

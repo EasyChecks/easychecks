@@ -64,7 +64,7 @@ export interface Attendance {
 }
 
 export interface CheckInRequest {
-  shiftId: number;
+  shiftId?: number;
   locationId?: number;
   photo?: string;
   latitude: number;
@@ -73,7 +73,7 @@ export interface CheckInRequest {
 }
 
 export interface CheckOutRequest {
-  shiftId: number;
+  shiftId?: number;
   photo?: string;
   latitude: number;
   longitude: number;

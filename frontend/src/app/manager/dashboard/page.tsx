@@ -10,7 +10,7 @@ export default function ManagerDashboard() {
   return (
     <div className="space-y-6">
       {/* Welcome Card */}
-      <Card className="p-6 bg-gradient-to-r from-purple-500 to-purple-600 text-white border-none shadow-lg">
+      <Card className="p-6 bg-linear-to-r from-purple-500 to-purple-600 text-white border-none shadow-lg">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">

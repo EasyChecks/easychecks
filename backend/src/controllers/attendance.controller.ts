@@ -150,7 +150,10 @@ export const checkOut = async (req: Request, res: Response) => {
     sendSuccess(res, attendance, 'ออกงานเรียบร้อยแล้ว');
   } catch (error: unknown) {
     // [6] service โยน Error ถ้า: ไม่มี check-in ที่ค้างอยู่, GPS นอก radius
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการออกงาน');
+    console.error('CheckOut error:', error);
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการออกงาน';
+    const status = msg.includes('ไม่พบ') ? 400 : 500;
+    sendError(res, msg, status);
   }
 };
 

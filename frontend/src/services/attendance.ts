@@ -20,6 +20,45 @@ import {
   UpdateAttendanceRequest,
 } from '@/types/attendance';
 
+/**
+ * แปลง Attendance จาก backend (attendanceId, shiftId, locationId)
+ * → frontend (id) + nested shift/location/user id
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapAttendance(raw: any): Attendance {
+  if (!raw) return raw;
+  return {
+    ...raw,
+    id: raw.attendanceId ?? raw.id,
+    checkIn: raw.checkIn,
+    checkOut: raw.checkOut ?? undefined,
+    checkInPhoto: raw.checkInPhoto ?? undefined,
+    checkOutPhoto: raw.checkOutPhoto ?? undefined,
+    checkInLatitude: raw.checkInLat ?? raw.checkInLatitude,
+    checkInLongitude: raw.checkInLng ?? raw.checkInLongitude,
+    checkOutLatitude: raw.checkOutLat ?? raw.checkOutLatitude,
+    checkOutLongitude: raw.checkOutLng ?? raw.checkOutLongitude,
+    checkInAddress: raw.checkInAddress ?? undefined,
+    checkOutAddress: raw.checkOutAddress ?? undefined,
+    checkInDistance: raw.checkInDistance ?? undefined,
+    checkOutDistance: raw.checkOutDistance ?? undefined,
+    shift: raw.shift ? {
+      ...raw.shift,
+      id: raw.shift.shiftId ?? raw.shift.id,
+      location: raw.shift.location ? { ...raw.shift.location, id: raw.shift.location.locationId ?? raw.shift.location.id } : undefined,
+    } : undefined,
+    location: raw.location ? {
+      ...raw.location,
+      id: raw.location.locationId ?? raw.location.id,
+    } : undefined,
+    user: raw.user ? {
+      ...raw.user,
+      id: raw.user.userId ?? raw.user.id,
+      name: raw.user.name ?? `${raw.user.firstName ?? ''} ${raw.user.lastName ?? ''}`.trim(),
+    } : undefined,
+  };
+}
+
 export const attendanceService = {
   /**
    * checkIn() — บันทึกเวลาเข้างาน
@@ -31,7 +70,7 @@ export const attendanceService = {
    */
   async checkIn(data: CheckInRequest): Promise<Attendance> {
     const response = await api.post('/attendance/check-in', data);
-    return response.data.data;
+    return mapAttendance(response.data.data);
   },
 
   /**
@@ -43,7 +82,7 @@ export const attendanceService = {
    */
   async checkOut(data: CheckOutRequest): Promise<Attendance> {
     const response = await api.post('/attendance/check-out', data);
-    return response.data.data;
+    return mapAttendance(response.data.data);
   },
 
   /**
@@ -57,7 +96,7 @@ export const attendanceService = {
    */
   async getMyHistory(userId: number, params?: AttendanceHistoryParams): Promise<Attendance[]> {
     const response = await api.get(`/attendance/history/${userId}`, { params });
-    return response.data.data;
+    return (response.data.data ?? []).map(mapAttendance);
   },
 
   /**
@@ -68,19 +107,19 @@ export const attendanceService = {
    */
   async getAll(params?: AttendanceListParams): Promise<Attendance[]> {
     const response = await api.get('/attendance', { params });
-    return response.data.data;
+    return (response.data.data ?? []).map(mapAttendance);
   },
 
   /** ดึง attendance record เดี่ยวโดย id — GET /api/attendance/:id */
   async getById(id: number): Promise<Attendance> {
     const response = await api.get(`/attendance/${id}`);
-    return response.data.data;
+    return mapAttendance(response.data.data);
   },
 
   /** แก้ไข attendance record (Admin เท่านั้น) — PUT /api/attendance/:id */
   async update(id: number, data: UpdateAttendanceRequest): Promise<Attendance> {
     const response = await api.put(`/attendance/${id}`, data);
-    return response.data.data;
+    return mapAttendance(response.data.data);
   },
 
   /** ลบ attendance record (Admin เท่านั้น, Soft Delete) — DELETE /api/attendance/:id */
@@ -107,7 +146,15 @@ export const attendanceService = {
   }> {
     try {
       const response = await api.get(`/attendance/today/${userId}`);
-      const todayAttendance = response.data.data; // null ถ้ายังไม่ check-in วันนี้
+      const data = response.data.data;
+
+      // Backend ใช้ findMany → ส่ง array กลับมา
+      // ถ้าเป็น array → เอา record แรก (ล่าสุด, sort desc)
+      // ถ้าเป็น single object → ใช้ตรงๆ
+      const rawAttendance = Array.isArray(data)
+        ? (data.length > 0 ? data[0] : null)
+        : data;
+      const todayAttendance = rawAttendance ? mapAttendance(rawAttendance) : null;
 
       return {
         hasCheckedIn: !!todayAttendance,

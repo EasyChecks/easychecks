@@ -11,7 +11,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install dependencies (postinstall will run prisma generate)
-RUN npm install --legacy-peer-deps
+RUN npm install
 
 # Expose port
 EXPOSE 3001

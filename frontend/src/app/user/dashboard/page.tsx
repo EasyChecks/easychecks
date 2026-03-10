@@ -66,6 +66,12 @@ export default function UserDashboard() {
   const [showInfoPopup, setShowInfoPopup] = useState(false);
   const [infoMessage, setInfoMessage] = useState('');
 
+  // ── GPS location status (ตรวจสอบพิกัดจริงจาก backend) ──
+  const [gpsStatus, setGpsStatus] = useState<'loading' | 'within' | 'outside' | 'error' | 'no-location'>('loading');
+  const [gpsMessage, setGpsMessage] = useState('กำลังตรวจสอบตำแหน่ง...');
+  // เก็บ distance ไว้ใช้อนาคต (ตอนนี้แสดงผ่าน gpsMessage แทน)
+  const [, setGpsDistance] = useState<number | null>(null);
+
   // ── load today status ──────────────────────────────────
   const loadTodayStatus = useCallback(async () => {
     if (!userId) return;
@@ -131,6 +137,74 @@ export default function UserDashboard() {
     loadMonthlyStats();
   }, [userId, loadTodayStatus, loadShifts, loadMonthlyStats]);
 
+  // ── GPS location check — ตรวจสอบพิกัดจริงผ่าน backend ──────────
+  // ทำไม? — ไม่ให้ frontend ติดตั้ง geolib / คำนวณระยะทางเอง
+  // เรียก /api/locations/check-gps พร้อมพิกัด GPS + shiftId ที่เลือก
+  useEffect(() => {
+    // ยังไม่โหลดกะเสร็จ → รอก่อน
+    if (shiftsLoading) return;
+
+    // ถ้าไม่มีกะวันนี้ → ไม่มีสถานที่ต้องตรวจ
+    if (shifts.length === 0) {
+      setGpsStatus('no-location');
+      setGpsMessage('ไม่มีกะงานวันนี้');
+      return;
+    }
+
+    // ใช้กะที่เลือก หรือกะแรกเป็นค่าเริ่มต้น
+    const activeShiftId = selectedShift ?? shifts[0]?.id;
+    if (!activeShiftId) return;
+
+    setGpsStatus('loading');
+    setGpsMessage('กำลังตรวจสอบตำแหน่ง...');
+
+    // ขอ GPS จาก browser
+    if (!navigator.geolocation) {
+      setGpsStatus('error');
+      setGpsMessage('เบราว์เซอร์ไม่รองรับ GPS');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        // ป้องกัน (0,0) — GPS ไม่พร้อม
+        if (latitude === 0 && longitude === 0) {
+          setGpsStatus('error');
+          setGpsMessage('ไม่สามารถรับพิกัด GPS ได้');
+          return;
+        }
+        try {
+          const result = await attendanceService.checkGps({
+            latitude,
+            longitude,
+            shiftId: activeShiftId,
+          });
+          setGpsDistance(result.distance);
+          if (!result.location) {
+            // กะไม่มีสถานที่กำหนด → อนุญาตทุกที่
+            setGpsStatus('within');
+            setGpsMessage('ไม่มีสถานที่กำหนด — เช็คอินได้ทุกที่');
+          } else if (result.withinRadius) {
+            setGpsStatus('within');
+            setGpsMessage(`คุณอยู่ในพื้นที่อนุญาต (ห่าง ${result.distance} ม.)`);
+          } else {
+            setGpsStatus('outside');
+            setGpsMessage(`คุณอยู่นอกพื้นที่ (ห่าง ${result.distance} ม., สูงสุด ${result.radius} ม.)`);
+          }
+        } catch {
+          setGpsStatus('error');
+          setGpsMessage('ไม่สามารถตรวจสอบตำแหน่งได้');
+        }
+      },
+      () => {
+        setGpsStatus('error');
+        setGpsMessage('ไม่ได้รับอนุญาตให้เข้าถึง GPS');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+    );
+  }, [shiftsLoading, shifts, selectedShift]);
+
   // ── open history modal + fetch ─────────────────────────
   const openHistory = async () => {
     setShowHistoryModal(true);
@@ -168,12 +242,34 @@ export default function UserDashboard() {
       <div className="bg-white rounded-2xl shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1),0px_5px_5px_0px_rgba(0,0,0,0.09),0px_12px_7px_0px_rgba(0,0,0,0.05)] p-5">
         <h3 className="mb-3 text-xl font-bold text-black">บันทึกเวลา</h3>
 
-        {/* Location status bar */}
-        <div className="flex items-center gap-2.5 px-4 py-3 mb-4 bg-green-200/50 rounded-xl">
-          <svg xmlns="http://www.w3.org/2000/svg" className="shrink-0 w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-          </svg>
-          <span className="text-sm text-black">คุณอยู่ในพื้นที่อนุญาต - สามารถเช็คอินได้</span>
+        {/* Location status bar — สถานะ GPS จริงจาก backend */}
+        <div className={`flex items-center gap-2.5 px-4 py-3 mb-4 rounded-xl ${
+          gpsStatus === 'within'  ? 'bg-green-200/50' :
+          gpsStatus === 'outside' ? 'bg-red-200/50' :
+          gpsStatus === 'loading' ? 'bg-gray-200/50' :
+                                    'bg-yellow-200/50'
+        }`}>
+          {gpsStatus === 'loading' ? (
+            <div className="shrink-0 w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+          ) : gpsStatus === 'within' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="shrink-0 w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+            </svg>
+          ) : gpsStatus === 'outside' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="shrink-0 w-5 h-5 text-red-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="shrink-0 w-5 h-5 text-yellow-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" />
+            </svg>
+          )}
+          <span className={`text-sm ${
+            gpsStatus === 'within'  ? 'text-green-800' :
+            gpsStatus === 'outside' ? 'text-red-800' :
+            gpsStatus === 'loading' ? 'text-gray-600' :
+                                      'text-yellow-800'
+          }`}>{gpsMessage}</span>
         </div>
 
         {/* Shift selector — only when > 1 shift */}

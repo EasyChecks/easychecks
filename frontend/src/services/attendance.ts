@@ -128,6 +128,27 @@ export const attendanceService = {
   },
 
   /**
+   * POST /api/attendance/check-gps
+   * ตรวจสอบว่า GPS ของพนักงานอยู่ในพื้นที่อนุญาตหรือไม่
+   * — การคำนวณระยะทางทั้งหมดอยู่ฝั่ง backend
+   */
+  async checkGps(params: {
+    latitude: number;
+    longitude: number;
+    locationId?: number;
+    shiftId?: number;
+  }): Promise<{
+    withinRadius: boolean;
+    distance: number | null;
+    radius: number | null;
+    location: { locationId: number; locationName: string; latitude: number; longitude: number; address?: string } | null;
+    message: string;
+  }> {
+    const res = await api.post('/attendance/check-gps', params);
+    return res.data.data;
+  },
+
+  /**
    * getTodayStatus() — ดึงสถานะการเข้างานวันนี้ของ user
    * GET /api/attendance/today/:userId
    *

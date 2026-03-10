@@ -6,6 +6,7 @@ import mainRouter from './routes/index.js';
 import { setupAttendanceWebSocket } from './websocket/attendance.websocket.js';
 import { setupEventWebSocket } from './websocket/event.websocket.js';
 import { setupSwagger } from './config/swagger.js';
+import { startAuditCleanupCron } from './services/audit-cron.service.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -92,4 +93,6 @@ server.on('upgrade', (request, socket, head) => {
 
 server.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
+  // เริ่ม cron job ลบ audit log เก่า — เรียกครั้งเดียวตอน server start
+  startAuditCleanupCron();
 });

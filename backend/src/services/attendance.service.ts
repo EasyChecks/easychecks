@@ -94,29 +94,35 @@ function calculateDistance(
  * Admin สามารถตั้ง gracePeriodMinutes และ lateThresholdMinutes ต่อกะได้
  * → frontend ส่งมาใน CreateShiftDTO, บันทึกไว้ใน Shift record
  *
- * Logic:
- * diff ≤ 0  AND |diff| ≤ gracePeriod  → ON_TIME  (มาก่อน ภายใน grace)
- * diff = 0                             → ON_TIME  (ตรงเวลาพอดี)
- * 0 < diff ≤ lateThreshold             → LATE
- * diff > lateThreshold                 → ABSENT   (สายมากเกินไป)
+ * Logic ที่แก้แล้ว (v2):
+ * diff ≤ grace  → ON_TIME  (มาก่อน หรือสายไม่เกิน grace — ยังถือว่าตรงเวลา)
+ * grace < diff ≤ threshold → LATE    (สายแต่ยังไม่ถึงเกณฑ์ขาด)
+ * diff > threshold         → ABSENT  (สายเกินไป — ขาดงาน)
+ *
+ * ทำไมเปลี่ยน?
+ * เวอร์ชันเก่ามี bug: เงื่อนไข `diff === 0` อยู่หลัง `diff <= 0` → ไม่มีทางเข้าถึง
+ * และ grace ควรรวม "มาก่อน" + "สายนิดหน่อย" ด้วย เช่น grace=15 แปลว่า
+ * มาสายได้ 15 นาทีแล้วยังถือว่า ON_TIME
  */
 function calculateAttendanceStatus(
   checkInTime: string,
   shift: Shift,
 ): { status: AttendanceStatus; lateMinutes: number; message: string } {
   const diff = calculateTimeDifference(checkInTime, shift.startTime);
-  const grace = shift.gracePeriodMinutes;       // เข้าก่อนได้กี่นาที
+  const grace = shift.gracePeriodMinutes;       // สายไม่เกินกี่นาทียังตรงเวลา
   const threshold = shift.lateThresholdMinutes; // สายเกินนี้ถือว่าขาด
 
-  if (diff <= 0 && Math.abs(diff) <= grace) {
-    return { status: 'ON_TIME', lateMinutes: 0, message: `เข้างานตรงเวลา (มาก่อน ${Math.abs(diff)} นาที)` };
+  // diff ≤ 0 = มาก่อนเวลา, diff > 0 = มาหลังเวลา
+  if (diff <= grace) {
+    // มาก่อนหรือสายไม่เกิน grace → ตรงเวลา
+    const earlyOrLate = diff <= 0 ? `มาก่อน ${Math.abs(diff)} นาที` : 'ตรงเวลาพอดี';
+    return { status: 'ON_TIME', lateMinutes: 0, message: `เข้างานตรงเวลา (${earlyOrLate})` };
   }
-  if (diff === 0) {
-    return { status: 'ON_TIME', lateMinutes: 0, message: 'เข้างานตรงเวลา' };
-  }
-  if (diff > 0 && diff <= threshold) {
+  if (diff <= threshold) {
+    // สายแต่ยังไม่ถึง threshold → LATE
     return { status: 'LATE', lateMinutes: diff, message: `มาสาย ${diff} นาที` };
   }
+  // สายเกิน threshold → ABSENT
   return { status: 'ABSENT', lateMinutes: diff, message: `สายเกิน ${threshold} นาที — ถือว่าขาดงาน` };
 }
 
@@ -153,7 +159,20 @@ export const checkIn = async (data: CheckInDTO) => {
   // [A] Destructure ทุก field จาก DTO ที่ controller ส่งมา
   const { userId, shiftId, locationId, photo, latitude, longitude, address } = data;
 
-  // ===== 1. ตรวจสอบการลงชื่อซ้ำในวันเดียวกัน =====
+  // ===== 0. Validate GPS — ปฏิเสธพิกัด (0,0) เพราะเป็น default ที่ frontend ส่งมาเมื่อ GPS ไม่ทำงาน =====
+  // ทำไมต้องตรวจ? frontend เดิมส่ง lat:0, lng:0 เมื่อ GPS ไม่พร้อม
+  // พิกัด (0,0) อยู่กลางมหาสมุทรแอตแลนติก → ไม่มีทางเป็นตำแหน่งจริง
+  if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
+    throw new Error('กรุณาเปิด GPS เพื่อบันทึกพิกัดตำแหน่ง');
+  }
+  if (latitude === 0 && longitude === 0) {
+    throw new Error('พิกัด GPS ไม่ถูกต้อง (0,0) — กรุณาเปิด GPS แล้วลองใหม่');
+  }
+
+  // ===== 1. ตรวจสอบการลงชื่อซ้ำในวันเดียวกัน (Double-Punch Prevention) =====
+  // ทำไมต้องเพิ่ม deletedAt: null?
+  // ถ้า Admin soft-delete record เก่าไปแล้ว → ต้องให้ check-in ใหม่ได้
+  // ไม่งั้น record ที่ถูกลบจะยังบล็อกอยู่ตลอด
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
@@ -177,15 +196,17 @@ export const checkIn = async (data: CheckInDTO) => {
   // SQL: SELECT 1 FROM "Attendance"
   //   WHERE "userId"=$1 AND "checkIn" >= TODAY AND "checkIn" < TOMORROW
   //   AND ("shiftId"=$2 OR $2 IS NULL)
+  //   AND "deletedAt" IS NULL  ← สำคัญ: ไม่นับ record ที่ soft-delete แล้ว
   const existingAttendance = await prisma.attendance.findFirst({
     where: {
       userId,
+      deletedAt: null,                              // ← เพิ่ม: กรอง soft-delete ออก
       ...(shiftId !== undefined && { shiftId }), // spread ว่างถ้า shiftId ไม่มี → ตรวจทุกกะ
       checkIn: { gte: today, lt: tomorrow },       // ช่วงวันนี้เท่านั้น
     },
   });
   if (existingAttendance !== null) {
-    // พบ record วันนี้แล้ว → โยน Error ให้ controller ส่ง 500
+    // พบ record วันนี้แล้ว → โยน Error (จะถูก map เป็น 409 Conflict)
     throw new Error(shiftId !== undefined ? 'คุณได้ check-in กะนี้ไปแล้ววันนี้' : 'คุณได้ check-in ไปแล้ววันนี้');
   }
 
@@ -193,43 +214,60 @@ export const checkIn = async (data: CheckInDTO) => {
   // SQL: SELECT * FROM "Shift" WHERE "shiftId"=$1
   let shift: Shift | null = null;
   if (shiftId !== undefined) {
-    shift = await prisma.shift.findUnique({ where: { shiftId } });
+    shift = await prisma.shift.findUnique({
+      where: { shiftId },
+      include: { location: true }, // ← เพิ่ม: ดึง location ที่ผูกกับกะ เพื่อใช้คำนวณ GPS
+    });
     if (shift === null) throw new Error('ไม่พบกะที่ระบุ');               // กะถูกลบไปแล้ว
     if (shift.userId !== userId) throw new Error('กะนี้ไม่ใช่ของคุณ');  // ป้องกัน check-in สลับกะคนอื่น
     if (!shift.isActive) throw new Error('กะนี้ถูกปิดใช้งานแล้ว');      // Admin ปิดกะแล้ว
+
+    // ===== 2.1 ตรวจสอบว่าเลยเวลาออกงานหรือยัง =====
+    // ทำไมต้องเช็ค? ถ้ากะ 08:00-17:00 แล้วมาเข้างานตอน 18:00
+    // ไม่มีประโยชน์แล้ว → บล็อกไว้เลย ไม่ให้สร้าง record ขยะ
+    // ใช้ calculateTimeDifference ซึ่งรองรับกะข้ามเที่ยงคืน (เช่น 22:00-06:00) ด้วย
+    //
+    // SQL เทียบเท่า: ไม่มี — เป็น business logic ฝั่ง application
+    const nowForEndCheck = new Date();
+    const thaiNowForEndCheck = new Date(nowForEndCheck.getTime() + 7 * 60 * 60 * 1000);
+    const currentTimeHHMM = `${String(thaiNowForEndCheck.getUTCHours()).padStart(2, '0')}:${String(thaiNowForEndCheck.getUTCMinutes()).padStart(2, '0')}`;
+    const diffFromEnd = calculateTimeDifference(currentTimeHHMM, shift.endTime);
+    if (diffFromEnd > 0) {
+      throw new Error(`ไม่สามารถเข้างานได้ — เลยเวลาออกงาน (${shift.endTime}) แล้ว`);
+    }
   }
 
   // ===== 3. ตรวจสอบ Location (ถ้ามี) =====
-  // SQL: SELECT * FROM "Location" WHERE "locationId"=$1
+  // ลำดับความสำคัญ: locationId ที่ส่งมาตรง > locationId จาก Shift > ไม่มี
+  // ทำไมใช้ลำดับนี้? Admin อาจส่ง locationId เฉพาะกิจ override location ของกะ
   let location: Location | null = null;
   let distance: number | null = null;
-  // ลำดับความสำคัญ: locationId ที่ส่งมาตรง > locationId จาก Shift > ไม่มี
   const targetLocationId = locationId ?? shift?.locationId ?? undefined;
 
   if (targetLocationId !== undefined) {
+    // SQL: SELECT * FROM "Location" WHERE "locationId"=$1
     location = await prisma.location.findUnique({ where: { locationId: targetLocationId } });
     if (location === null) throw new Error('ไม่พบสถานที่ที่ระบุ');
 
-    // ทำไมต้องตรวจสอบ GPS ก่อน write?
-    // ป้องกัน record ค้างที่ไม่มี checkOut เพราะ location ผิด
-    if (latitude !== undefined && longitude !== undefined) {
-      distance = calculateDistance(latitude, longitude, location.latitude, location.longitude);
-      // distance > radius → อยู่นอกพื้นที่ → ไม่อนุญาต
-      if (distance > location.radius) {
-        throw new Error(
-          `คุณอยู่นอกพื้นที่ (ห่าง ${distance.toFixed(0)} ม., อนุญาตสูงสุด ${location.radius} ม.)`,
-        );
-      }
+    // คำนวณระยะห่างระหว่างพนักงานกับศูนย์กลาง location เสมอ
+    // ทำไมบังคับ? เพื่อให้ distance ถูกบันทึกทุกครั้ง ไม่เป็น NULL
+    distance = calculateDistance(latitude, longitude, location.latitude, location.longitude);
+    // distance > radius → อยู่นอกพื้นที่ → ไม่อนุญาต
+    if (distance > location.radius) {
+      throw new Error(
+        `คุณอยู่นอกพื้นที่ (ห่าง ${distance.toFixed(0)} ม., อนุญาตสูงสุด ${location.radius} ม.)`,
+      );
     }
   }
 
   // ===== 4. คำนวณสถานะ =====
-  // แปลงเวลาปัจจุบันเป็น "HH:MM" เพื่อเปรียบเทียบกับ shift.startTime
-  const checkInTime = new Date().toLocaleTimeString('th-TH', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
+  // ทำไมใช้ UTC+7 แทน toLocaleTimeString?
+  // toLocaleTimeString('th-TH') ขึ้นกับ locale ของ server → ต่าง OS ได้ค่าต่างกัน
+  // ใช้ manual offset ให้ได้ format "HH:MM" ที่แน่นอนเสมอ
+  const now = new Date();
+  const thaiOffsetMs = 7 * 60 * 60 * 1000; // UTC+7
+  const thaiNow = new Date(now.getTime() + thaiOffsetMs);
+  const checkInTime = `${String(thaiNow.getUTCHours()).padStart(2, '0')}:${String(thaiNow.getUTCMinutes()).padStart(2, '0')}`;
 
   let status: AttendanceStatus = 'ON_TIME'; // default ถ้าไม่มีกะ
   let lateMinutes = 0;
@@ -256,12 +294,12 @@ export const checkIn = async (data: CheckInDTO) => {
     data: {
       userId,
       shiftId: shiftId ?? null,                    // null ถ้าเป็น walk-in
-      locationId: targetLocationId ?? null,         // null ถ้าไม่ตรวจ GPS
+      locationId: targetLocationId ?? null,         // ← บันทึก locationId FK เสมอ (ไม่ NULL ถ้ามี shift.location)
       checkInPhoto: photo ?? null,                  // Base64 selfie
-      checkInLat: latitude ?? null,                 // พิกัดตอนเข้า
-      checkInLng: longitude ?? null,
+      checkInLat: latitude,                         // ← บังคับบันทึก GPS (ไม่ใช่ null)
+      checkInLng: longitude,
       checkInAddress: address ?? null,              // ที่อยู่ reverse geocode
-      checkInDistance: distance ?? null,            // ระยะห่างจาก location (เมตร)
+      checkInDistance: distance,                    // ← บันทึกระยะห่างจาก location (เมตร)
       status,                                       // ON_TIME / LATE / ABSENT / LEAVE_APPROVED
       lateMinutes,                                  // 0 ถ้าตรงเวลา
       note: message,                                // ข้อความสรุปสถานะ
@@ -312,23 +350,33 @@ export const checkOut = async (data: CheckOutDTO) => {
   // [A] Destructure จาก DTO ที่ controller ส่งมา
   const { userId, attendanceId, shiftId, photo, latitude, longitude, address } = data;
 
+  // ===== 0. Validate GPS — เหมือน checkIn, ปฏิเสธพิกัดที่ไม่ถูกต้อง =====
+  if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
+    throw new Error('กรุณาเปิด GPS เพื่อบันทึกพิกัดตำแหน่ง');
+  }
+  if (latitude === 0 && longitude === 0) {
+    throw new Error('พิกัด GPS ไม่ถูกต้อง (0,0) — กรุณาเปิด GPS แล้วลองใหม่');
+  }
+
   // ===== 1. หา record check-in ที่ยังไม่ได้ check-out =====
+  // เพิ่ม deletedAt: null เพื่อไม่ให้หา record ที่ soft-delete ไปแล้ว
   let attendance;
   if (attendanceId !== undefined) {
     // มี attendanceId ตรง → ใช้กันกรณีพนักงานเปิดหลายกะพร้อมกัน (เลือก check-out กะใดกะหนึ่ง)
-    // WHERE "attendanceId"=$1 AND "userId"=$2 AND "checkOut" IS NULL
+    // WHERE "attendanceId"=$1 AND "userId"=$2 AND "checkOut" IS NULL AND "deletedAt" IS NULL
     attendance = await prisma.attendance.findFirst({
-      where: { attendanceId, userId, checkOut: null }, // checkOut: null = ยังไม่ออก
+      where: { attendanceId, userId, checkOut: null, deletedAt: null },
       include: { location: true }, // ต้องการ location.radius สำหรับตรวจ GPS
     });
   } else {
     // ไม่มี attendanceId → หา record ล่าสุดที่ยังไม่ check-out ของ user นี้
-    // SQL: ORDER BY "checkIn" DESC LIMIT 1
+    // SQL: ... AND "deletedAt" IS NULL ORDER BY "checkIn" DESC LIMIT 1
     attendance = await prisma.attendance.findFirst({
       where: {
         userId,
         ...(shiftId !== undefined && { shiftId }), // กรองเพิ่มถ้าระบุ shiftId
         checkOut: null,                             // ยังไม่ได้ออก
+        deletedAt: null,                            // ← เพิ่ม: ไม่นับ record ที่ soft-delete
       },
       orderBy: { checkIn: 'desc' }, // เอาล่าสุดก่อนเสมอ
       include: { location: true },
@@ -342,7 +390,7 @@ export const checkOut = async (data: CheckOutDTO) => {
 
   // ===== 2. ตรวจสอบ GPS (ถ้ามี location ผูกอยู่) =====
   let distance: number | null = null;
-  if (attendance.location !== null && latitude !== undefined && longitude !== undefined) {
+  if (attendance.location !== null) {
     // คำนวณระยะห่างระหว่างพนักงานกับ location ที่ผูกไว้ตอน check-in
     distance = calculateDistance(
       latitude,             // GPS ปัจจุบันของพนักงาน
@@ -365,10 +413,10 @@ export const checkOut = async (data: CheckOutDTO) => {
     data: {
       checkOut: new Date(),          // timestamp ปัจจุบัน
       checkOutPhoto: photo ?? null,  // selfie ตอนออก
-      checkOutLat: latitude ?? null, // GPS ตอนออก
-      checkOutLng: longitude ?? null,
+      checkOutLat: latitude,         // ← บังคับบันทึก GPS (ไม่ใช่ null)
+      checkOutLng: longitude,
       checkOutAddress: address ?? null,    // reverse geocode ตอนออก
-      checkOutDistance: distance ?? null,  // ระยะห่างจาก location (เมตร)
+      checkOutDistance: distance,          // ← บันทึกระยะห่างจาก location (เมตร)
     },
     include: {
       // include เพื่อให้ response ที่ส่งกลับมีข้อมูลครบ
@@ -411,7 +459,7 @@ export const getTodayAttendance = async (userId: number) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   return prisma.attendance.findMany({
-    where: { userId, checkIn: { gte: today, lt: tomorrow } },
+    where: { userId, deletedAt: null, checkIn: { gte: today, lt: tomorrow } },
     include: { shift: true, location: true },
     orderBy: { checkIn: 'desc' },
   });
@@ -434,6 +482,7 @@ export const getAttendanceHistory = async (
   return prisma.attendance.findMany({
     where: {
       userId,
+      deletedAt: null,
       ...(filters?.startDate !== undefined && { checkIn: { gte: filters.startDate } }),
       ...(filters?.endDate !== undefined && { checkIn: { lte: filters.endDate } }),
       ...(filters?.status !== undefined && { status: filters.status }),
@@ -465,6 +514,7 @@ export const getAllAttendances = async (filters?: {
 }) => {
   return prisma.attendance.findMany({
     where: {
+      deletedAt: null,
       ...(filters?.userId !== undefined && { userId: filters.userId }),
       ...(filters?.startDate !== undefined && { checkIn: { gte: filters.startDate } }),
       ...(filters?.endDate !== undefined && { checkIn: { lte: filters.endDate } }),

@@ -550,11 +550,105 @@
 
 /**
  * @swagger
+ * /api/attendance/check-gps:
+ *   post:
+ *     summary: ตรวจสอบ GPS ว่าอยู่ในพื้นที่อนุญาตหรือไม่
+ *     description: |
+ *       ตรวจสอบว่าพิกัด GPS ที่ส่งมาอยู่ภายในรัศมีของ location หรือไม่
+ *       ใช้ก่อน check-in เพื่อแสดงสถานะ GPS บนหน้า Dashboard
+ *
+ *       **การหา Location:**
+ *       - ถ้าส่ง `locationId` → ใช้ location นั้นตรง ๆ
+ *       - ถ้าส่ง `shiftId` → ดึง location จาก shift
+ *       - ถ้าไม่ส่งทั้งคู่ → ต้องมีอย่างน้อย 1 อย่าง
+ *
+ *       **การคำนวณ:**
+ *       ใช้ geolib ฝั่ง backend เพื่อความปลอดภัย (ไม่ trust client distance)
+ *     tags:
+ *       - Attendance
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - latitude
+ *               - longitude
+ *             properties:
+ *               latitude:
+ *                 type: number
+ *                 example: 13.7563
+ *               longitude:
+ *                 type: number
+ *                 example: 100.5018
+ *               locationId:
+ *                 type: integer
+ *                 example: 1
+ *                 description: ระบุ location ตรง ๆ (optional ถ้ามี shiftId)
+ *               shiftId:
+ *                 type: integer
+ *                 example: 5
+ *                 description: ดึง location จาก shift (optional ถ้ามี locationId)
+ *     responses:
+ *       200:
+ *         description: ผลตรวจ GPS
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     withinRadius:
+ *                       type: boolean
+ *                       example: true
+ *                       description: true = อยู่ในพื้นที่
+ *                     distance:
+ *                       type: number
+ *                       example: 45.2
+ *                       description: ระยะห่างจากศูนย์กลาง (เมตร)
+ *                     radius:
+ *                       type: number
+ *                       example: 100
+ *                       description: รัศมีที่อนุญาต (เมตร)
+ *                     location:
+ *                       type: object
+ *                       properties:
+ *                         locationId:
+ *                           type: integer
+ *                         locationName:
+ *                           type: string
+ *                         latitude:
+ *                           type: number
+ *                         longitude:
+ *                           type: number
+ *                     message:
+ *                       type: string
+ *                       example: "อยู่ในรัศมี 45 ม. (อนุญาต 100 ม.)"
+ *       400:
+ *         description: ไม่ได้ส่ง locationId หรือ shiftId
+ *       404:
+ *         description: ไม่พบ location หรือ shift
+ */
+
+/**
+ * @swagger
  * /api/attendance/check-in:
  *   post:
  *     summary: เข้างาน (Check-in)
  *     description: |
  *       บันทึกเวลาเข้างานพร้อม GPS, รูปภาพ, และคำนวณสถานะอัตโนมัติ
+ *
+ *       **ข้อจำกัดเพิ่มเติม:**
+ *       - ไม่สามารถ check-in หลังเวลาออกงาน (endTime) ของกะได้
+ *       - พิกัด (0,0) ถูกปฏิเสธ — ต้องเปิด GPS จริง
  *
  *       **Flow การทำงาน:**
  *       1. ตรวจสอบว่า check-in ซ้ำในวันนี้หรือยัง
@@ -4492,4 +4586,204 @@
  *               type: number
  *             radius:
  *               type: number
+ */
+
+// ============================================================
+// 📋 AUDIT LOG ENDPOINTS
+// ============================================================
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Audit
+ *     description: |
+ *       📋 API สำหรับ Audit Log (Admin/SuperAdmin เท่านั้น)
+ *
+ *       **ทำไมต้องมี Audit API?**
+ *       Admin ต้องตรวจสอบได้ว่า "ใครทำอะไร เมื่อไหร่" ตามข้อกำหนด PDPA
+ *
+ *       **การเก็บรักษา:**
+ *       Audit logs ถูกลบอัตโนมัติหลัง 90 วัน ด้วย cron job (ทุกวัน 02:00)
+ *
+ *       **สิทธิ์การเข้าถึง:**
+ *       - Admin/SuperAdmin เท่านั้น
+ */
+
+/**
+ * @swagger
+ * /api/audit:
+ *   get:
+ *     summary: ดึง Audit Logs
+ *     description: |
+ *       ดึงรายการ audit logs ตามเงื่อนไขที่กำหนด (paginated)
+ *       เรียง createdAt DESC (ล่าสุดขึ้นก่อน)
+ *
+ *       **SQL เทียบเท่า:**
+ *       ```sql
+ *       SELECT al.*, u."firstName", u."lastName", u."employeeId"
+ *       FROM "audit_logs" al
+ *       LEFT JOIN "users" u ON al."userId" = u."userId"
+ *       WHERE (conditions)
+ *       ORDER BY al."createdAt" DESC
+ *       LIMIT $limit
+ *       ```
+ *     tags:
+ *       - Audit
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *         description: กรองเฉพาะ action ของ user คนนี้
+ *       - in: query
+ *         name: action
+ *         schema:
+ *           type: string
+ *         description: กรองเฉพาะ action นี้ เช่น CHECK_IN, UPDATE_ATTENDANCE
+ *       - in: query
+ *         name: targetTable
+ *         schema:
+ *           type: string
+ *         description: กรองเฉพาะตารางนี้ เช่น attendance, shifts
+ *       - in: query
+ *         name: targetId
+ *         schema:
+ *           type: integer
+ *         description: กรองเฉพาะ record ID นี้
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: วันเริ่มต้น (ISO string)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: วันสิ้นสุด (ISO string)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: จำนวนสูงสุดต่อหน้า
+ *     responses:
+ *       200:
+ *         description: ดึง audit logs สำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/AuditLog'
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่ใช่ Admin/SuperAdmin
+ */
+
+/**
+ * @swagger
+ * /api/audit/actions:
+ *   get:
+ *     summary: ดึงรายชื่อ Action ทั้งหมด
+ *     description: |
+ *       ดึง AuditAction constants ทั้งหมด สำหรับใช้เป็น dropdown filter ฝั่ง frontend
+ *       เช่น CHECK_IN, CHECK_OUT, UPDATE_ATTENDANCE, ...
+ *     tags:
+ *       - Audit
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: สำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   description: key-value ของ action constants
+ *                   example:
+ *                     CHECK_IN: "CHECK_IN"
+ *                     CHECK_OUT: "CHECK_OUT"
+ *                     UPDATE_ATTENDANCE: "UPDATE_ATTENDANCE"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่ใช่ Admin/SuperAdmin
+ */
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     AuditLog:
+ *       type: object
+ *       description: |
+ *         Audit log record — บันทึกว่า "ใครทำอะไร กับข้อมูลอะไร เมื่อเวลาใด"
+ *         ถูกสร้างอัตโนมัติโดย audit middleware สำหรับทุก write request
+ *       properties:
+ *         logId:
+ *           type: integer
+ *           example: 1234
+ *         userId:
+ *           type: integer
+ *           nullable: true
+ *           example: 5
+ *           description: ผู้กระทำ — null ถ้า system action
+ *         action:
+ *           type: string
+ *           example: "CHECK_IN"
+ *           description: ชื่อ action จาก AuditAction constants
+ *         targetTable:
+ *           type: string
+ *           example: "attendance"
+ *         targetId:
+ *           type: integer
+ *           example: 42
+ *           description: primary key ของ record ที่ถูกกระทำ
+ *         oldValues:
+ *           type: object
+ *           nullable: true
+ *           description: snapshot ก่อนเปลี่ยน (null สำหรับ CREATE)
+ *         newValues:
+ *           type: object
+ *           nullable: true
+ *           description: snapshot หลังเปลี่ยน (null สำหรับ DELETE)
+ *         ipAddress:
+ *           type: string
+ *           nullable: true
+ *           example: "203.150.11.1"
+ *         userAgent:
+ *           type: string
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *         user:
+ *           type: object
+ *           nullable: true
+ *           properties:
+ *             userId:
+ *               type: integer
+ *             firstName:
+ *               type: string
+ *             lastName:
+ *               type: string
+ *             employeeId:
+ *               type: string
  */

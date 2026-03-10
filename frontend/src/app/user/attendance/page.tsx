@@ -50,6 +50,7 @@ export default function AttendancePage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [selectedShift, setSelectedShift] = useState<number | null>(null);
   const [successResult, setSuccessResult] = useState<{ time: string; status: string } | null>(null);
+  const [countdown, setCountdown] = useState(0); // นับถอยหลังก่อน redirect กลับ dashboard
   const [todayStatus, setTodayStatus] = useState<{
     hasCheckedIn: boolean;
     hasCheckedOut: boolean;
@@ -212,7 +213,7 @@ export default function AttendancePage() {
    *
    * Validation ก่อนส่ง:
    *  - ต้องมีรูป (photo.data)
-   *  - ต้องมีพิกัด GPS (location)
+   *  - ต้องมีพิกัด GPS จริง ไม่ใช่ (0,0) หรือ null
    *  - ต้องเลือกกะ (selectedShift)
    *
    * ส่ง:
@@ -220,13 +221,17 @@ export default function AttendancePage() {
    *  - checkOut → attendanceService.checkOut({ shiftId, photo, latitude, longitude })
    *
    * หลังสำเร็จ:
-   *  - แสดง popup "บันทึกสำเร็จ" 2 วินาที
-   *  - reload สถานะวันนี้ + สถิติเดือนนี้
-   *  - reset mode กลับหน้าหลัก
+   *  - แสดง popup "บันทึกสำเร็จ" พร้อมนับถอยหลัง 5 วินาที → redirect กลับ dashboard
+   *  - ป้องกัน double-punch โดยให้ user กลับ dashboard ทันที
    */
   const handleSubmit = useCallback(async () => {
     if (!photo.data) {
       alert('กรุณาถ่ายรูปก่อนยืนยัน');
+      return;
+    }
+    // ─ GPS validation: ต้องมีพิกัดจริง ไม่ใช่ (0,0) ─
+    if (!location || (location.lat === 0 && location.lng === 0)) {
+      alert('ไม่สามารถรับพิกัด GPS ได้ กรุณาเปิด GPS แล้วลองใหม่');
       return;
     }
     if (shifts.length > 1 && !selectedShift) {
@@ -241,15 +246,15 @@ export default function AttendancePage() {
         result = await attendanceService.checkIn({
           shiftId: selectedShift ?? undefined,
           photo: photo.data,
-          latitude: location?.lat ?? 0,
-          longitude: location?.lng ?? 0,
+          latitude: location.lat,
+          longitude: location.lng,
         });
       } else {
         result = await attendanceService.checkOut({
           shiftId: selectedShift ?? undefined,
           photo: photo.data,
-          latitude: location?.lat ?? 0,
-          longitude: location?.lng ?? 0,
+          latitude: location.lat,
+          longitude: location.lng,
         });
       }
 
@@ -269,6 +274,20 @@ export default function AttendancePage() {
 
       setUi({ loading: false, showSuccess: true, isCameraActive: false, permissionGranted: false });
       await loadTodayStatus();
+
+      // นับถอยหลัง 5 วินาที แล้ว redirect กลับ dashboard อัตโนมัติ
+      // ป้องกัน double-punch: user ไม่สามารถกดซ้ำได้เพราะอยู่หน้า success modal
+      setCountdown(5);
+      const timer = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            router.push('/user/dashboard');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
     } catch (error: unknown) {
       console.error('Error submitting attendance:', error);
       const err = error as { response?: { data?: { error?: string; message?: string } } };
@@ -276,7 +295,7 @@ export default function AttendancePage() {
       alert(errorMsg);
       setUi(prev => ({ ...prev, loading: false }));
     }
-  }, [photo.data, location, selectedShift, mode, shifts.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [photo.data, location, selectedShift, mode, shifts.length, router]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * handleCancel() — กดปุ่ม "ยกเลิก" หรือ "กลับ"
@@ -365,6 +384,27 @@ export default function AttendancePage() {
           {/* hidden canvas for capture */}
           <canvas ref={canvasRef} className="hidden" />
 
+          {/* ── GPS status indicator ── */}
+          <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm ${
+            location && !(location.lat === 0 && location.lng === 0)
+              ? 'bg-green-100 text-green-800'
+              : 'bg-yellow-100 text-yellow-800'
+          }`}>
+            {location && !(location.lat === 0 && location.lng === 0) ? (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                </svg>
+                <span>ได้รับพิกัด GPS แล้ว</span>
+              </>
+            ) : (
+              <>
+                <div className="w-4 h-4 shrink-0 border-2 border-yellow-600 border-t-transparent rounded-full animate-spin" />
+                <span>กำลังรับพิกัด GPS...</span>
+              </>
+            )}
+          </div>
+
           {/* ── Shift selector (when multiple shifts & photo taken) ── */}
           {shifts.length > 1 && photo.taken && (
             <div className="bg-white rounded-2xl p-4 space-y-2 shadow-sm">
@@ -441,7 +481,7 @@ export default function AttendancePage() {
           )}
         </div>
 
-        {/* ── Success Modal ── */}
+        {/* ── Success Modal (พร้อมนับถอยหลัง redirect) ── */}
         {ui.showSuccess && (
           <div className="fixed inset-0 z-99999 flex items-end justify-center bg-black/60">
             <div className="w-full bg-white rounded-t-3xl p-6 text-center space-y-4 pb-10">
@@ -459,6 +499,9 @@ export default function AttendancePage() {
                     {successResult.status ? ` · ${successResult.status}` : ''}
                   </p>
                 )}
+                {countdown > 0 && (
+                  <p className="text-gray-400 mt-2 text-xs">กลับหน้าหลักใน {countdown} วินาที...</p>
+                )}
               </div>
               <button
                 onClick={() => {
@@ -468,6 +511,7 @@ export default function AttendancePage() {
                   setLocation(null);
                   setSelectedShift(null);
                   setSuccessResult(null);
+                  setCountdown(0);
                   loadTodayStatus();
                   router.push('/user/dashboard');
                 }}

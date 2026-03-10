@@ -454,6 +454,7 @@ model Announcement {
   content               String                 @map("content")
   targetRoles           Role[]                 @default([]) // บุคลากรประเภท เว้นไว้ = EVERYONE
   targetBranchIds       Int[]                  @default([]) @map("target_branch_ids") // สาขาเฉพาะ เว้นไว้ = EVERYONE
+  targetUserIds         Int[]                  @default([]) @map("target_user_ids") // ระบุ userId เฉพาะ เว้นไว้ = ใช้ role/branch filter
   status                AnnouncementStatus     @default(DRAFT) @map("status")
   createdByUserId       Int                    @map("created_by_user_id")
   createdAt             DateTime               @default(now()) @map("created_at")

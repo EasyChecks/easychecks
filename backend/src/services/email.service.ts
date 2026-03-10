@@ -65,6 +65,11 @@ export const sendAnnouncementEmail = async (opts: SendAnnouncementEmailOptions):
  * ทำไมไม่ใช้ Resend batch endpoint?
  * → Resend batch API ส่งอีเมลเหมือนกันแต่ไม่ personalize (เปลี่ยน recipientName ไม่ได้)
  *   ส่งทีละคนเพื่อให้สามารถ render "สวัสดีคุณ {firstName}" ได้แต่ละคน
+ *
+ * ทำไมส่งทีละคนแทน Promise.allSettled พร้อมกัน?
+ * → Resend free tier จำกัด 2 requests/วินาที
+ *   ถ้ายิงพร้อมกันหมด จะถูก rate limit แล้ว email หายไป
+ *   ส่งทีละคนพร้อม delay 600ms เพื่อไม่ให้เกิน rate limit
  */
 export const sendBulkAnnouncementEmails = async (
   recipients: { email: string; firstName: string; lastName: string }[],
@@ -72,26 +77,27 @@ export const sendBulkAnnouncementEmails = async (
   content: string,
   sentAt: Date
 ): Promise<{ success: number; failed: number }> => {
-  const results = await Promise.allSettled(
-    recipients.map((r) =>
-      sendAnnouncementEmail({
+  let success = 0;
+  let failed = 0;
+
+  for (const r of recipients) {
+    try {
+      await sendAnnouncementEmail({
         to: r.email,
         recipientName: `${r.firstName} ${r.lastName}`,
         title,
         content,
         sentAt,
-      })
-    )
-  );
-
-  const success = results.filter((r) => r.status === 'fulfilled').length;
-  const failed = results.filter((r) => r.status === 'rejected').length;
-
-  if (failed > 0) {
-    const errors = results
-      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-      .map((r) => r.reason);
-    console.error(`[EmailService] ส่งอีเมลล้มเหลว ${failed} รายการ:`, errors);
+      });
+      success++;
+    } catch (err) {
+      failed++;
+      console.error(`[EmailService] ส่งอีเมลไปยัง ${r.email} ล้มเหลว:`, err);
+    }
+    // Delay 600ms ระหว่างแต่ละฉบับ เพื่อไม่ให้เกิน Resend rate limit (2/วินาที)
+    if (recipients.indexOf(r) < recipients.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
   }
 
   return { success, failed };

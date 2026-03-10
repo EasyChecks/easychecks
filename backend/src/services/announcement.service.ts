@@ -29,6 +29,7 @@ export interface CreateAnnouncementDTO {
   content: string;          // เนื้อหาประกาศ (required เสมอ)
   targetRoles?: string[];   // ถ้าไม่ระบุ = ส่งหาทุก role
   targetBranchIds?: number[]; // ถ้าไม่ระบุ = ส่งหาทุกสาขา
+  targetUserIds?: number[];   // ระบุ userId เฉพาะ — ถ้ามี จะส่งเฉพาะคนเหล่านี้
   createdByUserId: number;  // ต้องรู้ว่าใครสร้าง เพื่อ audit trail
 }
 
@@ -37,6 +38,7 @@ export interface UpdateAnnouncementDTO {
   content?: string;
   targetRoles?: string[];
   targetBranchIds?: number[];
+  targetUserIds?: number[];
 }
 
 // ============================================
@@ -70,6 +72,7 @@ export const createAnnouncement = async (data: CreateAnnouncementDTO) => {
       content: data.content,
       targetRoles: data.targetRoles || [],
       targetBranchIds: data.targetBranchIds || [],
+      targetUserIds: data.targetUserIds || [],
       // กำหนด DRAFT เสมอ — ป้องกันการส่งผ่าน API โดยตรงโดยไม่ผ่าน send endpoint
       status: 'DRAFT',
       createdByUserId: data.createdByUserId,
@@ -266,11 +269,13 @@ export const updateAnnouncement = async (
     where: { announcementId },
     data: {
       // ใช้ spread + conditional เพื่อ partial update
-      // ถ้า field ไม่ได้ส่งมา จะไม่ overwrite ด้วย undefined
-      ...(data.title && { title: data.title }),
-      ...(data.content && { content: data.content }),
-      ...(data.targetRoles && { targetRoles: data.targetRoles }),
-      ...(data.targetBranchIds && { targetBranchIds: data.targetBranchIds }),
+      // ถ้า field ไม่ได้ส่งมา (undefined) จะไม่ overwrite
+      // ใช้ !== undefined แทน truthy เพื่อให้ส่ง [] (ล้างค่า) หรือ "" ได้
+      ...(data.title !== undefined && { title: data.title }),
+      ...(data.content !== undefined && { content: data.content }),
+      ...(data.targetRoles !== undefined && { targetRoles: data.targetRoles }),
+      ...(data.targetBranchIds !== undefined && { targetBranchIds: data.targetBranchIds }),
+      ...(data.targetUserIds !== undefined && { targetUserIds: data.targetUserIds }),
       updatedByUserId,
     },
     include: {
@@ -339,100 +344,99 @@ export const sendAnnouncement = async (
   sentByUserRole: string,
   sentByUserBranchId?: number
 ) => {
-  const announcement = await prisma.announcement.findUnique({
-    where: { announcementId },
-  });
-
-  if (!announcement) {
-    throw new Error('ไม่พบประกาศที่ระบุ');
-  }
-
-  // ป้องกันการส่งซ้ำ — ถ้า SENT แล้วจะสร้าง duplicate recipients
-  if (announcement.status !== 'DRAFT') {
-    throw new Error('ประกาศต้องอยู่ในสถานะ DRAFT เพื่อส่งได้');
-  }
-
-  // สร้าง query object แบบ dynamic เพราะเงื่อนไขผู้รับมีหลาย combination
-  // BASE: ดึงเฉพาะ user ที่ active — inactive/resigned ไม่ควรได้รับประกาศ
-  let recipientIds: number[] = [];
-  let recipientQuery: any = { status: 'ACTIVE' };
-
-  // ถ้าประกาศนี้ระบุ targetRoles ไว้ = ส่งเฉพาะ role นั้นๆ
-  // ถ้าไม่ระบุ (array ว่าง) = ส่งหาทุก role (ไม่ใส่ WHERE role)
-  if (announcement.targetRoles && announcement.targetRoles.length > 0) {
-    recipientQuery.role = { in: (announcement.targetRoles || []) as any };
-  }
-
-  // ถ้าประกาศนี้ระบุ targetBranchIds ไว้ = ส่งเฉพาะสาขานั้นๆ
-  if (announcement.targetBranchIds && announcement.targetBranchIds.length > 0) {
-    recipientQuery.branchId = { in: announcement.targetBranchIds };
-  }
-
-  // ─── Permission Rules ───────────────────────────────────────
-  if (sentByUserRole === 'ADMIN') {
-    // ADMIN ต้องมี branchId เสมอ เพราะเราจะ override branchId ใน query
-    // ถ้าไม่มี = data inconsistency ใน users table
-    if (!sentByUserBranchId) {
-      throw new Error('Admin ต้องมี branchId เพื่อส่งประกาศ');
-    }
-    // Override branchId — ทับ targetBranchIds ที่กำหนดไว้
-    // เพราะ ADMIN ไม่มีสิทธิ์ส่งข้ามสาขาไม่ว่าจะตั้งค่าอย่างไร
-    recipientQuery.branchId = sentByUserBranchId;
-
-    // กรอง SUPERADMIN ออก:
-    // - ถ้า targetRoles มี role list อยู่แล้ว → ลบ SUPERADMIN ออกจาก array
-    // - ถ้าเป็น EVERYONE (ไม่มี role filter) → เพิ่ม WHERE role != SUPERADMIN
-    if (recipientQuery.role?.in) {
-      recipientQuery.role = {
-        in: (recipientQuery.role.in as string[]).filter((r: string) => r !== 'SUPERADMIN'),
-      };
-    } else {
-      recipientQuery.role = { not: 'SUPERADMIN' };
-    }
-  } else if (sentByUserRole === 'SUPERADMIN') {
-    // SUPERADMIN ไม่มีข้อจำกัด — ใช้ query ที่ build มาแล้วได้เลย
-  } else {
-    throw new Error('เฉพาะ Admin และ Super Admin เท่านั้นที่สามารถส่งประกาศได้');
-  }
-
-  // SQL:
-  //   SELECT user_id, email, first_name, last_name
-  //   FROM users WHERE <recipientQuery conditions>
-  // ดึง email ด้วยเพราะต้องส่งอีเมลในขั้นตอนถัดไป
-  const users = await prisma.user.findMany({
-    where: recipientQuery,
-    select: { userId: true, email: true, firstName: true, lastName: true },
-  });
-  recipientIds = users.map((u) => u.userId);
-
-  // SQL:
-  //   INSERT INTO announcement_recipients (announcement_id, user_id, sent_at)
-  //   VALUES ($1, $2, NOW()), ($1, $3, NOW()), ...
-  // ใช้ createMany เพราะ recipients อาจมีหลายร้อยคน
-  // INSERT ทีละ row จะช้ามาก
-  if (recipientIds.length > 0) {
-    await prisma.announcementRecipient.createMany({
-      data: recipientIds.map((userId) => ({
-        announcementId,
-        userId,
-        sentAt: new Date(),
-      })),
+  // ใช้ $transaction เพื่อป้องกัน race condition
+  // ถ้ากดส่ง 2 ครั้งพร้อมกัน request ที่ 2 จะเจอ status ≠ DRAFT แล้ว fail
+  const { updated, recipientIds, users, announcement } = await prisma.$transaction(async (tx) => {
+    const announcement = await tx.announcement.findUnique({
+      where: { announcementId },
     });
-  }
 
-  // SQL:
-  //   UPDATE announcements
-  //   SET status = 'SENT', sent_at = NOW(), sent_by_user_id = $1
-  //   WHERE announcement_id = $2
-  // อัปเดต status ให้เป็น SENT หลังจาก insert recipients สำเร็จ
-  // (ถ้า insert recipients fail → status ยังเป็น DRAFT ไม่หลุด)
-  const updated = await prisma.announcement.update({
-    where: { announcementId },
-    data: {
-      status: 'SENT',
-      sentAt: new Date(),
-      sentByUserId,
-    },
+    if (!announcement) {
+      throw new Error('ไม่พบประกาศที่ระบุ');
+    }
+
+    // ป้องกันการส่งซ้ำ — ถ้า SENT แล้วจะสร้าง duplicate recipients
+    if (announcement.status !== 'DRAFT') {
+      throw new Error('ประกาศต้องอยู่ในสถานะ DRAFT เพื่อส่งได้');
+    }
+
+    // ─── ถ้าระบุ targetUserIds = ส่งเฉพาะคนที่เลือก ─────────────
+    // ข้าม role/branch filter ทั้งหมด แต่ยังตรวจ ACTIVE status
+    let users;
+    if (announcement.targetUserIds && announcement.targetUserIds.length > 0) {
+      users = await tx.user.findMany({
+        where: {
+          userId: { in: announcement.targetUserIds },
+          status: 'ACTIVE',
+        },
+        select: { userId: true, email: true, firstName: true, lastName: true },
+      });
+    } else {
+      // ─── ไม่ได้ระบุ userId เฉพาะ → ใช้ role/branch filter ตามเดิม ──
+      // สร้าง query object แบบ dynamic เพราะเงื่อนไขผู้รับมีหลาย combination
+      // BASE: ดึงเฉพาะ user ที่ active — inactive/resigned ไม่ควรได้รับประกาศ
+      let recipientQuery: any = { status: 'ACTIVE' };
+
+      // ถ้าประกาศนี้ระบุ targetRoles ไว้ = ส่งเฉพาะ role นั้นๆ
+      // ถ้าไม่ระบุ (array ว่าง) = ส่งหาทุก role (ไม่ใส่ WHERE role)
+      if (announcement.targetRoles && announcement.targetRoles.length > 0) {
+        recipientQuery.role = { in: (announcement.targetRoles || []) as any };
+      }
+
+      // ถ้าประกาศนี้ระบุ targetBranchIds ไว้ = ส่งเฉพาะสาขานั้นๆ
+      if (announcement.targetBranchIds && announcement.targetBranchIds.length > 0) {
+        recipientQuery.branchId = { in: announcement.targetBranchIds };
+      }
+
+      // ─── Permission Rules ───────────────────────────────────────
+      if (sentByUserRole === 'ADMIN') {
+        if (!sentByUserBranchId) {
+          throw new Error('Admin ต้องมี branchId เพื่อส่งประกาศ');
+        }
+        recipientQuery.branchId = sentByUserBranchId;
+
+        if (recipientQuery.role?.in) {
+          recipientQuery.role = {
+            in: (recipientQuery.role.in as string[]).filter((r: string) => r !== 'SUPERADMIN'),
+          };
+        } else {
+          recipientQuery.role = { not: 'SUPERADMIN' };
+        }
+      } else if (sentByUserRole === 'SUPERADMIN') {
+        // SUPERADMIN ไม่มีข้อจำกัด
+      } else {
+        throw new Error('เฉพาะ Admin และ Super Admin เท่านั้นที่สามารถส่งประกาศได้');
+      }
+
+      users = await tx.user.findMany({
+        where: recipientQuery,
+        select: { userId: true, email: true, firstName: true, lastName: true },
+      });
+    }
+    const recipientIds = users.map((u) => u.userId);
+
+    if (recipientIds.length > 0) {
+      await tx.announcementRecipient.createMany({
+        data: recipientIds.map((userId) => ({
+          announcementId,
+          userId,
+          sentAt: new Date(),
+        })),
+      });
+    }
+
+    // อัปเดต status ให้เป็น SENT ภายใน transaction เดียวกัน
+    // ถ้า request อื่นเข้ามาพร้อมกัน จะเจอ status ≠ DRAFT แล้ว throw ออกไป
+    const updated = await tx.announcement.update({
+      where: { announcementId },
+      data: {
+        status: 'SENT',
+        sentAt: new Date(),
+        sentByUserId,
+      },
+    });
+
+    return { updated, recipientIds, users, announcement };
   });
 
   // บันทึก audit พร้อม recipientCount เพื่อให้ทราบว่าส่งไปกี่คน
@@ -536,6 +540,7 @@ export const deleteAnnouncement = async (
  *   WHERE recipient_id = $1
  */
 export const deleteRecipient = async (
+  announcementId: number,
   recipientId: number,
   deletedByUserId: number
 ) => {
@@ -546,6 +551,12 @@ export const deleteRecipient = async (
 
   if (!recipient) {
     throw new Error('ไม่พบรายการที่ส่ง');
+  }
+
+  // ตรวจสอบว่า recipient นี้เป็นของ announcement ที่ระบุจริง
+  // ป้องกันการลบ recipient ข้ามประกาศ
+  if (recipient.announcementId !== announcementId) {
+    throw new Error('ผู้รับประกาศนี้ไม่ได้อยู่ในประกาศที่ระบุ');
   }
 
   const deleted = await prisma.announcementRecipient.delete({

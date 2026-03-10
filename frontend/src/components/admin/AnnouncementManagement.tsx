@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import announcementService from '@/services/announcementService';
+import api from '@/services/api';
 import type {
   Announcement,
   AnnouncementRole,
@@ -12,6 +13,15 @@ import type {
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import AlertDialog from '@/components/common/AlertDialog';
+
+// ─── User type for recipient picker ──────────────────────────
+interface SimpleUser {
+  userId: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+}
 
 // ─── Constants ───────────────────────────────────────────────────
 const ROLE_OPTIONS: { value: AnnouncementRole; label: string }[] = [
@@ -27,6 +37,29 @@ const ROLE_BADGE_COLOR: Record<AnnouncementRole, string> = {
   MANAGER: 'bg-blue-100 text-blue-700',
   USER: 'bg-green-100 text-green-700',
 };
+
+const ROLE_ICONS: Record<AnnouncementRole, string> = {
+  SUPERADMIN: '👑',
+  ADMIN: '🛡️',
+  MANAGER: '💼',
+  USER: '👤',
+};
+
+const ROLE_DESCRIPTIONS: Record<AnnouncementRole, string> = {
+  SUPERADMIN: 'ผู้ดูแลระบบสูงสุด',
+  ADMIN: 'ผู้ดูแลระบบ',
+  MANAGER: 'ผู้จัดการ',
+  USER: 'พนักงานทั่วไป',
+};
+
+const AVATAR_COLORS = [
+  'from-violet-500 to-purple-600',
+  'from-blue-500 to-cyan-500',
+  'from-emerald-500 to-teal-500',
+  'from-orange-500 to-amber-500',
+  'from-pink-500 to-rose-500',
+  'from-indigo-500 to-blue-600',
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────
 const formatDate = (iso: string) =>
@@ -62,6 +95,14 @@ export default function AnnouncementManagement() {
   const emptyForm = { title: '', content: '', targetRoles: [] as AnnouncementRole[], branchIds: '' };
   const [form, setForm] = useState(emptyForm);
   const [deleteReason, setDeleteReason] = useState('');
+
+  // ── User picker state ──
+  const [allUsers, setAllUsers] = useState<SimpleUser[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [isUserPickerOpen, setIsUserPickerOpen] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const userPickerRef = useRef<HTMLDivElement>(null);
 
   // ── Loading flag (รวมเป็นตัวเดียวเพราะแต่ละ action ไม่ทับซ้อนกัน) ──
   const [loadingAction, setLoadingAction] = useState<null | 'saving' | 'sending' | 'deleting'>(null);
@@ -99,6 +140,40 @@ export default function AnnouncementManagement() {
     fetchAnnouncements();
   }, [fetchAnnouncements]);
 
+  // ── Fetch users for picker ──
+  const fetchUsers = useCallback(async () => {
+    if (allUsers.length > 0) return; // already loaded
+    setLoadingUsers(true);
+    try {
+      const response = await api.get('/users', { params: { limit: 500 } });
+      const data = response.data?.data ?? response.data;
+      const rawList: any[] = Array.isArray(data) ? data : (data?.users ?? []);
+      const mapped: SimpleUser[] = rawList.map((u: any) => ({
+        userId: Number(u.userId ?? u.user_id ?? u.id),
+        firstName: String(u.firstName ?? u.first_name ?? ''),
+        lastName: String(u.lastName ?? u.last_name ?? ''),
+        email: String(u.email ?? ''),
+        role: String(u.role ?? '').toUpperCase(),
+      }));
+      setAllUsers(mapped);
+    } catch {
+      // silently fail — user picker will show empty
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [allUsers.length]);
+
+  // Click outside to close picker
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userPickerRef.current && !userPickerRef.current.contains(e.target as Node)) {
+        setIsUserPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // ── Filtered list ──
   const filtered = announcements.filter((a) => {
     if (activeTab === 'ALL') return true;
@@ -117,7 +192,11 @@ export default function AnnouncementManagement() {
 
   const openCreate = () => {
     setForm(emptyForm);
+    setSelectedUserIds([]);
+    setUserSearch('');
+    setIsUserPickerOpen(false);
     setEditTarget('new');
+    fetchUsers();
   };
 
   const openEdit = (a: Announcement) => {
@@ -127,7 +206,11 @@ export default function AnnouncementManagement() {
       targetRoles: [...a.targetRoles],
       branchIds: a.targetBranchIds.join(', '),
     });
+    setSelectedUserIds(a.targetUserIds ?? []);
+    setUserSearch('');
+    setIsUserPickerOpen(false);
     setEditTarget(a);
+    fetchUsers();
   };
 
   const openView = async (a: Announcement) => {
@@ -160,6 +243,7 @@ export default function AnnouncementManagement() {
         content: form.content.trim(),
         ...(form.targetRoles.length > 0 && { targetRoles: form.targetRoles }),
         ...(form.branchIds.trim() && { targetBranchIds: parseBranchIds(form.branchIds) }),
+        ...(selectedUserIds.length > 0 && { targetUserIds: selectedUserIds }),
       };
       await announcementService.create(dto);
       setEditTarget(null);
@@ -186,7 +270,8 @@ export default function AnnouncementManagement() {
         title: form.title.trim(),
         content: form.content.trim(),
         targetRoles: form.targetRoles,
-        ...(form.branchIds.trim() && { targetBranchIds: parseBranchIds(form.branchIds) }),
+        targetBranchIds: form.branchIds.trim() ? parseBranchIds(form.branchIds) : [],
+        targetUserIds: selectedUserIds,
       };
       await announcementService.update(editTarget.announcementId, dto);
       setEditTarget(null);
@@ -277,23 +362,31 @@ export default function AnnouncementManagement() {
 
           {/* Target */}
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {a.targetRoles.length === 0 ? (
-              <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">ทุก Role</span>
+            {a.targetUserIds && a.targetUserIds.length > 0 ? (
+              <span className="text-xs bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full">
+                👤  {a.targetUserIds.length} คน
+              </span>
             ) : (
-              a.targetRoles.map((r) => (
-                <span key={r} className={`text-xs px-2 py-0.5 rounded-full ${ROLE_BADGE_COLOR[r]}`}>
-                  {ROLE_OPTIONS.find((o) => o.value === r)?.label ?? r}
-                </span>
-              ))
-            )}
-            {a.targetBranchIds.length === 0 ? (
-              <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">ทุกสาขา</span>
-            ) : (
-              a.targetBranchIds.map((id) => (
-                <span key={id} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
-                  สาขา #{id}
-                </span>
-              ))
+              <>
+                {a.targetRoles.length === 0 ? (
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">ทุก Role</span>
+                ) : (
+                  a.targetRoles.map((r) => (
+                    <span key={r} className={`text-xs px-2 py-0.5 rounded-full ${ROLE_BADGE_COLOR[r]}`}>
+                      {ROLE_OPTIONS.find((o) => o.value === r)?.label ?? r}
+                    </span>
+                  ))
+                )}
+                {a.targetBranchIds.length === 0 ? (
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">ทุกสาขา</span>
+                ) : (
+                  a.targetBranchIds.map((id) => (
+                    <span key={id} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
+                      สาขา #{id}
+                    </span>
+                  ))
+                )}
+              </>
             )}
           </div>
 
@@ -362,114 +455,348 @@ export default function AnnouncementManagement() {
   );
 
   // ── Form (Create / Edit) shared render ──
-  const renderFormModal = (isEdit: boolean) => (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-lg font-bold text-gray-800">
-            {isEdit ? '✏️ แก้ไขประกาศ' : '➕ สร้างประกาศใหม่'}
-          </h2>
-          <button
-            className="p-2 text-gray-400 rounded-lg hover:bg-gray-100"
-            onClick={() => setEditTarget(null)}
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+  const renderFormModal = (isEdit: boolean) => {
+    const searchLower = userSearch.toLowerCase();
+    const filteredUsers = allUsers.filter((u) => {
+      if (!searchLower) return true;
+      const roleLabel = ROLE_OPTIONS.find((r) => r.value === u.role)?.label ?? u.role;
+      return (
+        u.firstName.toLowerCase().includes(searchLower) ||
+        u.lastName.toLowerCase().includes(searchLower) ||
+        u.email.toLowerCase().includes(searchLower) ||
+        `${u.firstName} ${u.lastName}`.toLowerCase().includes(searchLower) ||
+        roleLabel.toLowerCase().includes(searchLower) ||
+        u.role.toLowerCase().includes(searchLower)
+      );
+    });
 
-        {/* Body */}
-        <div className="p-6 space-y-4">
-          {/* Title */}
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              หัวข้อประกาศ <span className="text-red-500">*</span>
-            </label>
-            <input
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400"
-              placeholder="กรอกหัวข้อประกาศ..."
-              value={form.title}
-              onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-            />
-          </div>
+    const getAvatarColor = (id: number) => AVATAR_COLORS[id % AVATAR_COLORS.length];
 
-          {/* Content */}
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              เนื้อหา <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              rows={5}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-orange-400"
-              placeholder="กรอกเนื้อหาประกาศ..."
-              value={form.content}
-              onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
-            />
-          </div>
+    const summaryText = selectedUserIds.length > 0
+      ? `เฉพาะ ${selectedUserIds.length} คน`
+      : form.targetRoles.length > 0
+        ? `${form.targetRoles.length} กลุ่ม${form.branchIds.trim() ? ' + สาขาที่ระบุ' : ''}`
+        : 'ส่งถึงทุกคน';
 
-          {/* Target Roles */}
-          <div>
-            <label className="block mb-2 text-sm font-medium text-gray-700">
-              กลุ่มเป้าหมาย <span className="text-xs text-gray-400">(ไม่เลือก = ทุก Role)</span>
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {ROLE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => toggleFormRole(opt.value)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                    form.targetRoles.includes(opt.value)
-                      ? `${ROLE_BADGE_COLOR[opt.value]} ring-2 ring-offset-1 ring-current`
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[92vh] overflow-hidden flex flex-col">
+
+          {/* ── Gradient Header ── */}
+          <div className="relative px-6 pt-6 pb-5 overflow-hidden bg-linear-to-br from-orange-500 via-orange-400 to-amber-400">
+            {/* Pattern overlay */}
+            <div className="absolute inset-0 opacity-10">
+              <svg width="100%" height="100%"><defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="white"/></pattern></defs><rect fill="url(#grid)" width="100%" height="100%"/></svg>
+            </div>
+            <button
+              onClick={() => setEditTarget(null)}
+              className="absolute p-1.5 text-white/70 hover:text-white right-4 top-4 rounded-lg hover:bg-white/20 transition-all duration-200"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+            <div className="relative flex items-center gap-4">
+              <div className="flex items-center justify-center w-12 h-12 text-xl shadow-lg rounded-xl bg-white/20 backdrop-blur-sm shadow-orange-600/20">
+                {isEdit ? '✏️' : '📢'}
+              </div>
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-white">
+                  {isEdit ? 'แก้ไขประกาศ' : 'สร้างประกาศใหม่'}
+                </h2>
+                <p className="text-sm text-white/80">
+                  {isEdit ? 'อัปเดตรายละเอียดประกาศ' : 'กรอกข้อมูลและเลือกกลุ่มเป้าหมาย'}
+                </p>
+              </div>
             </div>
           </div>
 
-          {/* Target Branch IDs */}
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              สาขาเป้าหมาย <span className="text-xs text-gray-400">(ID คั่นด้วย , เว้นว่าง = ทุกสาขา)</span>
-            </label>
-            <input
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400"
-              placeholder="เช่น 1, 2, 5"
-              value={form.branchIds}
-              onChange={(e) => setForm((p) => ({ ...p, branchIds: e.target.value }))}
-            />
+          {/* ── Scrollable Body ── */}
+          <div className="flex-1 px-6 py-5 space-y-6 overflow-y-auto">
+
+            {/* ─ Section 1: ข้อมูลประกาศ ─ */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-center text-xs font-bold text-white rounded-full shadow-sm w-7 h-7 bg-linear-to-br from-orange-500 to-orange-600">1</div>
+                <span className="text-sm font-semibold text-gray-800">ข้อมูลประกาศ</span>
+              </div>
+
+              {/* Title */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-600">
+                  หัวข้อ <span className="text-red-400">*</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg>
+                  </div>
+                  <input
+                    className="w-full py-2.5 pl-10 pr-4 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/40 focus:border-orange-400 focus:bg-white transition-all duration-200"
+                    placeholder="พิมพ์หัวข้อประกาศ..."
+                    value={form.title}
+                    onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-600">
+                  เนื้อหา <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  className="w-full px-4 py-3 text-sm transition-all duration-200 border border-gray-200 resize-none bg-gray-50 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/40 focus:border-orange-400 focus:bg-white"
+                  placeholder="กรอกเนื้อหาประกาศ..."
+                  value={form.content}
+                  onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
+                />
+                <p className="text-xs text-right text-gray-400">{form.content.length} ตัวอักษร</p>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 border-dashed" />
+
+            {/* ─ Section 2: กลุ่มเป้าหมาย ─ */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-center text-xs font-bold text-white rounded-full shadow-sm w-7 h-7 bg-linear-to-br from-orange-500 to-orange-600">2</div>
+                <span className="text-sm font-semibold text-gray-800">กลุ่มเป้าหมาย</span>
+                <span className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-500">ไม่เลือก = ทุกคน</span>
+              </div>
+
+              {/* Role cards */}
+              <div className="grid grid-cols-2 gap-2.5">
+                {ROLE_OPTIONS.map((opt) => {
+                  const isActive = form.targetRoles.includes(opt.value);
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => toggleFormRole(opt.value)}
+                      className={`relative flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-all duration-200 ${
+                        isActive
+                          ? 'border-orange-400 bg-orange-50 shadow-sm shadow-orange-100'
+                          : 'border-gray-100 bg-gray-50/50 hover:border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="text-xl">{ROLE_ICONS[opt.value]}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-semibold ${isActive ? 'text-orange-700' : 'text-gray-700'}`}>
+                          {opt.label}
+                        </p>
+                        <p className="text-[11px] text-gray-400 truncate">{ROLE_DESCRIPTIONS[opt.value]}</p>
+                      </div>
+                      {isActive && (
+                        <div className="flex items-center justify-center w-5 h-5 text-white bg-orange-500 rounded-full">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Branch IDs */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-gray-600">
+                  สาขาเป้าหมาย <span className="text-xs text-gray-400">(เว้นว่าง = ทุกสาขา)</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                    <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                  </div>
+                  <input
+                    className="w-full py-2.5 pl-10 pr-4 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/40 focus:border-orange-400 focus:bg-white transition-all duration-200"
+                    placeholder="เช่น 1, 2, 5"
+                    value={form.branchIds}
+                    onChange={(e) => setForm((p) => ({ ...p, branchIds: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 border-dashed" />
+
+            {/* ─ Section 3: เลือกพนักงานเฉพาะราย ─ */}
+            <div className="space-y-4" ref={userPickerRef}>
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center justify-center text-xs font-bold text-white rounded-full shadow-sm w-7 h-7 bg-linear-to-br from-orange-500 to-orange-600">3</div>
+                <span className="text-sm font-semibold text-gray-800">เลือกพนักงานเฉพาะราย</span>
+                <span className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-500">ไม่บังคับ</span>
+              </div>
+
+              {selectedUserIds.length > 0 && (
+                <div className="p-3 space-y-2 border border-orange-200 rounded-xl bg-orange-50/50">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-orange-600">
+                      ⚡ เลือกแล้ว {selectedUserIds.length} คน — จะส่งเฉพาะคนที่เลือก
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedUserIds([])}
+                      className="px-2 py-0.5 text-[11px] text-red-500 bg-white rounded-md border border-red-200 hover:bg-red-50 transition-colors"
+                    >
+                      ล้างทั้งหมด
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedUserIds.map((uid) => {
+                      const u = allUsers.find((x) => x.userId === uid);
+                      return (
+                        <span
+                          key={uid}
+                          className="inline-flex items-center gap-1.5 pl-1 pr-2 py-1 text-xs font-medium text-orange-800 bg-white border border-orange-200 rounded-full shadow-sm"
+                        >
+                          <span className={`flex items-center justify-center w-5 h-5 text-[10px] font-bold text-white rounded-full bg-linear-to-br ${getAvatarColor(uid)}`}>
+                            {u ? u.firstName.charAt(0) : '#'}
+                          </span>
+                          {u ? `${u.firstName} ${u.lastName}` : `#${uid}`}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedUserIds((prev) => prev.filter((id) => id !== uid))}
+                            className="ml-0.5 text-orange-400 hover:text-red-500 transition-colors"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Search input */}
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                  <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                </div>
+                <input
+                  className="w-full py-2.5 pl-10 pr-4 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-400/40 focus:border-orange-400 focus:bg-white transition-all duration-200"
+                  placeholder="ค้นหาด้วยชื่อ, อีเมล หรือตำแหน่ง..."
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  onFocus={() => { setIsUserPickerOpen(true); fetchUsers(); }}
+                />
+                {userSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setUserSearch('')}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                )}
+
+                {/* Dropdown */}
+                {isUserPickerOpen && (
+                  <div className="absolute z-20 w-full mt-2 overflow-hidden bg-white border border-gray-200 shadow-xl rounded-xl shadow-gray-200/50">
+                    {/* Dropdown header */}
+                    <div className="px-4 py-2 text-xs font-medium text-gray-500 border-b border-gray-100 bg-gray-50/80">
+                      {loadingUsers ? 'กำลังโหลด...' : `${filteredUsers.length} คน`}
+                    </div>
+                    <div className="overflow-y-auto max-h-60">
+                      {loadingUsers ? (
+                        <div className="flex items-center justify-center gap-2 py-8">
+                          <div className="w-5 h-5 border-2 border-orange-400 rounded-full border-t-transparent animate-spin" />
+                          <span className="text-sm text-gray-400">กำลังโหลดรายชื่อ...</span>
+                        </div>
+                      ) : filteredUsers.length === 0 ? (
+                        <div className="py-8 text-center">
+                          <div className="mb-2 text-3xl">🔍</div>
+                          <p className="text-sm text-gray-400">ไม่พบพนักงานที่ค้นหา</p>
+                        </div>
+                      ) : (
+                        filteredUsers.map((u) => {
+                          const isSelected = selectedUserIds.includes(u.userId);
+                          const roleLabel = ROLE_OPTIONS.find((r) => r.value === u.role)?.label ?? u.role;
+                          const roleColor = ROLE_BADGE_COLOR[u.role as AnnouncementRole] ?? 'bg-gray-100 text-gray-600';
+                          return (
+                            <button
+                              key={u.userId}
+                              type="button"
+                              onClick={() => {
+                                setSelectedUserIds((prev) =>
+                                  isSelected ? prev.filter((id) => id !== u.userId) : [...prev, u.userId]
+                                );
+                              }}
+                              className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-all duration-150 ${
+                                isSelected
+                                  ? 'bg-orange-50 hover:bg-orange-100/80'
+                                  : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              {/* Avatar */}
+                              <div className={`relative flex items-center justify-center w-9 h-9 text-sm font-bold text-white rounded-full bg-linear-to-br ${getAvatarColor(u.userId)} shrink-0`}>
+                                {u.firstName.charAt(0)}
+                                {isSelected && (
+                                  <div className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center w-4 h-4 bg-orange-500 rounded-full ring-2 ring-white">
+                                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+                                  </div>
+                                )}
+                              </div>
+                              {/* Info */}
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-medium ${isSelected ? 'text-orange-700' : 'text-gray-800'}`}>
+                                  {u.firstName} {u.lastName}
+                                </p>
+                                <p className="text-xs text-gray-400 truncate">{u.email}</p>
+                              </div>
+                              {/* Role badge */}
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${roleColor}`}>
+                                {roleLabel}
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Sticky Footer ── */}
+          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50/80">
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" /></svg>
+              <span>เป้าหมาย: <span className="font-medium text-gray-700">{summaryText}</span></span>
+            </div>
+            <div className="flex gap-2.5">
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setEditTarget(null)}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                className="text-white shadow-md rounded-xl bg-linear-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 shadow-orange-200/50"
+                onClick={isEdit ? handleUpdate : handleCreate}
+                disabled={loadingAction === 'saving'}
+              >
+                {loadingAction === 'saving' ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin" />
+                    กำลังบันทึก...
+                  </span>
+                ) : isEdit ? (
+                  <span className="flex items-center gap-1.5">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    บันทึกการแก้ไข
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                    สร้างประกาศ
+                  </span>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
-
-        {/* Footer */}
-        <div className="flex justify-end gap-3 px-6 pb-6">
-          <Button
-            variant="outline"
-            onClick={() => setEditTarget(null)}
-          >
-            ยกเลิก
-          </Button>
-          <Button
-            className="text-white bg-orange-500 hover:bg-orange-600"
-            onClick={isEdit ? handleUpdate : handleCreate}
-            disabled={loadingAction === 'saving'}
-          >
-            {loadingAction === 'saving' ? (
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin" />
-                กำลังบันทึก...
-              </span>
-            ) : isEdit ? 'บันทึกการแก้ไข' : 'สร้างประกาศ'}
-          </Button>
-        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // ───────────────────────────────────────────────────────────────
   // Render

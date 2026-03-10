@@ -30,6 +30,7 @@ export interface Announcement {
   content: string;
   targetRoles: AnnouncementRole[];     // [] = เป้าหมายทุกคน
   targetBranchIds: number[];           // [] = ทุกสาขา
+  targetUserIds: number[];             // [] = ใช้ role/branch filter
   status: AnnouncementStatus;
   createdByUserId: number;
   createdAt: string;
@@ -48,6 +49,7 @@ export interface CreateAnnouncementDTO {
   content: string;
   targetRoles?: AnnouncementRole[];
   targetBranchIds?: number[];
+  targetUserIds?: number[];
 }
 
 export interface UpdateAnnouncementDTO {
@@ -55,6 +57,7 @@ export interface UpdateAnnouncementDTO {
   content?: string;
   targetRoles?: AnnouncementRole[];
   targetBranchIds?: number[];
+  targetUserIds?: number[];
 }
 
 export interface AnnouncementFilters {

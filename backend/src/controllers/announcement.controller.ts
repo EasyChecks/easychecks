@@ -31,6 +31,7 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       content,
       targetRoles,
       targetBranchIds,
+      targetUserIds,
     } = req.body;
 
     // ตรวจสอบข้อมูล
@@ -47,6 +48,7 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       content,
       targetRoles,
       targetBranchIds,
+      targetUserIds,
       createdByUserId: req.user.userId,
     });
 
@@ -113,7 +115,7 @@ export const getAnnouncementById = async (req: Request, res: Response) => {
 export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
-    const { title, content, targetRoles, targetBranchIds } = req.body;
+    const { title, content, targetRoles, targetBranchIds, targetUserIds } = req.body;
 
     if (!announcementId || isNaN(announcementId)) {
       return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
@@ -130,6 +132,7 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
         content,
         targetRoles,
         targetBranchIds,
+        targetUserIds,
       },
       req.user.userId
     );
@@ -226,10 +229,15 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 export const deleteRecipient = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
+    const announcementId = parseInt(req.params.announcementId as string);
     const recipientId = parseInt(req.params.recipientId as string);
 
     if (!userId) {
       return sendError(res, 'ต้องเข้าสู่ระบบก่อน', 401);
+    }
+
+    if (!announcementId || isNaN(announcementId)) {
+      return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
     }
 
     if (!recipientId || isNaN(recipientId)) {
@@ -241,6 +249,7 @@ export const deleteRecipient = async (req: Request, res: Response) => {
     }
 
     const result = await announcementService.deleteRecipient(
+      announcementId,
       recipientId,
       req.user.userId
     );

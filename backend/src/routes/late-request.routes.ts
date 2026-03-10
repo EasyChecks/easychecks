@@ -56,12 +56,12 @@ router.get('/', authenticate, authorizeRole('ADMIN', 'SUPERADMIN', 'MANAGER'), l
 router.get('/:id', authenticate, lateRequestController.getLateRequestById);
 
 /**
- * @route   PATCH /api/late-requests/:id
+ * @route   PUT /api/late-requests/:id
  * @desc    แก้ไขคำขอมาสาย (เฉพาะ PENDING)
  * @access  Owner หรือ Admin
  * @body    requestDate?, scheduledTime?, actualTime?, reason?, attachmentUrl?
  */
-router.patch('/:id', authenticate, lateRequestController.updateLateRequest);
+router.put('/:id', authenticate, lateRequestController.updateLateRequest);
 
 /**
  * @route   POST /api/late-requests/:id/approve

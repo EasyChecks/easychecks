@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, Fragment } from 'react';
 import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -432,7 +432,7 @@ export default function EventMap({
 
         {/* Event markers */}
         {events?.map((event) => (
-          <div key={event.id}>
+          <Fragment key={event.id}>
             {eventIcon && (
               <Marker position={[event.latitude, event.longitude]} icon={eventIcon}>
                 <Popup className="custom-popup" minWidth={200}>
@@ -459,12 +459,12 @@ export default function EventMap({
                 pathOptions={{ color: '#f97316', weight: 2, dashArray: '6 4', fillColor: '#f97316', fillOpacity: 0.08 }}
               />
             )}
-          </div>
+          </Fragment>
         ))}
 
         {/* Location markers */}
         {locations?.map((location) => (
-          <div key={location.id}>
+          <Fragment key={location.id}>
             {locationIcon && (
               <Marker position={[location.latitude, location.longitude]} icon={locationIcon}>
                 <Popup className="custom-popup" minWidth={200}>
@@ -486,7 +486,7 @@ export default function EventMap({
                 pathOptions={{ color: '#2563eb', weight: 2, dashArray: '6 4', fillColor: '#3b82f6', fillOpacity: 0.08 }}
               />
             )}
-          </div>
+          </Fragment>
         ))}
 
         {/* Pending marker — green pulsing, click to open add form */}

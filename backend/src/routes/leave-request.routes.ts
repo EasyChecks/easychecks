@@ -63,12 +63,12 @@ router.get('/', authenticate, authorizeRole('ADMIN', 'SUPERADMIN', 'MANAGER'), l
 router.get('/:id', authenticate, leaveRequestController.getLeaveRequestById);
 
 /**
- * @route   PATCH /api/leave-requests/:id
+ * @route   PUT /api/leave-requests/:id
  * @desc    แก้ไขใบลา (เฉพาะ PENDING)
  * @access  Owner หรือ Admin
  * @body    leaveType?, startDate?, endDate?, reason?, attachmentUrl?
  */
-router.patch('/:id', authenticate, leaveRequestController.updateLeaveRequest);
+router.put('/:id', authenticate, leaveRequestController.updateLeaveRequest);
 
 /**
  * @route   POST /api/leave-requests/:id/approve

@@ -4,6 +4,9 @@
 import { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
 import { eventService, EventItem, ParticipantType } from '@/services/eventService';
 import { locationService, LocationItem, LOCATION_TYPE_LABELS } from '@/services/locationService';
+import { dashboardService } from '@/services/dashboardService';
+import { userService } from '@/services/user';
+import type { AuthUser } from '@/types/auth';
 import type { EventData, LocationData } from '@/types/event';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -86,7 +89,24 @@ const EMPTY_FORM: EventFormData = {
 };
 
 function combineDatetime(date: string, time: string): string {
-  return `${date}T${time}:00`;
+  // Append local timezone offset so the backend (running in UTC) stores the
+  // correct absolute time. Without this, "08:00" is stored as 08:00 UTC which
+  // displays as 15:00 in Bangkok (UTC+7).
+  const d = new Date(`${date}T${time}:00`);
+  const offset = -d.getTimezoneOffset(); // minutes ahead of UTC
+  const sign = offset >= 0 ? '+' : '-';
+  const abs = Math.abs(offset);
+  const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mm = String(abs % 60).padStart(2, '0');
+  return `${date}T${time}:00${sign}${hh}:${mm}`;
+}
+
+/** Return a date in YYYY-MM-DD using the **local** calendar (not UTC). */
+function toLocalYYYYMMDD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 /** คำนวณจำนวนวันระหว่าง 2 วัน */
@@ -117,6 +137,19 @@ export default function EventManagementTab() {
   const [formData, setFormData] = useState<EventFormData>({ ...EMPTY_FORM });
   const [editFormData, setEditFormData] = useState<Partial<EventFormData>>({});
   const [submitting, setSubmitting] = useState(false);
+
+  // ── Participant data (lazy-loaded) ──
+  const [allUsers, setAllUsers] = useState<{ userId: number; firstName: string; lastName: string; employeeId: string }[]>([]);
+  const [allBranches, setAllBranches] = useState<{ branchId: number; name: string }[]>([]);
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
+  // Add-form participant selections
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  // Edit-form participant selections
+  const [editSelectedUserIds, setEditSelectedUserIds] = useState<number[]>([]);
+  const [editSelectedBranchIds, setEditSelectedBranchIds] = useState<number[]>([]);
+  const [editSelectedRoles, setEditSelectedRoles] = useState<string[]>([]);
 
   const [alertDialog, setAlertDialog] = useState({
     isOpen: false,
@@ -164,6 +197,41 @@ export default function EventManagementTab() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Lazy-fetch users or branches when participantType needs them
+  const fetchParticipantData = useCallback(async (type: ParticipantType) => {
+    if (type === 'INDIVIDUAL' && allUsers.length === 0) {
+      try {
+        setLoadingParticipants(true);
+        const res = await userService.getManageUsers({} as AuthUser, { limit: 500 });
+        setAllUsers(res.users.map(u => ({
+          userId: Number(u.id),
+          firstName: u.name.split(' ')[0] || '',
+          lastName: u.name.split(' ').slice(1).join(' ') || '',
+          employeeId: u.employeeId,
+        })));
+      } catch { /* ignore */ } finally { setLoadingParticipants(false); }
+    }
+    if (type === 'BRANCH' && allBranches.length === 0) {
+      try {
+        setLoadingParticipants(true);
+        const res = await dashboardService.getBranchesMap();
+        setAllBranches((res.data ?? []).map((b: { branchId: number; name: string }) => ({ branchId: b.branchId, name: b.name })));
+      } catch { /* ignore */ } finally { setLoadingParticipants(false); }
+    }
+  }, [allUsers.length, allBranches.length]);
+
+  // When add-form participantType changes, pre-fetch data
+  useEffect(() => {
+    if (isAddingEvent) fetchParticipantData(formData.participantType);
+  }, [formData.participantType, isAddingEvent, fetchParticipantData]);
+
+  // When edit-form participantType changes (user switches type in the edit card), fetch data too
+  useEffect(() => {
+    if (editingEventId !== null && editFormData.participantType) {
+      fetchParticipantData(editFormData.participantType);
+    }
+  }, [editFormData.participantType, editingEventId, fetchParticipantData]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -252,8 +320,31 @@ export default function EventManagementTab() {
   }, [pendingPosition, findNearestLocationId]);
 
   const handleAddEvent = async () => {
-    if (!formData.eventName || !formData.locationId || !formData.startDate || !formData.endDate) {
-      setAlertDialog({ isOpen: true, type: 'error', title: 'ข้อมูลไม่ครบ', message: 'กรุณากรอก ชื่อกิจกรรม, สถานที่, วันที่เริ่ม และวันที่สิ้นสุด' });
+    // Validate venue based on venueMode
+    const venueOk = formData.venueMode === 'checkin'
+      ? !!formData.locationId
+      : (!!formData.customVenueName && (formData.latitude !== 0 || formData.longitude !== 0));
+
+    if (!formData.eventName || !venueOk || !formData.startDate || !formData.endDate) {
+      const msg = !formData.eventName
+        ? 'กรุณากรอกชื่อกิจกรรม'
+        : !venueOk
+          ? formData.venueMode === 'checkin' ? 'กรุณาเลือกสถานที่เช็คอิน' : 'กรุณากรอกชื่อสถานที่และระบุตำแหน่งบนแผนที่'
+          : 'กรุณากรอกวันที่เริ่มต้นและสิ้นสุด';
+      setAlertDialog({ isOpen: true, type: 'error', title: 'ข้อมูลไม่ครบ', message: msg });
+      return;
+    }
+
+    if (formData.participantType === 'INDIVIDUAL' && selectedUserIds.length === 0) {
+      setAlertDialog({ isOpen: true, type: 'error', title: 'ข้อมูลไม่ครบ', message: 'กรุณาเลือกพนักงานอย่างน้อย 1 คน' });
+      return;
+    }
+    if (formData.participantType === 'BRANCH' && selectedBranchIds.length === 0) {
+      setAlertDialog({ isOpen: true, type: 'error', title: 'ข้อมูลไม่ครบ', message: 'กรุณาเลือกสาขาอย่างน้อย 1 สาขา' });
+      return;
+    }
+    if (formData.participantType === 'ROLE' && selectedRoles.length === 0) {
+      setAlertDialog({ isOpen: true, type: 'error', title: 'ข้อมูลไม่ครบ', message: 'กรุณาเลือกตำแหน่งอย่างน้อย 1 ตำแหน่ง' });
       return;
     }
 
@@ -265,33 +356,51 @@ export default function EventManagementTab() {
       return;
     }
 
+    const venuePayload = formData.venueMode === 'checkin'
+      ? { locationId: Number(formData.locationId) }
+      : { venueName: formData.customVenueName, venueLatitude: formData.latitude, venueLongitude: formData.longitude };
+
+    const participantsPayload = formData.participantType === 'ALL' ? undefined
+      : formData.participantType === 'INDIVIDUAL' ? { userIds: selectedUserIds }
+      : formData.participantType === 'BRANCH' ? { branchIds: selectedBranchIds }
+      : formData.participantType === 'ROLE' ? { roles: selectedRoles }
+      : undefined;
+
     try {
       setSubmitting(true);
       await eventService.create({
         eventName: formData.eventName,
         description: formData.description || undefined,
-        locationId: Number(formData.locationId),
+        ...venuePayload,
         startDateTime: startDT,
         endDateTime: endDT,
         participantType: formData.participantType,
+        participants: participantsPayload,
       });
-      // Optimistic: prepend placeholder immediately
-      const loc = locations.find(l => l.locationId === Number(formData.locationId));
+      const loc = formData.venueMode === 'checkin'
+        ? locations.find(l => l.locationId === Number(formData.locationId)) ?? null
+        : null;
       const optimisticEvent: EventItem = {
         eventId: -Date.now(),
         eventName: formData.eventName,
         description: formData.description || '',
-        locationId: Number(formData.locationId),
-        location: loc ?? null,
+        locationId: formData.venueMode === 'checkin' ? Number(formData.locationId) : null,
+        venueName: formData.venueMode === 'custom' ? formData.customVenueName : null,
+        venueLatitude: formData.venueMode === 'custom' ? formData.latitude : null,
+        venueLongitude: formData.venueMode === 'custom' ? formData.longitude : null,
+        location: loc,
         startDateTime: startDT,
         endDateTime: endDT,
         participantType: formData.participantType,
         isActive: true,
-        _count: { event_participants: 0 },
+        _count: { event_participants: participantsPayload ? (selectedUserIds.length || selectedBranchIds.length || selectedRoles.length) : 0 },
       } as unknown as EventItem;
       setEvents(prev => [optimisticEvent, ...prev]);
       setAlertDialog({ isOpen: true, type: 'success', title: 'สำเร็จ!', message: 'เพิ่มกิจกรรมใหม่เรียบร้อยแล้ว' });
       setFormData({ ...EMPTY_FORM });
+      setSelectedUserIds([]);
+      setSelectedBranchIds([]);
+      setSelectedRoles([]);
       setIsAddingEvent(false);
       setPendingPosition(null);
       silentRefresh();
@@ -304,7 +413,7 @@ export default function EventManagementTab() {
     }
   };
 
-  const handleEditEvent = (event: EventItem) => {
+  const handleEditEvent = async (event: EventItem) => {
     setEditingEventId(event.eventId);
     const startDT = new Date(event.startDateTime);
     const endDT = new Date(event.endDateTime);
@@ -315,15 +424,35 @@ export default function EventManagementTab() {
       venueMode: isCustom ? 'custom' : 'checkin',
       locationId: event.locationId ? String(event.locationId) : '',
       customVenueName: event.venueName || '',
-      startDate: startDT.toISOString().split('T')[0],
+      startDate: toLocalYYYYMMDD(startDT),
       startTime: startDT.toTimeString().slice(0, 5),
-      endDate: endDT.toISOString().split('T')[0],
+      endDate: toLocalYYYYMMDD(endDT),
       endTime: endDT.toTimeString().slice(0, 5),
       participantType: event.participantType,
       isActive: event.isActive,
       latitude: isCustom ? (event.venueLatitude ?? 0) : (event.location?.latitude ?? 0),
       longitude: isCustom ? (event.venueLongitude ?? 0) : (event.location?.longitude ?? 0),
     });
+    // Reset first; then fetch full detail to get participant list
+    // (getAll doesn't include participants — need getById for full data)
+    setEditSelectedUserIds([]);
+    setEditSelectedBranchIds([]);
+    setEditSelectedRoles([]);
+    try {
+      const detail = await eventService.getById(event.eventId);
+      // Backend returns event_participants with .users / .branches (Prisma relation names)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const eps: any[] = (detail as any).event_participants ?? [];
+      if (eps.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setEditSelectedUserIds(eps.filter((p: any) => p.users?.userId).map((p: any) => p.users.userId as number));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setEditSelectedBranchIds(eps.filter((p: any) => p.branches?.branchId).map((p: any) => p.branches.branchId as number));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setEditSelectedRoles(eps.filter((p: any) => p.role).map((p: any) => p.role as string));
+      }
+    } catch { /* participants stay empty; user can re-select */ }
+    fetchParticipantData(event.participantType);
   };
 
   const handleSaveEdit = async () => {
@@ -346,6 +475,12 @@ export default function EventManagementTab() {
 
     try {
       setSubmitting(true);
+      const editParticipantsPayload = editFormData.participantType === 'ALL' ? undefined
+        : editFormData.participantType === 'INDIVIDUAL' ? { userIds: editSelectedUserIds }
+        : editFormData.participantType === 'BRANCH' ? { branchIds: editSelectedBranchIds }
+        : editFormData.participantType === 'ROLE' ? { roles: editSelectedRoles }
+        : undefined;
+
       await eventService.update(editingEventId!, {
         eventName: editFormData.eventName,
         description: editFormData.description || undefined,
@@ -354,6 +489,7 @@ export default function EventManagementTab() {
         endDateTime: endDT,
         participantType: editFormData.participantType,
         isActive: editFormData.isActive,
+        participants: editParticipantsPayload,
       });
       // Optimistic: update in-place
       setEvents(prev => prev.map(e =>
@@ -622,6 +758,22 @@ export default function EventManagementTab() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </div>
+                {/* Sub-selector for INDIVIDUAL / BRANCH / ROLE */}
+                {formData.participantType !== 'ALL' && (
+                  <ParticipantSubSelector
+                    participantType={formData.participantType}
+                    allUsers={allUsers}
+                    allBranches={allBranches}
+                    loading={loadingParticipants}
+                    selectedUserIds={selectedUserIds}
+                    selectedBranchIds={selectedBranchIds}
+                    selectedRoles={selectedRoles}
+                    onUserToggle={id => setSelectedUserIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                    onBranchToggle={id => setSelectedBranchIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                    onRoleToggle={role => setSelectedRoles(prev => prev.includes(role) ? prev.filter(x => x !== role) : [...prev, role])}
+                    compact
+                  />
+                )}
               </div>
 
               {/* รายละเอียด */}
@@ -718,15 +870,30 @@ export default function EventManagementTab() {
                   eventPhase={getEventPhase(event)}
                   onEdit={() => handleEditEvent(event)}
                   onSave={handleSaveEdit}
-                  onCancel={() => { setEditingEventId(null); setEditFormData({}); }}
+                  onCancel={() => { setEditingEventId(null); setEditFormData({}); setEditSelectedUserIds([]); setEditSelectedBranchIds([]); setEditSelectedRoles([]); }}
                   onDelete={() => handleDeleteEvent(event)}
                   onLocate={() => {
-                    if (event.location) setMapFlyTo({ lat: event.location.latitude, lng: event.location.longitude, zoom: 16, seq: ++mapFlySeq.current });
+                    const lat = event.location?.latitude ?? event.venueLatitude ?? null;
+                    const lng = event.location?.longitude ?? event.venueLongitude ?? null;
+                    if (lat && lng) {
+                      setMapFlyTo({ lat, lng, zoom: 16, seq: ++mapFlySeq.current });
+                      // The layout uses <main> with overflow-y-auto, so scroll that element
+                      (document.querySelector('main') ?? document.documentElement).scrollTo({ top: 0, behavior: 'smooth' });
+                    }
                   }}
                   onInputChange={handleInputChange}
                   onDateTimeChange={(name, val) => setEditFormData(prev => ({ ...prev, [name]: val }))}
                   onVenueModeChange={(mode) => setEditFormData(prev => ({ ...prev, venueMode: mode }))}
                   submitting={submitting}
+                  allUsers={allUsers}
+                  allBranches={allBranches}
+                  loadingParticipants={loadingParticipants}
+                  editSelectedUserIds={editSelectedUserIds}
+                  editSelectedBranchIds={editSelectedBranchIds}
+                  editSelectedRoles={editSelectedRoles}
+                  onEditUserToggle={id => setEditSelectedUserIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                  onEditBranchToggle={id => setEditSelectedBranchIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                  onEditRoleToggle={role => setEditSelectedRoles(prev => prev.includes(role) ? prev.filter(x => x !== role) : [...prev, role])}
                 />
               ))}
             </div>
@@ -753,7 +920,7 @@ export default function EventManagementTab() {
       />
 
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={confirmDialog.onCancel}></div>
           <Card className="relative z-10 w-full max-w-md p-6">
             <h3 className="mb-2 text-lg font-semibold">{confirmDialog.title}</h3>
@@ -767,6 +934,114 @@ export default function EventManagementTab() {
       )}
     </div>
   );
+}
+
+// ── ParticipantSubSelector ──────────────────────────────────────────────────────────
+const ALL_ROLES = [
+  { value: 'USER', label: 'พนักงาน' },
+  { value: 'MANAGER', label: 'ผู้จัดการ' },
+  { value: 'ADMIN', label: 'แอดมิน' },
+  { value: 'SUPERADMIN', label: 'ซุปเปอร์แอดมิน' },
+];
+
+interface ParticipantSubSelectorProps {
+  participantType: ParticipantType;
+  allUsers: { userId: number; firstName: string; lastName: string; employeeId: string }[];
+  allBranches: { branchId: number; name: string }[];
+  loading: boolean;
+  selectedUserIds: number[];
+  selectedBranchIds: number[];
+  selectedRoles: string[];
+  onUserToggle: (id: number) => void;
+  onBranchToggle: (id: number) => void;
+  onRoleToggle: (role: string) => void;
+  compact?: boolean;
+}
+
+function ParticipantSubSelector({
+  participantType, allUsers, allBranches, loading,
+  selectedUserIds, selectedBranchIds, selectedRoles,
+  onUserToggle, onBranchToggle, onRoleToggle, compact,
+}: ParticipantSubSelectorProps) {
+  const [search, setSearch] = useState('');
+  const labelClass = `block mt-2 mb-1 ${compact ? 'text-[10px]' : 'text-xs'} font-semibold text-gray-500 uppercase tracking-wider`;
+  const listClass = 'max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100 mt-1';
+
+  if (participantType === 'INDIVIDUAL') {
+    const filtered = allUsers.filter(u =>
+      !search ||
+      `${u.firstName} ${u.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
+      u.employeeId.toLowerCase().includes(search.toLowerCase())
+    );
+    return (
+      <div>
+        <label className={labelClass}>เลือกพนักงาน ({selectedUserIds.length} คนที่เลือก)</label>
+        <input
+          type="text"
+          placeholder="ค้นหาชื่อหรือรหัสพนักงาน..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:border-orange-500 focus:ring-1 focus:ring-orange-100 focus:outline-none"
+        />
+        {loading ? (
+          <div className="py-3 text-center text-xs text-gray-400">กำลังโหลด...</div>
+        ) : (
+          <div className={listClass}>
+            {filtered.length === 0
+              ? <div className="py-3 text-center text-xs text-gray-400">ไม่พบข้อมูล</div>
+              : filtered.map(u => (
+                <label key={u.userId} className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-orange-50 cursor-pointer">
+                  <input type="checkbox" checked={selectedUserIds.includes(u.userId)} onChange={() => onUserToggle(u.userId)} className="accent-orange-500 shrink-0" />
+                  <span className="text-xs text-gray-700 truncate flex-1">{u.firstName} {u.lastName}</span>
+                  <span className="text-[10px] text-gray-400 shrink-0">{u.employeeId}</span>
+                </label>
+              ))
+            }
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (participantType === 'BRANCH') {
+    return (
+      <div>
+        <label className={labelClass}>เลือกสาขา ({selectedBranchIds.length} สาขาที่เลือก)</label>
+        {loading ? (
+          <div className="py-3 text-center text-xs text-gray-400">กำลังโหลด...</div>
+        ) : (
+          <div className={listClass}>
+            {allBranches.length === 0
+              ? <div className="py-3 text-center text-xs text-gray-400">ไม่พบข้อมูลสาขา</div>
+              : allBranches.map(b => (
+                <label key={b.branchId} className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-orange-50 cursor-pointer">
+                  <input type="checkbox" checked={selectedBranchIds.includes(b.branchId)} onChange={() => onBranchToggle(b.branchId)} className="accent-orange-500 shrink-0" />
+                  <span className="text-xs text-gray-700 truncate">{b.name}</span>
+                </label>
+              ))
+            }
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (participantType === 'ROLE') {
+    return (
+      <div>
+        <label className={labelClass}>เลือกตำแหน่ง ({selectedRoles.length} ตำแหน่งที่เลือก)</label>
+        <div className={listClass}>
+          {ALL_ROLES.map(r => (
+            <label key={r.value} className="flex items-center gap-2 px-2.5 py-2 hover:bg-orange-50 cursor-pointer">
+              <input type="checkbox" checked={selectedRoles.includes(r.value)} onChange={() => onRoleToggle(r.value)} className="accent-orange-500 shrink-0" />
+              <span className="text-xs text-gray-700">{r.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return null;
 }
 
 // ── EventCard ──
@@ -802,9 +1077,19 @@ interface EventCardProps {
   onDateTimeChange: (name: string, val: string) => void;
   onVenueModeChange: (mode: 'checkin' | 'custom') => void;
   submitting: boolean;
+  // participant sub-selector props (for edit form)
+  allUsers: { userId: number; firstName: string; lastName: string; employeeId: string }[];
+  allBranches: { branchId: number; name: string }[];
+  loadingParticipants: boolean;
+  editSelectedUserIds: number[];
+  editSelectedBranchIds: number[];
+  editSelectedRoles: string[];
+  onEditUserToggle: (id: number) => void;
+  onEditBranchToggle: (id: number) => void;
+  onEditRoleToggle: (role: string) => void;
 }
 
-function EventCard({ event, locations, isEditing, editFormData, eventPhase, onEdit, onSave, onCancel, onDelete, onLocate, onInputChange, onDateTimeChange, onVenueModeChange, submitting }: EventCardProps) {
+function EventCard({ event, locations, isEditing, editFormData, eventPhase, onEdit, onSave, onCancel, onDelete, onLocate, onInputChange, onDateTimeChange, onVenueModeChange, submitting, allUsers, allBranches, loadingParticipants, editSelectedUserIds, editSelectedBranchIds, editSelectedRoles, onEditUserToggle, onEditBranchToggle, onEditRoleToggle }: EventCardProps) {
   if (isEditing) {
     return (
       <Card className="p-4 border-2 border-orange-300 md:col-span-2 lg:col-span-3">
@@ -910,6 +1195,21 @@ function EventCard({ event, locations, isEditing, editFormData, eventPhase, onEd
                 <option key={val} value={val}>{label}</option>
               ))}
             </select>
+            {/* Sub-selector for edit form */}
+            {(editFormData.participantType && editFormData.participantType !== 'ALL') && (
+              <ParticipantSubSelector
+                participantType={editFormData.participantType}
+                allUsers={allUsers}
+                allBranches={allBranches}
+                loading={loadingParticipants}
+                selectedUserIds={editSelectedUserIds}
+                selectedBranchIds={editSelectedBranchIds}
+                selectedRoles={editSelectedRoles}
+                onUserToggle={id => onEditUserToggle(id)}
+                onBranchToggle={id => onEditBranchToggle(id)}
+                onRoleToggle={role => onEditRoleToggle(role)}
+              />
+            )}
           </div>
           <div>
             <label className="block mb-1 text-xs font-semibold text-gray-600">สถานะ</label>

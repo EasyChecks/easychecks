@@ -4787,3 +4787,1477 @@
  *             employeeId:
  *               type: string
  */
+
+// ============================================================
+// 📍 LOCATION ENDPOINTS
+// ============================================================
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Locations
+ *     description: |
+ *       📍 API สำหรับจัดการสถานที่ (Locations)
+ *
+ *       ใช้กำหนดสถานที่สำหรับการเช็คอิน, สถานที่จัดงาน ของ Event, หรือสาขา
+ *
+ *       **ประเภทสถานที่ (locationType):** `OFFICE` `BRANCH` `EVENT` `SITE` `MEETING` `OTHER`
+ *
+ *       **สิทธิ์การเข้าถึง:**
+ *       - ดูรายการ / ค้นหา: ทุก Role ที่ login แล้ว
+ *       - สร้าง / แก้ไข / ลบ / กู้คืน: Admin / SuperAdmin เท่านั้น
+ */
+
+/**
+ * @swagger
+ * /api/locations:
+ *   post:
+ *     summary: สร้างสถานที่ใหม่ (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Locations]
+ *     description: |
+ *       สร้างสถานที่ใหม่สำหรับใช้กำหนดจุดเช็คอิน, สถานที่จัดงาน ของ Event หรือสาขา
+ *
+ *       **ต้องส่งมาด้วย:** `locationName`, `address`, `locationType`, `latitude`, `longitude`, `radius`
+ *
+ *       **ฟิลด์ที่ไม่บังคับ:** `description`, `isActive`
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - locationName
+ *               - address
+ *               - locationType
+ *               - latitude
+ *               - longitude
+ *               - radius
+ *             properties:
+ *               locationName:
+ *                 type: string
+ *                 example: "สำนักงานใหญ่"
+ *               address:
+ *                 type: string
+ *                 example: "123 ถ.สุขุมวิท แขวงคลองเตย กรุงเทพฯ 10110"
+ *               locationType:
+ *                 type: string
+ *                 enum: [OFFICE, BRANCH, EVENT, SITE, MEETING, OTHER]
+ *                 example: OFFICE
+ *                 description: ประเภทสถานที่
+ *               latitude:
+ *                 type: number
+ *                 format: float
+ *                 example: 13.7563
+ *                 description: พิกัด latitude
+ *               longitude:
+ *                 type: number
+ *                 format: float
+ *                 example: 100.5018
+ *                 description: พิกัด longitude
+ *               radius:
+ *                 type: number
+ *                 format: float
+ *                 example: 100
+ *                 minimum: 1
+ *                 description: "รัศมีเช็คอิน (เมตร) — จำเป็น ต้องมากกว่า 0 ระบบใช้ค่านี้ตรวจสอบว่าพนักงานอยู่ในพื้นที่เช็คอินหรือไม่"
+ *               description:
+ *                 type: string
+ *                 example: "สำนักงานใหญ่กรุงเทพ ชั้น 10"
+ *               isActive:
+ *                 type: boolean
+ *                 example: true
+ *                 description: เปิดใช้งานสถานที่นี้ (ค่าเริ่มต้น true)
+ *           examples:
+ *             สร้างสำนักงาน:
+ *               value:
+ *                 locationName: "สำนักงานใหญ่"
+ *                 address: "123 ถ.สุขุมวิท แขวงคลองเตย กรุงเทพฯ 10110"
+ *                 locationType: "OFFICE"
+ *                 latitude: 13.7563
+ *                 longitude: 100.5018
+ *                 radius: 150
+ *                 description: "สำนักงานใหญ่กรุงเทพ"
+ *                 isActive: true
+ *             สร้าง สถานที่จัดงาน ของ Event:
+ *               value:
+ *                 locationName: "ห้องประชุม A"
+ *                 address: "อาคาร B ชั้น 3"
+ *                 locationType: "MEETING"
+ *                 latitude: 13.7650
+ *                 longitude: 100.5380
+ *                 radius: 50
+ *     responses:
+ *       201:
+ *         description: สร้างสถานที่สำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *             example:
+ *               success: true
+ *               message: "สร้างสถานที่เรียบร้อยแล้ว"
+ *               data:
+ *                 locationId: 1
+ *                 locationName: "สำนักงานใหญ่"
+ *                 address: "123 ถ.สุขุมวิท กรุงเทพฯ"
+ *                 locationType: "OFFICE"
+ *                 latitude: 13.7563
+ *                 longitude: 100.5018
+ *                 radius: 150
+ *                 isActive: true
+ *                 createdAt: "2026-03-10T08:00:00.000Z"
+ *       400:
+ *         description: |
+ *           Bad Request — สาเหตุที่เป็นไปได้:
+ *           - ไม่ครบ field ที่จำเป็น
+ *           - locationType ไม่ถูกต้อง
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ *   get:
+ *     summary: ดึงรายการสถานที่ทั้งหมด
+ *     tags: [Locations]
+ *     description: |
+ *       ดึงรายการสถานที่ทั้งหมดพร้อม pagination และ filter
+ *
+ *       **สิทธิ์:** ทุก Role ที่ login แล้ว
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: ค้นหาตามชื่อสถานที่หรือที่อยู่
+ *         example: "สำนักงาน"
+ *       - in: query
+ *         name: locationType
+ *         schema:
+ *           type: string
+ *           enum: [OFFICE, BRANCH, EVENT, SITE, MEETING, OTHER]
+ *         description: กรองตามประเภทสถานที่
+ *       - in: query
+ *         name: isActive
+ *         schema:
+ *           type: boolean
+ *         description: กรองตามสถานะ (true = เปิดใช้งาน)
+ *       - in: query
+ *         name: skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: จำนวน record ที่ข้าม (pagination)
+ *       - in: query
+ *         name: take
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: จำนวน record ที่ต้องการ (pagination)
+ *     responses:
+ *       200:
+ *         description: รายการสถานที่
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 items:
+ *                   - locationId: 1
+ *                     locationName: "สำนักงานใหญ่"
+ *                     locationType: "OFFICE"
+ *                     latitude: 13.7563
+ *                     longitude: 100.5018
+ *                     radius: 150
+ *                     isActive: true
+ *                 total: 1
+ *                 skip: 0
+ *                 take: 10
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/locations/nearby:
+ *   get:
+ *     summary: ค้นหาสถานที่ใกล้เคียง
+ *     tags: [Locations]
+ *     description: |
+ *       ค้นหาสถานที่ที่อยู่ในรัศมีที่กำหนดจากพิกัดที่ส่งมา
+ *
+ *       **ต้องส่งมาด้วย:** `latitude`, `longitude`
+ *
+ *       **ไม่บังคับ:** `radiusKm` (ค่าเริ่มต้น: 5 กิโลเมตร)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: latitude
+ *         required: true
+ *         schema:
+ *           type: number
+ *           format: float
+ *         description: พิกัด latitude ของตำแหน่งปัจจุบัน
+ *         example: 13.7563
+ *       - in: query
+ *         name: longitude
+ *         required: true
+ *         schema:
+ *           type: number
+ *           format: float
+ *         description: พิกัด longitude ของตำแหน่งปัจจุบัน
+ *         example: 100.5018
+ *       - in: query
+ *         name: radiusKm
+ *         schema:
+ *           type: number
+ *           format: float
+ *           default: 5
+ *         description: รัศมีค้นหา (กิโลเมตร, ค่าเริ่มต้น 5)
+ *     responses:
+ *       200:
+ *         description: รายการสถานที่ใกล้เคียง
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 - locationId: 1
+ *                   locationName: "สำนักงานใหญ่"
+ *                   latitude: 13.7563
+ *                   longitude: 100.5018
+ *                   distanceKm: 0.12
+ *       400:
+ *         description: ต้องระบุ latitude และ longitude
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/locations/statistics:
+ *   get:
+ *     summary: ดึงสถิติสถานที่ (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Locations]
+ *     description: |
+ *       ดึงสถิติภาพรวมของสถานที่ทั้งหมด เช่น จำนวนแยกตามประเภท, สถิติการใช้งาน
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin เท่านั้น
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: สถิติสถานที่
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 total: 10
+ *                 active: 8
+ *                 inactive: 2
+ *                 byType:
+ *                   OFFICE: 3
+ *                   BRANCH: 4
+ *                   EVENT: 2
+ *                   MEETING: 1
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ */
+
+/**
+ * @swagger
+ * /api/locations/{id}:
+ *   get:
+ *     summary: ดึงสถานที่ด้วย ID
+ *     tags: [Locations]
+ *     description: ดึงข้อมูลสถานที่เดียวตาม ID
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Location ID
+ *         example: 1
+ *     responses:
+ *       200:
+ *         description: ข้อมูลสถานที่
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 locationId: 1
+ *                 locationName: "สำนักงานใหญ่"
+ *                 address: "123 ถ.สุขุมวิท กรุงเทพฯ"
+ *                 locationType: "OFFICE"
+ *                 latitude: 13.7563
+ *                 longitude: 100.5018
+ *                 radius: 150
+ *                 isActive: true
+ *                 createdAt: "2026-03-10T08:00:00.000Z"
+ *       401:
+ *         description: ไม่ได้ login
+ *       404:
+ *         description: ไม่พบสถานที่
+ *   put:
+ *     summary: แก้ไขสถานที่ (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Locations]
+ *     description: |
+ *       แก้ไขข้อมูลสถานที่ ส่งเฉพาะ field ที่ต้องการเปลี่ยนแปลง
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin เท่านั้น
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               locationName:
+ *                 type: string
+ *                 example: "สำนักงานใหญ่ (ปรับปรุงใหม่)"
+ *               address:
+ *                 type: string
+ *                 example: "123 ถ.สุขุมวิท กรุงเทพฯ 10110"
+ *               locationType:
+ *                 type: string
+ *                 enum: [OFFICE, BRANCH, EVENT, SITE, MEETING, OTHER]
+ *               latitude:
+ *                 type: number
+ *                 format: float
+ *                 example: 13.7563
+ *               longitude:
+ *                 type: number
+ *                 format: float
+ *                 example: 100.5018
+ *               radius:
+ *                 type: number
+ *                 format: float
+ *                 example: 200
+ *               description:
+ *                 type: string
+ *               isActive:
+ *                 type: boolean
+ *                 example: true
+ *           examples:
+ *             แก้ไขรัศมี:
+ *               value:
+ *                 radius: 200
+ *                 description: "ขยายรัศมีเช็คอิน"
+ *             ปิดการใช้งาน:
+ *               value:
+ *                 isActive: false
+ *     responses:
+ *       200:
+ *         description: แก้ไขสถานที่สำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "แก้ไขสถานที่เรียบร้อยแล้ว"
+ *               data:
+ *                 locationId: 1
+ *                 locationName: "สำนักงานใหญ่ (ปรับปรุงใหม่)"
+ *                 radius: 200
+ *                 isActive: true
+ *                 updatedAt: "2026-03-10T09:00:00.000Z"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ *       404:
+ *         description: ไม่พบสถานที่
+ *   delete:
+ *     summary: ลบสถานที่ (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Locations]
+ *     description: |
+ *       ลบสถานที่แบบ Soft Delete (สามารถกู้คืนได้ภายหลัง)
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin เท่านั้น
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               deleteReason:
+ *                 type: string
+ *                 example: "สาขาปิดตัว"
+ *     responses:
+ *       200:
+ *         description: ลบสถานที่สำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "ลบสถานที่เรียบร้อยแล้ว"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ *       404:
+ *         description: ไม่พบสถานที่
+ */
+
+/**
+ * @swagger
+ * /api/locations/{id}/restore:
+ *   post:
+ *     summary: กู้คืนสถานที่ที่ถูกลบ (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Locations]
+ *     description: |
+ *       กู้คืนสถานที่ที่ถูก Soft Delete ให้กลับมาใช้งานได้
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin เท่านั้น
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *     responses:
+ *       200:
+ *         description: กู้คืนสถานที่สำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "กู้คืนสถานที่เรียบร้อยแล้ว"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ *       404:
+ *         description: ไม่พบสถานที่
+ */
+
+// ============================================================
+// ⏰ LATE REQUEST ENDPOINTS
+// ============================================================
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Late Requests
+ *     description: |
+ *       ⏰ API สำหรับจัดการคำขอมาสาย (Late Requests)
+ *
+ *       พนักงานยื่นคำขอชี้แจงเหตุผลการมาสาย Admin ตรวจสอบและ อนุมัติ/ปฏิเสธ
+ *
+ *       **สถานะ:** `PENDING` → `APPROVED` / `REJECTED`
+ *
+ *       **สิทธิ์การเข้าถึง:**
+ *       - สร้าง / ดูของตัวเอง / แก้ไข / ลบ (เฉพาะ PENDING): ทุก Role ที่ login แล้ว
+ *       - ดูทั้งหมด / อนุมัติ / ปฏิเสธ: Admin / SuperAdmin / Manager
+ */
+
+/**
+ * @swagger
+ * /api/late-requests:
+ *   post:
+ *     summary: สร้างคำขอมาสายใหม่
+ *     tags: [Late Requests]
+ *     description: |
+ *       ยื่นคำขอชี้แจงเหตุผลการมาสาย
+ *
+ *       **ต้องส่งมาด้วย:** `requestDate`, `scheduledTime`, `actualTime`, `reason`
+ *
+ *       **ไม่บังคับ:** `attendanceId` (ผูกกับ attendance record), `attachmentUrl`
+ *
+ *       รูปแบบเวลา: `HH:MM` เช่น `08:30`, `09:15`
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - requestDate
+ *               - scheduledTime
+ *               - actualTime
+ *               - reason
+ *             properties:
+ *               attendanceId:
+ *                 type: integer
+ *                 description: ID ของ attendance record (ถ้ามี)
+ *                 example: 42
+ *               requestDate:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-03-10"
+ *                 description: วันที่มาสาย
+ *               scheduledTime:
+ *                 type: string
+ *                 example: "08:30"
+ *                 description: เวลาที่กำหนดเข้างาน (HH:MM)
+ *               actualTime:
+ *                 type: string
+ *                 example: "09:15"
+ *                 description: เวลาที่มาถึงจริง (HH:MM)
+ *               reason:
+ *                 type: string
+ *                 example: "รถติดบนทางด่วน"
+ *                 description: เหตุผลการมาสาย
+ *               attachmentUrl:
+ *                 type: string
+ *                 example: "https://storage.example.com/evidence.jpg"
+ *                 description: URL ไฟล์หลักฐาน (ถ้ามี)
+ *           examples:
+ *             คำขอมาสายทั่วไป:
+ *               value:
+ *                 requestDate: "2026-03-10"
+ *                 scheduledTime: "08:30"
+ *                 actualTime: "09:15"
+ *                 reason: "รถติดบนทางด่วน"
+ *             คำขอพร้อมหลักฐาน:
+ *               value:
+ *                 attendanceId: 42
+ *                 requestDate: "2026-03-10"
+ *                 scheduledTime: "08:30"
+ *                 actualTime: "09:45"
+ *                 reason: "อุบัติเหตุบนถนน"
+ *                 attachmentUrl: "https://storage.example.com/evidence.jpg"
+ *     responses:
+ *       201:
+ *         description: สร้างคำขอมาสายสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "สร้างคำขอมาสายเรียบร้อยแล้ว"
+ *               data:
+ *                 lateRequestId: 10
+ *                 userId: 5
+ *                 requestDate: "2026-03-10"
+ *                 scheduledTime: "08:30"
+ *                 actualTime: "09:15"
+ *                 reason: "รถติดบนทางด่วน"
+ *                 status: "PENDING"
+ *                 createdAt: "2026-03-10T09:20:00.000Z"
+ *       400:
+ *         description: |
+ *           Bad Request — สาเหตุที่เป็นไปได้:
+ *           - ไม่ครบ field ที่จำเป็น
+ *           - รูปแบบ date/time ไม่ถูกต้อง
+ *       401:
+ *         description: ไม่ได้ login
+ *   get:
+ *     summary: ดึงคำขอมาสายทั้งหมด (Admin/Manager เท่านั้น)
+ *     tags: [Late Requests]
+ *     description: |
+ *       ดึงคำขอมาสายของพนักงานทุกคน พร้อม filter และ pagination
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin / Manager เท่านั้น
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [PENDING, APPROVED, REJECTED]
+ *         description: กรองตามสถานะ (ถ้าไม่ส่งจะดึงทุกสถานะ)
+ *       - in: query
+ *         name: skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: จำนวน record ที่ข้าม
+ *       - in: query
+ *         name: take
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: จำนวน record ที่ต้องการ
+ *     responses:
+ *       200:
+ *         description: รายการคำขอมาสายทั้งหมด
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 items:
+ *                   - lateRequestId: 10
+ *                     userId: 5
+ *                     requestDate: "2026-03-10"
+ *                     scheduledTime: "08:30"
+ *                     actualTime: "09:15"
+ *                     reason: "รถติด"
+ *                     status: "PENDING"
+ *                 total: 1
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/Manager
+ */
+
+/**
+ * @swagger
+ * /api/late-requests/my:
+ *   get:
+ *     summary: ดึงคำขอมาสายของตัวเอง
+ *     tags: [Late Requests]
+ *     description: |
+ *       ดึงรายการคำขอมาสายของผู้ใช้ที่ login อยู่ พร้อม filter และ pagination
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [PENDING, APPROVED, REJECTED]
+ *         description: กรองตามสถานะ
+ *       - in: query
+ *         name: skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *       - in: query
+ *         name: take
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: รายการคำขอมาสายของฉัน
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 items:
+ *                   - lateRequestId: 10
+ *                     requestDate: "2026-03-10"
+ *                     scheduledTime: "08:30"
+ *                     actualTime: "09:15"
+ *                     reason: "รถติด"
+ *                     status: "PENDING"
+ *                 total: 1
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/late-requests/my/statistics:
+ *   get:
+ *     summary: ดึงสถิติการมาสายของตัวเอง
+ *     tags: [Late Requests]
+ *     description: |
+ *       ดึงสรุปสถิติการมาสายของผู้ใช้ที่ login อยู่ เช่น จำนวนครั้งแยกตามสถานะ
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: สถิติการมาสาย
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 total: 5
+ *                 pending: 1
+ *                 approved: 3
+ *                 rejected: 1
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/late-requests/{id}:
+ *   get:
+ *     summary: ดึงคำขอมาสายด้วย ID
+ *     tags: [Late Requests]
+ *     description: ดึงข้อมูลคำขอมาสายเดียวตาม ID
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 10
+ *     responses:
+ *       200:
+ *         description: ข้อมูลคำขอมาสาย
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 lateRequestId: 10
+ *                 userId: 5
+ *                 requestDate: "2026-03-10"
+ *                 scheduledTime: "08:30"
+ *                 actualTime: "09:15"
+ *                 reason: "รถติด"
+ *                 status: "PENDING"
+ *                 adminComment: null
+ *                 rejectionReason: null
+ *                 createdAt: "2026-03-10T09:20:00.000Z"
+ *       401:
+ *         description: ไม่ได้ login
+ *       404:
+ *         description: ไม่พบคำขอมาสาย
+ *   put:
+ *     summary: แก้ไขคำขอมาสาย (เจ้าของหรือ Admin, เฉพาะสถานะ PENDING)
+ *     tags: [Late Requests]
+ *     description: |
+ *       แก้ไขข้อมูลคำขอมาสาย ทำได้เฉพาะเมื่อสถานะเป็น `PENDING` เท่านั้น
+ *
+ *       **สิทธิ์:** เจ้าของคำขอ หรือ Admin / SuperAdmin
+ *
+ *       ส่งเฉพาะ field ที่ต้องการเปลี่ยนแปลง
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 10
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               requestDate:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-03-10"
+ *               scheduledTime:
+ *                 type: string
+ *                 example: "08:30"
+ *               actualTime:
+ *                 type: string
+ *                 example: "09:20"
+ *               reason:
+ *                 type: string
+ *                 example: "รถติดมาก ไม่ใช่แค่รถติดปกติ"
+ *               attachmentUrl:
+ *                 type: string
+ *                 example: "https://storage.example.com/new-evidence.jpg"
+ *           examples:
+ *             แก้ไขเหตุผล:
+ *               value:
+ *                 reason: "รถเสียระหว่างทาง"
+ *                 attachmentUrl: "https://storage.example.com/car-breakdown.jpg"
+ *     responses:
+ *       200:
+ *         description: แก้ไขคำขอมาสายสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "แก้ไขคำขอมาสายเรียบร้อยแล้ว"
+ *               data:
+ *                 lateRequestId: 10
+ *                 reason: "รถเสียระหว่างทาง"
+ *                 status: "PENDING"
+ *                 updatedAt: "2026-03-10T10:00:00.000Z"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์แก้ไข
+ *       404:
+ *         description: ไม่พบคำขอมาสาย
+ *   delete:
+ *     summary: ลบคำขอมาสาย (เจ้าของหรือ Admin, เฉพาะสถานะ PENDING)
+ *     tags: [Late Requests]
+ *     description: |
+ *       ลบคำขอมาสาย ทำได้เฉพาะเมื่อสถานะเป็น `PENDING` เท่านั้น
+ *
+ *       **สิทธิ์:** เจ้าของคำขอ หรือ Admin / SuperAdmin
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 10
+ *     responses:
+ *       200:
+ *         description: ลบคำขอมาสายสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "ลบคำขอมาสายเรียบร้อยแล้ว"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ลบ
+ *       404:
+ *         description: ไม่พบคำขอมาสาย
+ */
+
+/**
+ * @swagger
+ * /api/late-requests/{id}/approve:
+ *   post:
+ *     summary: อนุมัติคำขอมาสาย (Admin/Manager เท่านั้น)
+ *     tags: [Late Requests]
+ *     description: |
+ *       อนุมัติคำขอมาสาย สถานะจะเปลี่ยนจาก `PENDING` เป็น `APPROVED`
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin / Manager เท่านั้น
+ *
+ *       **ไม่บังคับ:** `adminComment` (หมายเหตุจาก Admin)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 10
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               adminComment:
+ *                 type: string
+ *                 example: "อนุมัติ - เหตุสุดวิสัย"
+ *     responses:
+ *       200:
+ *         description: อนุมัติคำขอมาสายสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "อนุมัติคำขอมาสายเรียบร้อยแล้ว"
+ *               data:
+ *                 lateRequestId: 10
+ *                 status: "APPROVED"
+ *                 adminComment: "อนุมัติ - เหตุสุดวิสัย"
+ *                 approvedByUserId: 1
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์อนุมัติ — ต้องเป็น Admin/Manager
+ *       404:
+ *         description: ไม่พบคำขอมาสาย
+ */
+
+/**
+ * @swagger
+ * /api/late-requests/{id}/reject:
+ *   post:
+ *     summary: ปฏิเสธคำขอมาสาย (Admin/Manager เท่านั้น)
+ *     tags: [Late Requests]
+ *     description: |
+ *       ปฏิเสธคำขอมาสาย สถานะจะเปลี่ยนจาก `PENDING` เป็น `REJECTED`
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin / Manager เท่านั้น
+ *
+ *       **ต้องส่งมาด้วย:** `rejectionReason`
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 10
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - rejectionReason
+ *             properties:
+ *               rejectionReason:
+ *                 type: string
+ *                 example: "ไม่มีหลักฐานประกอบ"
+ *     responses:
+ *       200:
+ *         description: ปฏิเสธคำขอมาสายสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "ปฏิเสธคำขอมาสายเรียบร้อยแล้ว"
+ *               data:
+ *                 lateRequestId: 10
+ *                 status: "REJECTED"
+ *                 rejectionReason: "ไม่มีหลักฐานประกอบ"
+ *       400:
+ *         description: ต้องระบุ rejectionReason
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ปฏิเสธ — ต้องเป็น Admin/Manager
+ *       404:
+ *         description: ไม่พบคำขอมาสาย
+ */
+
+// ============================================================
+// 🏖️ LEAVE REQUEST ENDPOINTS
+// ============================================================
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Leave Requests
+ *     description: |
+ *       🏖️ API สำหรับจัดการใบลา (Leave Requests)
+ *
+ *       พนักงานยื่นใบลาประเภทต่าง ๆ Admin ตรวจสอบและ อนุมัติ/ปฏิเสธ
+ *       ระบบจะนับเฉพาะวันทำงาน (จันทร์-ศุกร์) และตรวจสอบวันลาคงเหลือโดยอัตโนมัติ
+ *
+ *       **ประเภทการลา:** `SICK` `PERSONAL` `VACATION` `MILITARY` `TRAINING` `MATERNITY` `STERILIZATION` `ORDINATION`
+ *
+ *       **สถานะ:** `PENDING` → `APPROVED` / `REJECTED`
+ *
+ *       **สิทธิ์การเข้าถึง:**
+ *       - สร้าง / ดูของตัวเอง / แก้ไข / ลบ (เฉพาะ PENDING): ทุก Role ที่ login แล้ว
+ *       - ดูทั้งหมด / อนุมัติ / ปฏิเสธ: Admin / SuperAdmin / Manager
+ */
+
+/**
+ * @swagger
+ * /api/leave-requests:
+ *   post:
+ *     summary: สร้างใบลาใหม่
+ *     tags: [Leave Requests]
+ *     description: |
+ *       ยื่นใบลาประเภทต่าง ๆ ระบบจะนับเฉพาะวันทำงาน (จันทร์-ศุกร์)
+ *       และหักออกจากโควต้าวันลาอัตโนมัติเมื่อได้รับการอนุมัติ
+ *
+ *       **ต้องส่งมาด้วย:** `leaveType`, `startDate`, `endDate`
+ *
+ *       **ไม่บังคับ:** `reason`, `attachmentUrl`, `medicalCertificateUrl`
+ *
+ *       **หมายเหตุ:** ลา SICK ≥ 3 วัน ต้องแนบใบรับรองแพทย์ใน `medicalCertificateUrl`
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - leaveType
+ *               - startDate
+ *               - endDate
+ *             properties:
+ *               leaveType:
+ *                 type: string
+ *                 enum: [SICK, PERSONAL, VACATION, MILITARY, TRAINING, MATERNITY, STERILIZATION, ORDINATION]
+ *                 example: SICK
+ *                 description: ประเภทการลา
+ *               startDate:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-03-15"
+ *                 description: วันที่เริ่มลา
+ *               endDate:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-03-16"
+ *                 description: วันที่สิ้นสุดการลา
+ *               reason:
+ *                 type: string
+ *                 example: "ป่วยไข้หวัด"
+ *               attachmentUrl:
+ *                 type: string
+ *                 example: "https://storage.example.com/doc.pdf"
+ *                 description: URL ไฟล์หลักฐาน
+ *               medicalCertificateUrl:
+ *                 type: string
+ *                 example: "https://storage.example.com/medical-cert.pdf"
+ *                 description: URL ใบรับรองแพทย์ (จำเป็นสำหรับ SICK ≥ 3 วัน)
+ *           examples:
+ *             ลาป่วย:
+ *               value:
+ *                 leaveType: "SICK"
+ *                 startDate: "2026-03-15"
+ *                 endDate: "2026-03-16"
+ *                 reason: "ป่วยไข้หวัด"
+ *             ลาพักร้อน:
+ *               value:
+ *                 leaveType: "VACATION"
+ *                 startDate: "2026-04-01"
+ *                 endDate: "2026-04-03"
+ *                 reason: "พักผ่อนประจำปี"
+ *     responses:
+ *       201:
+ *         description: สร้างใบลาสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "สร้างใบลาเรียบร้อยแล้ว"
+ *               data:
+ *                 leaveRequestId: 20
+ *                 userId: 5
+ *                 leaveType: "SICK"
+ *                 startDate: "2026-03-15"
+ *                 endDate: "2026-03-16"
+ *                 totalDays: 2
+ *                 status: "PENDING"
+ *                 createdAt: "2026-03-10T08:00:00.000Z"
+ *       400:
+ *         description: |
+ *           Bad Request — สาเหตุที่เป็นไปได้:
+ *           - ไม่ครบ field ที่จำเป็น
+ *           - leaveType ไม่ถูกต้อง
+ *           - วันลาซ้อนทับกับใบลาที่มีอยู่
+ *           - วันลาคงเหลือไม่เพียงพอ
+ *       401:
+ *         description: ไม่ได้ login
+ *   get:
+ *     summary: ดึงใบลาทั้งหมด (Admin/Manager เท่านั้น)
+ *     tags: [Leave Requests]
+ *     description: |
+ *       ดึงใบลาของพนักงานทุกคน พร้อม filter และ pagination
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin / Manager เท่านั้น
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [PENDING, APPROVED, REJECTED]
+ *         description: กรองตามสถานะ (ถ้าไม่ส่งจะดึงทุกสถานะ)
+ *       - in: query
+ *         name: skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *       - in: query
+ *         name: take
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: รายการใบลาทั้งหมด
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 items:
+ *                   - leaveRequestId: 20
+ *                     userId: 5
+ *                     leaveType: "SICK"
+ *                     startDate: "2026-03-15"
+ *                     endDate: "2026-03-16"
+ *                     totalDays: 2
+ *                     status: "PENDING"
+ *                 total: 1
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/Manager
+ */
+
+/**
+ * @swagger
+ * /api/leave-requests/my:
+ *   get:
+ *     summary: ดึงใบลาของตัวเอง
+ *     tags: [Leave Requests]
+ *     description: |
+ *       ดึงรายการใบลาของผู้ใช้ที่ login อยู่ พร้อม filter และ pagination
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [PENDING, APPROVED, REJECTED]
+ *         description: กรองตามสถานะ
+ *       - in: query
+ *         name: skip
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *       - in: query
+ *         name: take
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: รายการใบลาของฉัน
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 items:
+ *                   - leaveRequestId: 20
+ *                     leaveType: "SICK"
+ *                     startDate: "2026-03-15"
+ *                     endDate: "2026-03-16"
+ *                     totalDays: 2
+ *                     status: "APPROVED"
+ *                 total: 1
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/leave-requests/my/statistics:
+ *   get:
+ *     summary: ดึงสถิติการลาของตัวเอง
+ *     tags: [Leave Requests]
+ *     description: |
+ *       ดึงสรุปสถิติการลาของผู้ใช้ที่ login อยู่ แยกตามประเภทการลาและสถานะ
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: สถิติการลา
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 total: 8
+ *                 pending: 1
+ *                 approved: 6
+ *                 rejected: 1
+ *                 byType:
+ *                   SICK: 3
+ *                   VACATION: 2
+ *                   PERSONAL: 3
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/leave-requests/my/quota:
+ *   get:
+ *     summary: ดึงโควต้าวันลาคงเหลือของตัวเอง
+ *     tags: [Leave Requests]
+ *     description: |
+ *       ดึงโควต้าวันลาคงเหลือทุกประเภทของผู้ใช้ที่ login อยู่
+ *       ระบบคำนวณเฉพาะวันทำงาน (จันทร์-ศุกร์)
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: โควต้าวันลาคงเหลือทุกประเภท
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 SICK:
+ *                   total: 30
+ *                   used: 3
+ *                   remaining: 27
+ *                 PERSONAL:
+ *                   total: 3
+ *                   used: 1
+ *                   remaining: 2
+ *                 VACATION:
+ *                   total: 6
+ *                   used: 2
+ *                   remaining: 4
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/leave-requests/{id}:
+ *   get:
+ *     summary: ดึงใบลาด้วย ID
+ *     tags: [Leave Requests]
+ *     description: ดึงข้อมูลใบลาเดียวตาม ID
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 20
+ *     responses:
+ *       200:
+ *         description: ข้อมูลใบลา
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 leaveRequestId: 20
+ *                 userId: 5
+ *                 leaveType: "SICK"
+ *                 startDate: "2026-03-15"
+ *                 endDate: "2026-03-16"
+ *                 totalDays: 2
+ *                 reason: "ป่วยไข้หวัด"
+ *                 status: "PENDING"
+ *                 adminComment: null
+ *                 rejectionReason: null
+ *                 createdAt: "2026-03-10T08:00:00.000Z"
+ *       401:
+ *         description: ไม่ได้ login
+ *       404:
+ *         description: ไม่พบใบลา
+ *   put:
+ *     summary: แก้ไขใบลา (เจ้าของหรือ Admin, เฉพาะสถานะ PENDING)
+ *     tags: [Leave Requests]
+ *     description: |
+ *       แก้ไขข้อมูลใบลา ทำได้เฉพาะเมื่อสถานะเป็น `PENDING` เท่านั้น
+ *
+ *       **สิทธิ์:** เจ้าของใบลา หรือ Admin / SuperAdmin
+ *
+ *       ส่งเฉพาะ field ที่ต้องการเปลี่ยนแปลง
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 20
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               leaveType:
+ *                 type: string
+ *                 enum: [SICK, PERSONAL, VACATION, MILITARY, TRAINING, MATERNITY, STERILIZATION, ORDINATION]
+ *               startDate:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-03-15"
+ *               endDate:
+ *                 type: string
+ *                 format: date
+ *                 example: "2026-03-17"
+ *               reason:
+ *                 type: string
+ *                 example: "ป่วยหนักกว่าที่คิด"
+ *               attachmentUrl:
+ *                 type: string
+ *                 example: "https://storage.example.com/updated-doc.pdf"
+ *           examples:
+ *             ขยายวันลา:
+ *               value:
+ *                 endDate: "2026-03-17"
+ *                 reason: "ป่วยหนักกว่าที่คิด"
+ *     responses:
+ *       200:
+ *         description: แก้ไขใบลาสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "แก้ไขใบลาเรียบร้อยแล้ว"
+ *               data:
+ *                 leaveRequestId: 20
+ *                 endDate: "2026-03-17"
+ *                 totalDays: 3
+ *                 status: "PENDING"
+ *                 updatedAt: "2026-03-10T10:00:00.000Z"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์แก้ไข
+ *       404:
+ *         description: ไม่พบใบลา
+ *   delete:
+ *     summary: ลบใบลา (เจ้าของหรือ Admin, เฉพาะสถานะ PENDING)
+ *     tags: [Leave Requests]
+ *     description: |
+ *       ลบใบลา ทำได้เฉพาะเมื่อสถานะเป็น `PENDING` เท่านั้น
+ *
+ *       **สิทธิ์:** เจ้าของใบลา หรือ Admin / SuperAdmin
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 20
+ *     responses:
+ *       200:
+ *         description: ลบใบลาสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "ลบใบลาเรียบร้อยแล้ว"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ลบ
+ *       404:
+ *         description: ไม่พบใบลา
+ */
+
+/**
+ * @swagger
+ * /api/leave-requests/{id}/approve:
+ *   post:
+ *     summary: อนุมัติใบลา (Admin/Manager เท่านั้น)
+ *     tags: [Leave Requests]
+ *     description: |
+ *       อนุมัติใบลา สถานะจะเปลี่ยนจาก `PENDING` เป็น `APPROVED`
+ *       และระบบจะหักวันลาออกจากโควต้าอัตโนมัติ
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin / Manager เท่านั้น
+ *
+ *       **ไม่บังคับ:** `adminComment` (หมายเหตุจาก Admin)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 20
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               adminComment:
+ *                 type: string
+ *                 example: "อนุมัติ"
+ *     responses:
+ *       200:
+ *         description: อนุมัติใบลาสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "อนุมัติใบลาเรียบร้อยแล้ว"
+ *               data:
+ *                 leaveRequestId: 20
+ *                 status: "APPROVED"
+ *                 adminComment: "อนุมัติ"
+ *                 approvedByUserId: 1
+ *                 approvedAt: "2026-03-11T08:00:00.000Z"
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์อนุมัติ — ต้องเป็น Admin/Manager
+ *       404:
+ *         description: ไม่พบใบลา
+ */
+
+/**
+ * @swagger
+ * /api/leave-requests/{id}/reject:
+ *   post:
+ *     summary: ปฏิเสธใบลา (Admin/Manager เท่านั้น)
+ *     tags: [Leave Requests]
+ *     description: |
+ *       ปฏิเสธใบลา สถานะจะเปลี่ยนจาก `PENDING` เป็น `REJECTED`
+ *
+ *       **สิทธิ์:** Admin / SuperAdmin / Manager เท่านั้น
+ *
+ *       **ต้องส่งมาด้วย:** `rejectionReason`
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 20
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - rejectionReason
+ *             properties:
+ *               rejectionReason:
+ *                 type: string
+ *                 example: "วันลาหมดแล้ว"
+ *     responses:
+ *       200:
+ *         description: ปฏิเสธใบลาสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "ปฏิเสธใบลาเรียบร้อยแล้ว"
+ *               data:
+ *                 leaveRequestId: 20
+ *                 status: "REJECTED"
+ *                 rejectionReason: "วันลาหมดแล้ว"
+ *       400:
+ *         description: ต้องระบุ rejectionReason
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ปฏิเสธ — ต้องเป็น Admin/Manager
+ *       404:
+ *         description: ไม่พบใบลา
+ */

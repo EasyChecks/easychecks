@@ -516,7 +516,11 @@ export default function LocationManagement() {
                   onCancel={handleCancelEdit}
                   onDelete={() => handleDeleteLocation(location)}
                   onInputChange={handleInputChange}
-                  onLocate={() => setMapFlyTo({ lat: location.latitude, lng: location.longitude, zoom: 16, seq: ++mapFlySeq.current })}
+                  onLocate={() => {
+                    setMapFlyTo({ lat: location.latitude, lng: location.longitude, zoom: 16, seq: ++mapFlySeq.current });
+                    // The layout uses <main> with overflow-y-auto, so scroll that element
+                    (document.querySelector('main') ?? document.documentElement).scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
                   submitting={submitting}
                 />
               ))}

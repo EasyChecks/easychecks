@@ -79,21 +79,21 @@ export interface SearchEventParams {
  *            แยกการเพิ่มผู้เข้าร่วมออกมาเพราะมีหลายประเภท (ALL, INDIVIDUAL, BRANCH, ROLE)
  */
 async function createEvent(data: CreateEventDTO): Promise<Event> {
-  // 🔍 ตรวจสอบว่าสถานที่มีอยู่จริงและยังไม่ถูกลบ
-  // เพราะต้องการป้องกันการสร้างกิจกรรมในสถานที่ที่ไม่มีหรือถูกลบแล้ว
-  // SQL: SELECT * FROM Location WHERE locationId = ? AND deletedAt IS NULL
-  const location = await prisma.location.findUnique({
-    where: { locationId: data.locationId },
-  });
+  // 🔍 ตรวจสอบสถานที่เฉพาะ Mode A (locationId) เท่านั้น
+  // Mode B (custom venue) ไม่มี locationId จึงข้ามส่วนนี้ไป
+  if (data.locationId) {
+    const location = await prisma.location.findUnique({
+      where: { locationId: data.locationId },
+    });
 
-  if (!location) {
-    throw new Error('ไม่พบสถานที่');
-  }
+    if (!location) {
+      throw new Error('ไม่พบสถานที่');
+    }
 
-  // 🚫 ตรวจสอบว่าสถานที่ยังใช้งานได้อยู่ (ไม่ถูก soft delete)
-  // เพราะถ้าสถานที่ถูกลบแล้ว จะทำให้กิจกรรมไม่สามารถใช้งานได้
-  if (location.deletedAt) {
-    throw new Error('ไม่สามารถสร้างกิจกรรมในสถานที่ที่ถูกลบแล้ว');
+    // 🚫 ตรวจสอบว่าสถานที่ยังใช้งานได้อยู่ (ไม่ถูก soft delete)
+    if (location.deletedAt) {
+      throw new Error('ไม่สามารถสร้างกิจกรรมในสถานที่ที่ถูกลบแล้ว');
+    }
   }
 
   // ⏰ ตรวจสอบความถูกต้องของวันเวลา

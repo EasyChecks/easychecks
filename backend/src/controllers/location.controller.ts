@@ -34,11 +34,15 @@ export const createLocation = asyncHandler(async (req: Request, res: Response) =
     longitude,
     radius,
     description,
-    isActive,
+    isActi  ve,
   } = req.body;
 
-  if (!locationName || !locationType || latitude === undefined || longitude === undefined) {
-    throw new BadRequestError('กรุณาระบุ locationName, locationType, latitude, longitude');
+  if (!locationName || !locationType || latitude === undefined || longitude === undefined || radius === undefined || radius === null) {
+    throw new BadRequestError('กรุณาระบุ locationName, locationType, latitude, longitude, radius');
+  }
+
+  if (parseFloat(radius) <= 0) {
+    throw new BadRequestError('radius ต้องมากกว่า 0');
   }
 
   const validTypes = ['OFFICE', 'BRANCH', 'EVENT', 'SITE', 'MEETING', 'OTHER'];
@@ -53,7 +57,7 @@ export const createLocation = asyncHandler(async (req: Request, res: Response) =
     locationType,
     latitude: parseFloat(latitude),
     longitude: parseFloat(longitude),
-    radius: radius ? parseFloat(radius) : undefined,
+    radius: parseFloat(radius),
     description,
     isActive,
   });
@@ -142,7 +146,7 @@ export const getLocationById = asyncHandler(async (req: Request, res: Response) 
 });
 
 /**
- * PATCH /api/locations/:id
+ * PUT /api/locations/:id
  * แก้ไขสถานที่ (Admin only)
  */
 export const updateLocation = asyncHandler(async (req: Request, res: Response) => {

@@ -143,7 +143,7 @@ export const getLeaveRequestById = asyncHandler(async (req: Request, res: Respon
 });
 
 /**
- * PATCH /api/leave-requests/:id
+ * PUT /api/leave-requests/:id
  * แก้ไขใบลา
  */
 export const updateLeaveRequest = asyncHandler(async (req: Request, res: Response) => {

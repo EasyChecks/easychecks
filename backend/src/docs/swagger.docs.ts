@@ -117,7 +117,7 @@
  *       เชื่อมต่อ `ws://HOST/ws/events` สำหรับ real-time event updates
  *   - name: Download Report
  *     description: |
- *       📥 API สำหรับดาวน์โหลดรายงาน (Excel / PDF)
+ *       📥 API สำหรับดาวน์โหลดรายงาน (Excel)
  *
  *       **ทำไมต้องมี Download API?**
  *       Admin ต้องดาวน์โหลดรายงาน attendance/shift เป็นไฟล์เพื่อนำไปวิเคราะห์
@@ -125,7 +125,7 @@
  *
  *       **รูปแบบรายงานที่รองรับ:**
  *       - `excel` (.xlsx) — สำหรับวิเคราะห์ข้อมูลใน spreadsheet
- *       - `pdf` (.pdf) — สำหรับพิมพ์เป็นเอกสาร
+ *      
  *
  *       **ประเภทรายงาน:**
  *       - `attendance` — ประวัติเข้า-ออกงาน
@@ -2354,6 +2354,7 @@
  *         name: branchId
  *         schema:
  *           type: integer
+ *           example: 1
  *         required: false
  *         description: |
  *           Filter เฉพาะสาขา (SUPERADMIN only)
@@ -2363,9 +2364,10 @@
  *         schema:
  *           type: string
  *           format: date
+ *           example: "2026-03-11"
  *         required: false
- *         description: วันที่ต้องการดู (default = วันนี้) เช่น 2026-03-05
- *         example: "2026-03-05"
+ *         description: วันที่ต้องการดู format YYYY-MM-DD (default = วันนี้)
+ *         example: "2026-03-11"
  *     responses:
  *       200:
  *         description: สรุป attendance สำเร็จ
@@ -2448,6 +2450,7 @@
  *         name: branchId
  *         schema:
  *           type: integer
+ *           example: 1
  *         required: false
  *         description: Filter เฉพาะสาขา (SUPERADMIN only)
  *       - in: query
@@ -2455,9 +2458,10 @@
  *         schema:
  *           type: string
  *           format: date
+ *           example: "2026-03-11"
  *         required: false
- *         description: วันที่ต้องการดู (default = วันนี้)
- *         example: "2026-03-05"
+ *         description: วันที่ต้องการดู format YYYY-MM-DD (default = วันนี้)
+ *         example: "2026-03-11"
  *     responses:
  *       200:
  *         description: ดึงข้อมูลพนักงานวันนี้สำเร็จ
@@ -2610,6 +2614,7 @@
  *         name: branchId
  *         schema:
  *           type: integer
+ *           example: 1
  *         required: false
  *         description: Filter เฉพาะสาขา (SUPERADMIN only)
  *       - in: query
@@ -2617,9 +2622,10 @@
  *         schema:
  *           type: string
  *           format: date
+ *           example: "2026-03-11"
  *         required: false
- *         description: วันที่ต้องการดู (default = วันนี้)
- *         example: "2026-03-05"
+ *         description: วันที่ต้องการดู format YYYY-MM-DD (default = วันนี้)
+ *         example: "2026-03-11"
  *     responses:
  *       200:
  *         description: ดึงเหตุการณ์นอกพื้นที่สำเร็จ
@@ -2767,52 +2773,24 @@
  *                     items:
  *                       type: integer
  *                     description: สำหรับ INDIVIDUAL
- *                     example: [5, 10, 15]
  *                   branchIds:
  *                     type: array
  *                     items:
  *                       type: integer
  *                     description: สำหรับ BRANCH
- *                     example: [1, 2]
  *                   roles:
  *                     type: array
  *                     items:
  *                       type: string
  *                       enum: [USER, MANAGER, ADMIN, SUPERADMIN]
  *                     description: สำหรับ ROLE
- *                     example: ["MANAGER", "ADMIN"]
- *           examples:
- *             งาน ALL กับ Location:
- *               summary: กิจกรรมทุกคนเข้าร่วม (ใช้ Location ที่มีอยู่)
- *               value:
- *                 eventName: "กิจกรรม Team Building"
- *                 description: "กิจกรรมสร้างทีมประจำปี"
- *                 locationId: 5
- *                 startDateTime: "2026-03-10T09:00:00.000Z"
- *                 endDateTime: "2026-03-10T17:00:00.000Z"
- *                 participantType: "ALL"
- *             งาน BRANCH กับ Custom Venue:
- *               summary: กิจกรรมเฉพาะสาขา (ใช้ custom venue)
- *               value:
- *                 eventName: "ประชุมสาขา BKK"
- *                 venueName: "ห้องประชุม A ชั้น 3"
- *                 venueLatitude: 13.7563
- *                 venueLongitude: 100.5018
- *                 startDateTime: "2026-03-10T09:00:00.000Z"
- *                 endDateTime: "2026-03-10T12:00:00.000Z"
- *                 participantType: "BRANCH"
- *                 participants:
- *                   branchIds: [1]
- *             งาน INDIVIDUAL:
- *               summary: กิจกรรมเฉพาะบุคคล
- *               value:
- *                 eventName: "อบรม Leadership"
- *                 locationId: 5
- *                 startDateTime: "2026-03-15T09:00:00.000Z"
- *                 endDateTime: "2026-03-15T16:00:00.000Z"
- *                 participantType: "INDIVIDUAL"
- *                 participants:
- *                   userIds: [5, 10, 15]
+ *           example:
+ *             eventName: "กิจกรรม Team Building"
+ *             description: "กิจกรรมสร้างทีมประจำปี"
+ *             locationId: 5
+ *             startDateTime: "2026-03-20T09:00:00.000Z"
+ *             endDateTime: "2026-03-20T17:00:00.000Z"
+ *             participantType: "ALL"
  *     responses:
  *       201:
  *         description: สร้างกิจกรรมสำเร็จ
@@ -3140,7 +3118,9 @@
  *         required: true
  *         schema:
  *           type: integer
+ *           example: 1
  *         description: Event ID
+ *         example: 1
  *     responses:
  *       200:
  *         description: ดึงกิจกรรมสำเร็จ
@@ -3187,7 +3167,9 @@
  *         required: true
  *         schema:
  *           type: integer
+ *           example: 1
  *         description: Event ID
+ *         example: 1
  *     requestBody:
  *       required: true
  *       content:
@@ -3235,14 +3217,9 @@
  *                     type: array
  *                     items:
  *                       type: string
- *           examples:
- *             แก้ชื่อและวันที่:
- *               value:
- *                 eventName: "ประชุมประจำเดือน (แก้ไข)"
- *                 endDateTime: "2026-03-10T18:00:00.000Z"
- *             ปิดกิจกรรม:
- *               value:
- *                 isActive: false
+ *           example:
+ *             eventName: "ประชุมประจำเดือน (แก้ไข)"
+ *             endDateTime: "2026-03-20T18:00:00.000Z"
  *     responses:
  *       200:
  *         description: แก้ไขกิจกรรมสำเร็จ
@@ -3295,7 +3272,9 @@
  *         required: true
  *         schema:
  *           type: integer
+ *           example: 1
  *         description: Event ID
+ *         example: 1
  *     requestBody:
  *       content:
  *         application/json:
@@ -3360,7 +3339,9 @@
  *         required: true
  *         schema:
  *           type: integer
+ *           example: 1
  *         description: Event ID
+ *         example: 1
  *     responses:
  *       200:
  *         description: กู้คืนกิจกรรมสำเร็จ
@@ -3424,20 +3405,19 @@
  *         required: true
  *         schema:
  *           type: integer
+ *           example: 1
  *         description: Event ID
+ *         example: 1
  *     requestBody:
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
- *               photo:
- *                 type: string
- *                 description: Base64 encoded selfie image
  *               latitude:
  *                 type: number
  *                 example: 13.7563
- *                 description: GPS latitude
+ *                 description: GPS latitude (ไม่ล้อง GPS ไม่ต้องใส่)
  *               longitude:
  *                 type: number
  *                 example: 100.5018
@@ -3446,16 +3426,10 @@
  *                 type: string
  *                 example: "อาคาร A ชั้น 3, กรุงเทพฯ"
  *                 description: ที่อยู่ text
- *           examples:
- *             พร้อม GPS:
- *               summary: Check-in พร้อม GPS
- *               value:
- *                 latitude: 13.7563
- *                 longitude: 100.5018
- *                 address: "อาคาร A ชั้น 3, กรุงเทพฯ"
- *             ไม่มี GPS:
- *               summary: Check-in อย่างง่าย (ไม่ต้องตรวจ GPS)
- *               value: {}
+ *           example:
+ *             latitude: 13.7563
+ *             longitude: 100.5018
+ *             address: "อาคาร A ชั้น 3, กรุงเทพฯ"
  *     responses:
  *       201:
  *         description: เข้าร่วมกิจกรรมสำเร็จ
@@ -3514,16 +3488,15 @@
  *         required: true
  *         schema:
  *           type: integer
+ *           example: 1
  *         description: Event ID
+ *         example: 1
  *     requestBody:
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
- *               photo:
- *                 type: string
- *                 description: Base64 encoded selfie image
  *               latitude:
  *                 type: number
  *                 example: 13.7563
@@ -3533,6 +3506,10 @@
  *               address:
  *                 type: string
  *                 example: "อาคาร A ชั้น 3, กรุงเทพฯ"
+ *           example:
+ *             latitude: 13.7563
+ *             longitude: 100.5018
+ *             address: "อาคาร A ชั้น 3, กรุงเทพฯ"
  *     responses:
  *       200:
  *         description: ออกจากกิจกรรมสำเร็จ
@@ -3588,7 +3565,9 @@
  *         required: true
  *         schema:
  *           type: integer
+ *           example: 1
  *         description: Event ID
+ *         example: 1
  *     responses:
  *       200:
  *         description: ดึงสถานะสำเร็จ
@@ -3713,14 +3692,18 @@
  *         schema:
  *           type: string
  *           enum: [attendance, shift]
- *         description: ประเภทรายงาน
+ *           example: "attendance"
+ *         description: ประเภทรายงาน — attendance หรือ shift
+ *         example: "attendance"
  *       - in: query
  *         name: format
  *         required: true
  *         schema:
  *           type: string
  *           enum: [excel]
+ *           example: "excel"
  *         description: รูปแบบไฟล์ (excel เท่านั้น)
+ *         example: "excel"
  *       - in: query
  *         name: startDate
  *         schema:

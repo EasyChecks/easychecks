@@ -80,6 +80,9 @@ export interface UpdateUserDTO {
   role?: Role;
   status?: UserStatus;
   avatarGender?: string; // สำหรับอัปเดต avatar
+  department?: string;
+  position?: string;
+  bloodType?: string;
 }
 
 export interface BulkCreateUserDTO {
@@ -475,6 +478,9 @@ export const getUsers = async (
       email: true,
       avatarUrl: true,
       birthDate: true,
+      department: true,
+      position: true,
+      bloodType: true,
       branchId: true,
       role: true,
       status: true,
@@ -488,7 +494,9 @@ export const getUsers = async (
         },
       },
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy: requesterRole === 'SUPERADMIN'
+      ? [{ branchId: 'asc' as const }, { employeeId: 'asc' as const }]
+      : [{ employeeId: 'asc' as const }],
     skip: (page - 1) * limit,
     take: limit,
   });
@@ -533,6 +541,9 @@ export const getUserById = async (
       email: true,
       avatarUrl: true,
       birthDate: true,
+      department: true,
+      position: true,
+      bloodType: true,
       branchId: true,
       role: true,
       status: true,
@@ -640,10 +651,13 @@ export const updateUser = async (
   if (data.branchId !== undefined) updateData.branchId = data.branchId;
   if (data.role !== undefined) updateData.role = data.role;
   if (data.status !== undefined) updateData.status = data.status;
+  if (data.department !== undefined) updateData.department = data.department || null;
+  if (data.position !== undefined) updateData.position = data.position || null;
+  if (data.bloodType !== undefined) updateData.bloodType = data.bloodType || null;
 
-  // Hash password if provided
+  // ตั้ง custom password (admin reset password)
   if (data.password) {
-    updateData.password = await hashPassword(data.password);
+    updateData.customPassword = await hashPassword(data.password);
   }
 
   // Parse birthDate
@@ -685,6 +699,9 @@ export const updateUser = async (
       email: true,
       avatarUrl: true,
       birthDate: true,
+      department: true,
+      position: true,
+      bloodType: true,
       branchId: true,
       role: true,
       status: true,

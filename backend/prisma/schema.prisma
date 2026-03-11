@@ -26,6 +26,9 @@ model User {
   adminPassword                                           String?              @map("admin_password")
   avatarUrl                                               String?              @map("avatar_url")
   birthDate                                               DateTime?            @map("birth_date") @db.Date
+  department                                              String?              @map("department")
+  position                                                String?              @map("position")
+  bloodType                                               String?              @map("blood_type")
   branchId                                                Int?                 @map("branch_id")
   role                                                    Role                 @default(USER)
   status                                                  UserStatus           @default(ACTIVE)

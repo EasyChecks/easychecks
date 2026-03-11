@@ -188,8 +188,8 @@ export default function AdminManageUser() {
     setEditing(prev => ({ ...prev, user: null, form: {} }));
   };
 
-  const saveEditUser = () => {
-    if (!editing.form.name || !editing.form.email || !editing.form.phone) {
+  const saveEditUser = async (form: Record<string, string | number | boolean | null>) => {
+    if (!form.name || !form.email || !form.phone) {
       setUi(prev => ({
         ...prev,
         alertDialog: {
@@ -197,7 +197,7 @@ export default function AdminManageUser() {
           type: 'error',
           title: 'ข้อมูลไม่ครบ',
           message: 'กรุณากรอกข้อมูลให้ครบถ้วน (ชื่อ, อีเมล, เบอร์โทร)',
-          autoClose: true
+          autoClose: false
         }
       }));
       return;
@@ -205,8 +205,7 @@ export default function AdminManageUser() {
 
     if (!editing.user) return;
 
-    const { emergencyContactName, emergencyContactPhone, emergencyContactRelation, ...restForm } = editing.form;
-    
+    const { emergencyContactName, emergencyContactPhone, emergencyContactRelation, ...restForm } = form;
     const updatedUserData = {
       ...restForm,
       emergencyContact: {
@@ -216,29 +215,35 @@ export default function AdminManageUser() {
       }
     };
 
-    const updatedUsers = users.map(user => 
-      user.id === editing.user!.id ? { ...user, ...updatedUserData } : user
-    );
-
-    setUsers(updatedUsers);
-    
-    if (selectedUser && selectedUser.id === editing.user!.id) {
-      const updatedUser = updatedUsers.find(u => u.id === editing.user!.id);
-      setSelectedUser(updatedUser || null);
-    }
-
-    setUi(prev => ({
-      ...prev,
-      alertDialog: {
-        isOpen: true,
-        type: 'success',
-        title: 'บันทึกสำเร็จ',
-        message: 'แก้ไขข้อมูลผู้ใช้เรียบร้อยแล้ว',
-        autoClose: true
+    try {
+      const savedUser = await userService.updateUser(editing.user.id, updatedUserData);
+      const updatedUsers = users.map(u =>
+        u.id === editing.user!.id ? { ...u, ...savedUser } : u
+      );
+      setUsers(updatedUsers);
+      if (selectedUser && selectedUser.id === editing.user!.id) {
+        setSelectedUser(updatedUsers.find(u => u.id === editing.user!.id) || null);
       }
-    }));
-
-    closeEditUser();
+      closeEditUser();
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'success',
+          title: 'บันทึกสำเร็จ',
+          message: 'แก้ไขข้อมูลผู้ใช้เรียบร้อยแล้ว',
+          autoClose: true
+        }
+      }));
+    } catch (err: unknown) {
+      const axiosMsg = (err as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message
+        ?? (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const msg = axiosMsg || (err instanceof Error ? err.message : 'ไม่สามารถบันทึกข้อมูลได้');
+      setUi(prev => ({
+        ...prev,
+        alertDialog: { isOpen: true, type: 'error', title: 'เกิดข้อผิดพลาด', message: msg, autoClose: false }
+      }));
+    }
   };
 
   // Delete user
@@ -665,11 +670,9 @@ export default function AdminManageUser() {
           <UserEditModal
             show={modals.editUser}
             editingUser={editing.user}
-            editForm={editing.form}
             currentUser={currentUser}
             onClose={closeEditUser}
             onSave={saveEditUser}
-            onChange={(form) => setEditing(prev => ({ ...prev, form }))}
           />
         )}
 

@@ -60,9 +60,18 @@ function mapBackendUserToFrontend(backendUser: Record<string, unknown>): User {
     role: (roleMap[String(backendUser.role ?? '')] ?? 'user') as User['role'],
     department: String(backendUser.department ?? ''),
     position: String(backendUser.position ?? ''),
+    bloodType: backendUser.bloodType ? String(backendUser.bloodType) : undefined,
     status: (statusMap[String(backendUser.status ?? '')] ?? 'active') as User['status'],
-    branch: String(backendUser.branch ?? backendUser.branchCode ?? ''),
-    branchCode: String(backendUser.branchCode ?? ''),
+    branch: (() => {
+      const b = backendUser.branch;
+      if (b && typeof b === 'object') return String((b as Record<string, unknown>).code ?? '');
+      return String(b ?? backendUser.branchCode ?? '');
+    })(),
+    branchCode: (() => {
+      const b = backendUser.branch;
+      if (b && typeof b === 'object') return String((b as Record<string, unknown>).code ?? '');
+      return String(backendUser.branchCode ?? '');
+    })(),
     provinceCode: String(backendUser.provinceCode ?? ''),
     profileImage: backendUser.avatarUrl ? String(backendUser.avatarUrl) : undefined,
     birthDate: backendUser.birthDate ? String(backendUser.birthDate).split('T')[0] : undefined,
@@ -149,6 +158,41 @@ export const userService = {
     const response = await api.get('/users/profile');
     return response.data.data || response.data;
   },
-};
 
-export default userService;
+  /**
+   * Update user by ID
+   */
+  async updateUser(id: string, data: Record<string, unknown>): Promise<User> {
+    // แปลง frontend form → backend format
+    const payload: Record<string, unknown> = {};
+    if (data.name) {
+      const parts = String(data.name).trim().split(' ');
+      payload.firstName = parts[0] ?? '';
+      payload.lastName = parts.slice(1).join(' ') || parts[0];
+    }
+    if (data.email !== undefined) payload.email = data.email;
+    if (data.phone !== undefined) payload.phone = data.phone;
+    if (data.role !== undefined) payload.role = String(data.role).toUpperCase();
+    if (data.status !== undefined) {
+      const statusMap: Record<string, string> = { active: 'ACTIVE', leave: 'RESIGNED', suspended: 'SUSPENDED' };
+      payload.status = statusMap[String(data.status)] ?? String(data.status).toUpperCase();
+    }
+    if (data.birthDate !== undefined) payload.birthDate = data.birthDate;
+    if (data.nationalId !== undefined) payload.nationalId = data.nationalId;
+    if (data.department !== undefined) payload.department = data.department;
+    if (data.position !== undefined) payload.position = data.position;
+    if (data.bloodType !== undefined) payload.bloodType = data.bloodType;
+    if (data.password && String(data.password).trim()) payload.password = data.password;
+    if (data.emergencyContact && typeof data.emergencyContact === 'object') {
+      const ec = data.emergencyContact as Record<string, unknown>;
+      payload.emergent_first_name = String(ec.name ?? '').split(' ')[0] ?? '';
+      payload.emergent_last_name = String(ec.name ?? '').split(' ').slice(1).join(' ') || String(ec.name ?? '');
+      payload.emergent_tel = ec.phone;
+      payload.emergent_relation = ec.relation;
+    }
+
+    const response = await api.put(`/users/${id}`, payload);
+    const backendUser = response.data.data ?? response.data;
+    return mapBackendUserToFrontend(backendUser);
+  },
+};

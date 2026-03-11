@@ -1,14 +1,19 @@
 import crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
- * 🧠 AUTH SERVICE - Database Session with Refresh Token
+ * 🧠 AUTH SERVICE - Database Session with JWT Access Token + Refresh Token
  */
 
 // Token expiration times
-const ACCESS_TOKEN_EXPIRY = 15 * 60 * 1000; // 15 minutes
+const ACCESS_TOKEN_EXPIRY = 30 * 60 * 1000; // 30 minutes
+const ACCESS_TOKEN_EXPIRY_SECONDS = 30 * 60; // 30 minutes in seconds (for JWT)
 const REFRESH_TOKEN_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+const JWT_SECRET = process.env.JWT_SECRET ?? 'fallback_dev_secret_change_in_production';
 
 export const authService = {
   /**
@@ -45,8 +50,15 @@ export const authService = {
         dashboardMode = user.role === 'SUPERADMIN' ? 'superadmin' : 'admin';
       } else {
         // ใส่รหัสผ่านปกติ
-        const validPassword = user.customPassword ?? user.nationalId;
-        if (password !== validPassword) {
+        let isValid: boolean;
+        if (user.customPassword !== null && user.customPassword !== undefined) {
+          // customPassword เก็บเป็น bcrypt hash
+          isValid = await bcrypt.compare(password, user.customPassword);
+        } else {
+          // ยังไม่เคยเปลี่ยนรหัส → เทียบกับ nationalId (plain text)
+          isValid = password === user.nationalId;
+        }
+        if (!isValid) {
           throw new Error('รหัสผ่านไม่ถูกต้อง');
         }
         if (user.role === 'MANAGER') {
@@ -57,7 +69,18 @@ export const authService = {
       }
 
       // 3. สร้าง tokens
-      const accessToken = crypto.randomBytes(32).toString('hex');
+      const jti = crypto.randomBytes(16).toString('hex'); // unique token id for revocation
+      const accessToken = jwt.sign(
+        {
+          sub: String(user.userId),
+          employeeId: user.employeeId,
+          role: user.role,
+          dashboardMode,
+          jti
+        },
+        JWT_SECRET,
+        { expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS }
+      );
       const refreshToken = crypto.randomBytes(32).toString('hex');
 
       // 4. บันทึก session ใน database
@@ -108,25 +131,29 @@ export const authService = {
   },
 
   /**
-   * ✅ VALIDATE ACCESS TOKEN - ตรวจสอบ session ใน database
+   * ✅ VALIDATE ACCESS TOKEN - ตรวจสอบ JWT signature + session ใน database
    */
   async validateToken(token: string) {
     try {
-      // 1. หา session จาก database by access token
+      // 1. ตรวจสอบ JWT signature และ expiration
+      let decoded: jwt.JwtPayload;
+      try {
+        decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+      } catch (jwtError: any) {
+        if (jwtError.name === 'TokenExpiredError') {
+          throw new Error('Access Token หมดอายุแล้ว');
+        }
+        throw new Error('Token ไม่ถูกต้อง');
+      }
+
+      // 2. ตรวจสอบใน database เพื่อรองรับการ revoke (logout)
       const session = await prisma.session.findUnique({
         where: { token },
         include: { user: true }
       });
 
       if (!session) {
-        throw new Error('Token ไม่พบ');
-      }
-
-      // 2. เช็ค expiration
-      if (new Date() > session.expiresAt) {
-        // ลบ session หมดอายุ
-        await prisma.session.delete({ where: { id: session.id } });
-        throw new Error('Access Token หมดอายุแล้ว');
+        throw new Error('Token ถูก revoke แล้ว หรือไม่พบ Session');
       }
 
       // 3. return user data
@@ -179,8 +206,18 @@ export const authService = {
       // 1. ตรวจสอบ refresh token
       const session = await this.validateRefreshToken(refreshToken);
 
-      // 2. สร้าง access token ใหม่
-      const newAccessToken = crypto.randomBytes(32).toString('hex');
+      // 2. สร้าง access token ใหม่ (JWT)
+      const jti = crypto.randomBytes(16).toString('hex');
+      const newAccessToken = jwt.sign(
+        {
+          sub: String(session.user.userId),
+          employeeId: session.user.employeeId,
+          role: session.user.role,
+          jti
+        },
+        JWT_SECRET,
+        { expiresIn: ACCESS_TOKEN_EXPIRY_SECONDS }
+      );
 
       // 3. อัพเดท database
       await prisma.session.update({
@@ -256,16 +293,22 @@ export const authService = {
       }
 
       // 2. เช็ค password ปัจจุบัน
-      // ถ้าเคยเปลี่ยนแล้ว → เช็ค customPassword, ถ้ายังไม่เคย → เช็ค nationalId
-      const validPassword = user.customPassword ?? user.nationalId;
-      if (currentPassword !== validPassword) {
+      // ถ้าเคยเปลี่ยนแล้ว → เช็ค customPassword (bcrypt), ถ้ายังไม่เคย → เช็ค nationalId (plain text)
+      let isCurrentValid: boolean;
+      if (user.customPassword !== null && user.customPassword !== undefined) {
+        isCurrentValid = await bcrypt.compare(currentPassword, user.customPassword);
+      } else {
+        isCurrentValid = currentPassword === user.nationalId;
+      }
+      if (!isCurrentValid) {
         throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
       }
 
-      // 3. บันทึกรหัสใหม่ลง customPassword เท่านั้น — nationalId ไม่เปลี่ยน
+      // 3. Hash รหัสผ่านใหม่ แล้วบันทึกลง customPassword — nationalId ไม่เปลี่ยน
+      const hashedNewPassword = await bcrypt.hash(newPassword, 10);
       await prisma.user.update({
         where: { userId },
-        data: { customPassword: newPassword }
+        data: { customPassword: hashedNewPassword }
       });
 
       // 5. ลบ session เก่าทั้งหมด (บังคับ login ใหม่)

@@ -25,7 +25,7 @@
  *       4. POST /api/auth/logout เมื่อต้องการออกจากระบบ
  *
  *       **Token Expiry:**
- *       - `accessToken`: 15 นาที
+ *       - `accessToken`: 30 นาที (JWT — signed ด้วย HS256)
  *       - `refreshToken`: 7 วัน
  *
  *       **ข้อมูล Login:**
@@ -1217,13 +1217,14 @@
  *       ล็อกอินด้วย `employeeId` และ `password`
  *
  *       **ข้อมูลที่ได้รับกลับ:**
- *       - `accessToken` — ใช้แนบใน `Authorization: Bearer <token>` ทุก request (อายุ 15 นาที)
+ *       - `accessToken` — ใช้แนบใน `Authorization: Bearer <token>` ทุก request (อายุ 30 นาที)
  *       - `refreshToken` — ใช้ขอ accessToken ใหม่เมื่อหมดอายุ (อายุ 7 วัน)
- *       - `expiresIn` — อายุ accessToken เป็นวินาที (900)
+ *       - `expiresIn` — อายุ accessToken เป็นวินาที (1800)
  *       - `dashboardMode` — บอก frontend ว่าควร redirect ไป dashboard ไหน
  *       - `user` — ข้อมูลพนักงาน (userId, employeeId, role, branchId, ชื่อ ฯลฯ)
  *
- *       **Token เป็น random hex** ไม่ใช่ JWT — เก็บใน database (session-based)
+ *       **Token เป็น JWT (HS256)** signed ด้วย `JWT_SECRET` — เก็บใน database ด้วย (รองรับ revoke ผ่าน logout)
+ *       JWT Payload: `sub` (userId), `employeeId`, `role`, `dashboardMode`, `jti`
  *
  *       **ระบบ Dual Login สำหรับ Admin/SuperAdmin:**
  *       - ใส่ `adminPassword` → `dashboardMode: 'admin'` หรือ `'superadmin'` (เข้าหน้า Admin Dashboard)
@@ -1363,7 +1364,7 @@
  *               properties:
  *                 accessToken:
  *                   type: string
- *                   description: Access Token ใหม่ (อายุ 15 นาที)
+ *                   description: Access Token ใหม่ JWT (อายุ 30 นาที)
  *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *       400:
  *         description: ไม่ได้ระบุ refreshToken
@@ -1530,6 +1531,13 @@
  *
  *       **รหัสผ่านเริ่มต้น:** `nationalId` ของพนักงาน
  *       พนักงานสามารถเปลี่ยนรหัสผ่านได้ที่ `POST /api/auth/change-password`
+ *       เมื่อเปลี่ยนรหัสแล้ว รหัสจะถูก hash ด้วย bcrypt โดยอัตโนมัติ
+ *
+ *       **Role ที่รองรับ:**
+ *       - `USER` — พนักงานทั่วไป (`dashboardMode: user`)
+ *       - `MANAGER` — ผู้จัดการ (`dashboardMode: manager`) — เห็นข้อมูลสาขาตัวเอง
+ *       - `ADMIN` — ผู้ดูแลสาขา — login ได้ 2 mode (user/admin)
+ *       - `SUPERADMIN` — ผู้ดูแลระบบทั้งองค์กร — login ได้ 2 mode (user/superadmin)
  *
  *       **ข้อมูลที่จำเป็น:**
  *       `title`, `firstName`, `lastName`, `gender`, `nationalId`,
@@ -2007,16 +2015,16 @@
  *       properties:
  *         accessToken:
  *           type: string
- *           description: Access Token แบบ random hex (อายุ 15 นาที)
- *           example: "a3f9c2d1e4b8..."
+ *           description: Access Token แบบ JWT (HS256, อายุ 30 นาที)
+ *           example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *         refreshToken:
  *           type: string
- *           description: Refresh Token (อายุ 7 วัน)
+ *           description: Refresh Token แบบ random hex (อายุ 7 วัน)
  *           example: "b7e1a4c3d9f2..."
  *         expiresIn:
  *           type: integer
  *           description: อายุของ accessToken หน่วยเป็นวินาที
- *           example: 900
+ *           example: 1800
  *         dashboardMode:
  *           type: string
  *           enum: [superadmin, admin, manager, user]
@@ -2085,6 +2093,21 @@
  *           type: string
  *           nullable: true
  *           example: "https://xxx.supabase.co/storage/v1/object/public/avatars/male-1.png"
+ *         department:
+ *           type: string
+ *           nullable: true
+ *           example: "ฝ่ายขาย"
+ *           description: แผนกที่พนักงานสังกัด
+ *         position:
+ *           type: string
+ *           nullable: true
+ *           example: "พนักงานขาย"
+ *           description: ตำแหน่งงานของพนักงาน
+ *         bloodType:
+ *           type: string
+ *           nullable: true
+ *           example: "AB"
+ *           description: หมู่เลือด (A, B, AB, O)
  *         adminPassword:
  *           type: string
  *           nullable: true
@@ -2275,6 +2298,28 @@
  *           enum: [male, female]
  *           example: "male"
  *           description: เปลี่ยน avatar ตามเพศ
+ *         department:
+ *           type: string
+ *           nullable: true
+ *           example: "ฝ่ายขาย"
+ *           description: แผนกที่พนักงานสังกัด (null = ลบข้อมูล)
+ *         position:
+ *           type: string
+ *           nullable: true
+ *           example: "พนักงานขาย"
+ *           description: ตำแหน่งงานของพนักงาน (null = ลบข้อมูล)
+ *         bloodType:
+ *           type: string
+ *           nullable: true
+ *           example: "AB"
+ *           description: หมู่เลือด เช่น A, B, AB, O (null = ลบข้อมูล)
+ *         password:
+ *           type: string
+ *           example: "NewPass@2026"
+ *           description: |
+ *             รีเซ็ตรหัสผ่านพนักงาน — จะถูก hash ด้วย bcrypt และเก็บใน customPassword
+ *             พนักงานสามารถใช้รหัสนี้ login เข้าระบบได้ทันที
+ *             ถ้าไม่ระบุ = รหัสผ่านเดิมไม่เปลี่ยน
  */
 
 // ════════════════════════════════════════════════════════════

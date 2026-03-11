@@ -3640,9 +3640,9 @@
  * @swagger
  * /api/download/report:
  *   get:
- *     summary: ดาวน์โหลดรายงาน Attendance/Shift (Excel หรือ PDF)
+ *     summary: ดาวน์โหลดรายงาน Attendance/Shift (Excel)
  *     description: |
- *       สร้างและดาวน์โหลดรายงานเป็นไฟล์ Excel (.xlsx) หรือ PDF (.pdf)
+ *       สร้างและดาวน์โหลดรายงานเป็นไฟล์ Excel (.xlsx)
  *
  *       **ประเภทรายงาน:**
  *       - `attendance` — ประวัติเข้า-ออกงาน (Employee ID, Name, Check In/Out, Status, Late Minutes)
@@ -3653,8 +3653,7 @@
  *       - SUPERADMIN → ดาวน์โหลดได้ทั้งองค์กร + filter branchId ได้
  *
  *       **Response:** Binary file (ไม่ใช่ JSON)
- *       - Content-Type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (Excel)
- *       - Content-Type: `application/pdf` (PDF)
+ *       - Content-Type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
  *       - Content-Disposition: `attachment; filename="..."`
  *
  *       **ข้อจำกัด:** ดึงสูงสุด 100 records ต่อครั้ง
@@ -3675,8 +3674,8 @@
  *         required: true
  *         schema:
  *           type: string
- *           enum: [excel, pdf]
- *         description: รูปแบบไฟล์
+ *           enum: [excel]
+ *         description: รูปแบบไฟล์ (excel เท่านั้น)
  *       - in: query
  *         name: startDate
  *         schema:
@@ -3701,10 +3700,6 @@
  *         description: ไฟล์รายงาน (binary download)
  *         content:
  *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
- *             schema:
- *               type: string
- *               format: binary
- *           application/pdf:
  *             schema:
  *               type: string
  *               format: binary

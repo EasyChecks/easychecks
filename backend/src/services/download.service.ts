@@ -21,7 +21,7 @@ export interface User {
 
 export interface DownloadQuery {
   type: 'attendance' | 'shift';
-  format: 'excel' | 'pdf';
+  format: 'excel';
   startDate?: Date;
   endDate?: Date;
   branchId?: number;
@@ -53,7 +53,7 @@ export async function downloadReport(
 
   // ป้องกันไม่ให้ Admin ลองเข้าถึง branch อื่น
   if (user.role === 'ADMIN' && query.branchId && query.branchId !== user.branchId) {
-    throw new Error('Unauthorized: Admin can only download their own branch data');
+    throw new Error('Unauthorized: You can only download your own branch data');
   }
 
   let fileName = '';

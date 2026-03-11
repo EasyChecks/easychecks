@@ -76,10 +76,10 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
      * - excel: XLSX spreadsheet (วิเคราะห์ได้ง่าย)
      * - pdf: PDF document (พิมพ์เป็นเอกสารลายประมาณ)
      */
-    if (!['excel', 'pdf'].includes(format as string)) {
+    if (!['excel'].includes(format as string)) {
       res.status(400).json({
         success: false,
-        error: 'Invalid format. Must be "excel" or "pdf"',
+        error: 'Invalid format. Must be "excel"',
       });
       return;
     }
@@ -97,7 +97,7 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
      */
     const downloadQuery = {
       type: type as 'attendance' | 'shift',
-      format: format as 'excel' | 'pdf',
+      format: format as 'excel',
       ...(startDate && { startDate: new Date(startDate as string) }),
       ...(endDate && { endDate: new Date(endDate as string) }),
       ...(branchId && { branchId: parseInt(branchId as string) }),

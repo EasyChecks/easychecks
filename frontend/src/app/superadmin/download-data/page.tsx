@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import downloadService, { DownloadHistoryItem, ReportType, ReportFormat } from '@/services/downloadService';
+import downloadService, { DownloadHistoryItem, ReportType } from '@/services/downloadService';
 
 // Lazy load heavy components
 const AlertDialog = lazy(() => import('@/components/common/AlertDialog'));
@@ -17,7 +17,6 @@ export default function DownloadData() {
   const [showModal, setShowModal] = useState(false);
   const [startDate, setStartDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [selectedFormat, setSelectedFormat] = useState<'excel' | 'pdf'>('excel');
   const [selectedReportType, setSelectedReportType] = useState<ReportType>('attendance');
   const [alertState, setAlertState] = useState<{ isOpen: boolean; type: 'info' | 'success' | 'warning' | 'error'; title: string; message: string }>({ isOpen: false, type: 'info', title: '', message: '' });
   const [isDownloading, setIsDownloading] = useState(false);
@@ -54,14 +53,14 @@ export default function DownloadData() {
       setIsDownloading(true);
       await downloadService.downloadReport({
         type:      selectedReportType,
-        format:    selectedFormat as ReportFormat,
+        format:    'excel',
         startDate: startDate || undefined,
         endDate:   endDate   || undefined,
       });
       // refresh history
       const res = await downloadService.getHistory({ limit: 10 });
       setHistory(res.data);
-      setAlertState({ isOpen: true, type: 'success', title: 'ดาวน์โหลดสำเร็จ', message: `ดาวน์โหลดรายงานในรูปแบบ ${selectedFormat.toUpperCase()} เรียบร้อยแล้ว` });
+      setAlertState({ isOpen: true, type: 'success', title: 'ดาวน์โหลดสำเร็จ', message: 'ดาวน์โหลดรายงานในรูปแบบ Excel เรียบร้อยแล้ว' });
       handleCloseModal();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -69,7 +68,7 @@ export default function DownloadData() {
     } finally {
       setIsDownloading(false);
     }
-  }, [selectedReportType, selectedFormat, startDate, endDate, handleCloseModal]);
+  }, [selectedReportType, startDate, endDate, handleCloseModal]);
 
   // suppress unused warning for isSuperAdmin (kept for future branch filter)
   void isSuperAdmin;
@@ -93,7 +92,7 @@ export default function DownloadData() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Attendance Report */}
         <Card className="overflow-hidden border-2 border-gray-100 hover:shadow-lg transition-all">
-          <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-6 relative overflow-hidden">
+          <div className="bg-linear-to-r from-blue-500 to-blue-600 p-6 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16"></div>
             <div className="relative flex items-center gap-3">
               <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
@@ -116,14 +115,14 @@ export default function DownloadData() {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              ดาวน์โหลด Excel / PDF
+              ดาวน์โหลด Excel
             </Button>
           </div>
         </Card>
 
         {/* Shift Report */}
         <Card className="overflow-hidden border-2 border-gray-100 hover:shadow-lg transition-all">
-          <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-6 relative overflow-hidden">
+          <div className="bg-linear-to-r from-purple-500 to-purple-600 p-6 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16"></div>
             <div className="relative flex items-center gap-3">
               <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
@@ -146,7 +145,7 @@ export default function DownloadData() {
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              ดาวน์โหลด Excel / PDF
+              ดาวน์โหลด Excel
             </Button>
           </div>
         </Card>
@@ -176,7 +175,7 @@ export default function DownloadData() {
                 {history.map((item, idx) => (
                   <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-2 px-3">{item.reportType === 'attendance' ? 'การเข้างาน' : 'กะการทำงาน'}</td>
-                    <td className="py-2 px-3 text-xs text-gray-500 truncate max-w-[200px]">{item.fileName}</td>
+                    <td className="py-2 px-3 text-xs text-gray-500 truncate max-w-50">{item.fileName}</td>
                     <td className="py-2 px-3">{new Date(item.downloadAt).toLocaleString('th-TH')}</td>
                     <td className="py-2 px-3">{item.user ? `${item.user.firstName} ${item.user.lastName}` : '-'}</td>
                   </tr>
@@ -193,7 +192,7 @@ export default function DownloadData() {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
               {/* Modal Header */}
-              <div className="bg-gradient-to-r from-orange-500 to-orange-600 p-6 relative overflow-hidden">
+              <div className="bg-linear-to-r from-orange-500 to-orange-600 p-6 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-48 h-48 bg-white/10 rounded-full -mr-24 -mt-24"></div>
                 <div className="relative flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -252,7 +251,7 @@ export default function DownloadData() {
                   </div>
                 </div>
 
-                {/* Format Selection */}
+                {/* Format Info */}
                 <div>
                   <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -260,35 +259,15 @@ export default function DownloadData() {
                     </svg>
                     รูปแบบไฟล์
                   </h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    {(['excel', 'pdf'] as const).map(format => (
-                      <button
-                        key={format}
-                        onClick={() => setSelectedFormat(format)}
-                        className={`p-4 rounded-xl border-2 transition-all ${
-                          selectedFormat === format
-                            ? 'bg-green-50 border-green-400 shadow-sm'
-                            : 'bg-gray-50 border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="flex flex-col items-center gap-2">
-                          <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                            selectedFormat === format ? 'bg-green-100' : 'bg-gray-100'
-                          }`}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className={`h-7 w-7 ${
-                              selectedFormat === format ? 'text-green-600' : 'text-gray-500'
-                            }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                          </div>
-                          <span className={`font-semibold text-sm ${
-                            selectedFormat === format ? 'text-green-700' : 'text-gray-700'
-                          }`}>
-                            {format.toUpperCase()}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
+                  <div className="p-4 rounded-xl border-2 bg-green-50 border-green-400 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <span className="font-semibold text-green-700">EXCEL (.xlsx)</span>
+                    </div>
                   </div>
                 </div>
               </div>

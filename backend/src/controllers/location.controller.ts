@@ -34,7 +34,7 @@ export const createLocation = asyncHandler(async (req: Request, res: Response) =
     longitude,
     radius,
     description,
-    isActi  ve,
+    isActive,
   } = req.body;
 
   if (!locationName || !locationType || latitude === undefined || longitude === undefined || radius === undefined || radius === null) {

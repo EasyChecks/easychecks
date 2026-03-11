@@ -9,13 +9,12 @@ import {
  * 📥 Download Routes - API endpoints สำหรับดาวน์โหลดรายงาน
  * 
  * ทำไมต้องมี Download routes?
- * - User ต้องดาวน์โหลด attendance/shift report เป็น Excel หรือ PDF
+ * - User ต้องดาวน์โหลด attendance/shift report เป็น Excel
  * - ต้อง authorize ให้เฉพาะ ADMIN/SUPERADMIN เท่านั้น
  * - ต้องเก็บ audit log (history) ว่าใครดาวน์โหลดอะไร เมื่อไร
  * 
  * Route structure:
- * /api/download/report - ดาวน์โหลดรายงาน (production)
- * /api/download/report-test - ดาวน์โหลดรายงาน (unit test)
+ * /api/download/report - ดาวน์โหลดรายงาน
  * /api/download/history - ดูประวัติการดาวน์โหลด
  */
 
@@ -34,26 +33,16 @@ const router = Router();
  * 
  * Query Parameters:
  * - type: 'attendance' | 'shift' (required)
- * - format: 'excel' | 'pdf' (required)
+ * - format: 'excel' (required)
  * - startDate: ISO DateTime string (optional) - filter records from this date
  * - endDate: ISO DateTime string (optional) - filter records until this date
  * - branchId: number (optional) - filter เฉพาะ branch นี้
  * 
  * Example:
  * GET /api/download/report?type=attendance&format=excel&startDate=2025-01-01&endDate=2025-12-31
- * GET /api/download/report?type=shift&format=pdf&branchId=2
+ * GET /api/download/report?type=shift&format=excel&branchId=2
  */
 router.get('/report', requireRole(['ADMIN', 'SUPERADMIN']), handleDownloadReport);
-
-/**
- * GET /api/download/report-test - ดาวน์โหลดรายงาน (TEST ONLY)
- * 
- * ทำไมต้อง -test endpoint?
- * - Unit test ต้อ end-to-end test route ที่ไม่ require role middleware
- * - ไม่ allow ใน production (ดู API_DOCS สำหรับ environment setup)
- * - ใช้เดียวกับ controller/handler เพื่อ test logic เดียวกัน
- */
-router.get('/report-test', handleDownloadReport);
 
 /**
  * GET /api/download/history - ดูประวัติการดาวน์โหลด
@@ -78,14 +67,5 @@ router.get('/report-test', handleDownloadReport);
  * GET /api/download/history?limit=20&offset=20 - page 2
  */
 router.get('/history', requireRole(['ADMIN', 'SUPERADMIN']), handleDownloadHistory);
-
-/**
- * GET /api/download/history-test - ดูประวัติการดาวน์โหลด (TEST ONLY)
- * 
- * ทำไม -test endpoint?
- * - วิธีเดียวกับ /report-test
- * - ใช้ test route เพื่อ test history API โดยไม่ต้อง role check
- */
-router.get('/history-test', handleDownloadHistory);
 
 export default router;

@@ -9,7 +9,7 @@
 import api from './api';
 
 export type ReportType = 'attendance' | 'shift';
-export type ReportFormat = 'excel' | 'pdf';
+export type ReportFormat = 'excel';
 
 export interface DownloadReportParams {
   type: ReportType;
@@ -62,7 +62,7 @@ export const downloadService = {
     // อ่านชื่อไฟล์จาก Content-Disposition header
     const disposition = res.headers['content-disposition'] || '';
     const match = disposition.match(/filename="?([^";\n]+)"?/);
-    const ext = params.format === 'excel' ? 'xlsx' : 'pdf';
+    const ext = 'xlsx';
     const filename = match?.[1] || `${params.type}_report.${ext}`;
 
     // สร้าง blob URL และ trigger download

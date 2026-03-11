@@ -18,10 +18,7 @@ import {
  * Role-based access:
  * - ADMIN: เห็นเฉพาะ branch ของตัวเอง (check ใน controller/service)
  * - SUPERADMIN: เห็นทั้งหมด
- * 
- * Test endpoints:
- * - ทั้งหมด endpoint มี -test version สำหรับ unit test
- * - Test version ไม่มี role middleware (allow direct testing)
+
  */
 
 const router = Router();
@@ -48,19 +45,6 @@ router.get(
 );
 
 /**
- * GET /api/dashboard/attendance-summary-test - สรุป attendance (TEST)
- * 
- * ทำไมต้อง -test endpoint?
- * - Unit test ต้อง test route ไม่มี middleware
- * - ใช้ controller เดียวกัน เพื่อ test logic
- * - Disabled ใน production (ดู API_DOCS)
- */
-router.get(
-  '/attendance-summary-test',
-  handleAttendanceSummary
-);
-
-/**
  * GET /api/dashboard/employees-today - List employee พร้อม check-in status วนนี้
  * 
  * ทำไมต้อง endpoint นี้?
@@ -78,18 +62,6 @@ router.get(
 router.get(
   '/employees-today',
   requireRole(['ADMIN', 'SUPERADMIN']),
-  handleEmployeesToday
-);
-
-/**
- * GET /api/dashboard/employees-today-test - List employee วนนี้ (TEST)
- * 
- * ทำไมต้อง -test endpoint?
- * - วิธีเดียวกับ /attendance-summary-test
- * - Test API ไม่ต้อง role check
- */
-router.get(
-  '/employees-today-test',
   handleEmployeesToday
 );
 
@@ -117,17 +89,6 @@ router.get(
 );
 
 /**
- * GET /api/dashboard/branches-map-test - List branch สำหรับ map (TEST)
- * 
- * ทำไมต้อง -test endpoint?
- * - Test route ไม่มี middleware
- */
-router.get(
-  '/branches-map-test',
-  handleBranchesMap
-);
-
-/**
  * GET /api/dashboard/location-events - List check-in/out ที่นอก radius
  * 
  * ทำไมต้อง endpoint นี้?
@@ -145,17 +106,6 @@ router.get(
 router.get(
   '/location-events',
   requireRole(['ADMIN', 'SUPERADMIN']),
-  handleLocationEvents
-);
-
-/**
- * GET /api/dashboard/location-events-test - Location events นอก radius (TEST)
- * 
- * ทำไม -test endpoint?
- * - Test route ไม่มี middleware
- */
-router.get(
-  '/location-events-test',
   handleLocationEvents
 );
 

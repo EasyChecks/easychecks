@@ -572,7 +572,7 @@ export default function AdminDashboard() {
           )}
 
           {/* Activity Log — สลับตาม tab การเข้างาน / กิจกรรม */}
-          <div className="h-52 border-t-2 border-borderMain bg-white flex flex-col">
+          <div className="border-t-2 border-borderMain bg-white flex flex-col flex-1 min-h-0">
             <div className="px-4 py-2 border-b border-borderMain flex items-center justify-between shrink-0">
               <h3 className="text-sm font-semibold text-primaryMain">
                 {statsType === 'attendance' ? 'บันทึกการเข้างาน' : 'รายการกิจกรรม'}

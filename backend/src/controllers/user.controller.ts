@@ -50,7 +50,7 @@ export const createUser = async (req: Request, res: Response) => {
     // Validate required fields (ไม่มี employeeId แล้ว เพราะ auto-generate)
     const requiredFields = ['title', 'firstName', 'lastName', 'gender', 'nationalId', 
                            'emergent_tel', 'emergent_first_name', 'emergent_last_name', 'emergent_relation',
-                           'phone', 'email', 'password', 'birthDate', 'branchId'];
+                           'phone', 'email', 'birthDate', 'branchId'];
     for (const field of requiredFields) {
       if (!userData[field]) {
         return sendError(res, `กรุณาระบุ ${field}`, 400);

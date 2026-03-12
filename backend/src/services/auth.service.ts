@@ -13,7 +13,9 @@ import { createAuditLog, AuditAction } from './audit.service.js';
  * - session      : บันทึกใน database เพื่อรองรับการ revoke (logout ทันที)
  *
  * ระบบรหัสผ่าน (2 ระดับ):
- * 1. รหัสปกติ  : nationalId (default) หรือ password ที่เปลี่ยนแล้ว (bcrypt hash)
+ * 1. รหัสปกติ  : bcrypt hash ใน password column เสมอ
+ *               - ยังไม่เคยเปลี่ยนรหัส → hash ของ nationalId (ตั้งแต่สร้าง account)
+ *               - เปลี่ยนรหัสแล้ว    → hash ของรหัสใหม่ (nationalId ใช้ไม่ได้อีก)
  * 2. adminPassword : plain text — สำหรับ Admin/SuperAdmin เข้า Admin Dashboard เท่านั้น
  */
 
@@ -36,6 +38,7 @@ export const authService = {
    * │ ② ทุก role + ใส่รหัสปกติ                                        │
    * │   • password column มีค่า → bcrypt.compare()                   │
    * │   • password column เป็น null → เทียบ nationalId (plain text)  │
+   * │     (fallback สำหรับ user เก่าที่ยังไม่ได้รัน migrate script)  │
    * │   → dashboardMode: 'manager' (Manager) | 'user' (อื่นๆ)        │
    * └─────────────────────────────────────────────────────────────────┘
    */
@@ -71,10 +74,12 @@ export const authService = {
         // เส้นทาง User Dashboard — ตรวจรหัสปกติ
         let isValid: boolean;
         if (user.password !== null && user.password !== undefined) {
-          // เคยเปลี่ยนรหัสแล้ว → เปรียบเทียบกับ bcrypt hash ใน password column
+          // bcrypt.compare ทำงานได้ทั้งสองกรณี:
+          //   - ยังไม่เคยเปลี่ยนรหัส → hash ของ nationalId อยู่ใน password column
+          //   - เปลี่ยนรหัสแล้ว      → hash ของรหัสใหม่อยู่ใน password column
           isValid = await bcrypt.compare(password, user.password);
         } else {
-          // ยังไม่เคยเปลี่ยนรหัส → ใช้ nationalId เป็นรหัสผ่าน (plain text)
+          // fallback สำหรับ user เก่าที่ยังไม่ได้รัน migrate script (ไม่ควรเกิดขึ้นแล้ว)
           isValid = password === user.nationalId;
         }
         if (!isValid) {
@@ -326,7 +331,8 @@ export const authService = {
    * 2. Hash รหัสใหม่ด้วย bcrypt (salt rounds 10) แล้วบันทึกใน password column
    * 3. ลบ session ทั้งหมด → บังคับ login ใหม่ด้วยรหัสใหม่
    *
-   * หมายเหตุ: nationalId ไม่เปลี่ยน — ยังเป็น fallback รหัสเริ่มต้นใน column nationalId
+   * หมายเหตุ: nationalId ไม่เปลี่ยน — แต่หลังเปลี่ยนรหัสแล้ว password column จะเป็น hash ใหม่
+   *           ทำให้ nationalId ใช้ login ไม่ได้อีก (bcrypt จะไม่ match)
    */
   async changePassword(userId: number, currentPassword: string, newPassword: string) {
     try {

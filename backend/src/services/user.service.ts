@@ -50,7 +50,7 @@ export interface CreateUserDTO {
   emergent_relation: string;
   phone: string;
   email: string;
-  password: string;
+  password?: string; // optional — ถ้าไม่ระบุจะใช้ nationalId เป็นรหัสเริ่มต้น
   birthDate: Date | string;
   branchId: number; // บังคับเพื่อสร้าง employeeId
   role?: Role;
@@ -99,7 +99,7 @@ export interface BulkCreateUserDTO {
   emergent_relation: string;
   phone: string;
   email: string;
-  password: string;
+  password?: string; // optional — ถ้าไม่ระบุจะใช้ nationalId เป็นรหัสเริ่มต้น
   birthDate: string;
   branchId: string | number; // บังคับ
   role?: string;
@@ -295,8 +295,9 @@ async function formatUsersWithAvatars(users: any[]): Promise<any[]> {
  * 2. Auto-generate employeeId จาก branchCode + running number
  * 3. ตรวจสิทธิ์: Admin สร้างได้เฉพาะสาขาตัวเอง, SuperAdmin สร้างได้ทุกสาขา
  * 4. ตรวจ email/nationalId ซ้ำ
- * 5. Hash password ด้วย bcrypt → เก็บใน password column
- *    (พนักงานใช้ตัวนี้ login เป็นรหัสแรก nationalId ยังคงเป็น fallback ถ้า password = null)
+ * 5. Hash รหัสเริ่มต้น → ถ้าไม่ได้ระบุ password จะใช้ nationalId เป็นรหัสเริ่มต้น
+ *    Supabase จะเห็น bcrypt hash ทุก row — ไม่มี plain text หรือ null
+ *    พนักงาน login ด้วย nationalId ได้ทันที, เปลี่ยนรหัสแล้ว nationalId ใช้ไม่ได้อีก
  * 6. Upload avatar อัตโนมัติตามเพศ ไป Supabase Storage
  * 7. บันทึก Audit Log
  * 8. Return ข้อมูล user โดยไม่มี password field
@@ -344,10 +345,10 @@ export const createUser = async (data: CreateUserDTO) => {
     }
   }
 
-  // ── ขั้น 6: Hash password และบันทึกลง password column ─────────────────
-  // password column ใช้ล็อกอินครั้งแรก (ถ้าตั้งเป็น nationalId)
-  // ถ้าพนักงานเปลี่ยนรหัสภายหลัง จะ overwrite ค่านี้ด้วย bcrypt hash ใหม่
-  const hashedPassword = await hashPassword(data.password);
+  // ── ขั้น 6: Hash รหัสเริ่มต้น → ใช้ nationalId ถ้าไม่ได้ระบุ password ─────
+  // พนักงานจะ login ด้วย nationalId ได้ทันที (bcrypt.compare ทำงานถูกต้อง)
+  // ถ้าเปลี่ยนรหัสภายหลัง hash ใหม่จะ overwrite ค่านี้
+  const hashedPassword = await hashPassword(data.password ?? data.nationalId);
 
   // ── ขั้น 7: Upload avatar ไปยัง Supabase Storage ─────────────────────
   // fallback เป็น ui-avatars.com ถ้า upload ล้มเหลว
@@ -887,13 +888,13 @@ export const bulkCreateUsers = async (
     try {
       // Validate required fields (ไม่ต้องมี employeeId แล้ว เพราะ auto-generate)
       if (!userData.title || !userData.firstName || !userData.lastName ||
-          !userData.email || !userData.password || !userData.nationalId ||
+          !userData.email || !userData.nationalId ||
           !userData.phone || !userData.emergent_tel || !userData.emergent_first_name ||
           !userData.emergent_last_name || !userData.emergent_relation || !userData.branchId || !userData.gender) {
         result.failed++;
         result.errors.push({
           row: rowNumber,
-          error: 'ข้อมูลไม่ครบ (ต้องมี: title, firstName, lastName, email, password, nationalId, phone, emergent_tel, emergent_first_name, emergent_last_name, emergent_relation, branchId, gender)',
+          error: 'ข้อมูลไม่ครบ (ต้องมี: title, firstName, lastName, email, nationalId, phone, emergent_tel, emergent_first_name, emergent_last_name, emergent_relation, branchId, gender)',
         });
         continue;
       }
@@ -999,8 +1000,8 @@ export const bulkCreateUsers = async (
       // Auto-generate employeeId
       const employeeId = await generateEmployeeId(branchId);
 
-      // Hash password
-      const hashedPassword = await hashPassword(userData.password);
+      // Hash รหัสเริ่มต้น → ใช้ nationalId ถ้าไม่ได้ระบุ password
+      const hashedPassword = await hashPassword(userData.password ?? userData.nationalId);
 
       // Upload avatar (ใช้ gender จริง)
       let avatarUrl: string | null = null;

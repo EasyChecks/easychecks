@@ -30,7 +30,8 @@
  *
  *       **ข้อมูล Login:**
  *       - username: `employeeId` เช่น BKK001
- *       - password: `nationalId` (เลขบัตรประชาชน) หรือรหัสผ่านที่เปลี่ยนแล้ว
+ *       - password: `nationalId` (เลขบัตรประชาชน) — รหัสเริ่มต้นที่ระบบ hash ไว้ตั้งแต่สร้าง account
+ *       - เมื่อเปลี่ยนรหัสแล้ว → ใช้รหัสใหม่เท่านั้น (nationalId ใช้ไม่ได้อีก)
  *
  *       **Dual Login (Admin/SuperAdmin):**
  *       - ใช้ `adminPassword` → เข้าหน้า Admin/SuperAdmin Dashboard
@@ -1227,8 +1228,8 @@
  *       JWT Payload: `sub` (userId), `employeeId`, `role`, `dashboardMode`, `jti`
  *
  *       **ระบบ Password:**
- *       - ถ้ายังไม่เคยเปลี่ยนรหัส → ใส่ `nationalId` (เลขบัตรประชาชน 13 หลัก)
- *       - ถ้าเคยเปลี่ยนรหัสแล้ว → ใส่รหัสผ่านที่เปลี่ยนไว้ (bcrypt hash เก็บใน `password` column)
+ *       - รหัสเริ่มต้น = `nationalId` (ระบบ hash ไว้ใน `password` column ตั้งแต่สร้าง account)
+ *       - เปลี่ยนรหัสแล้ว → ใช้รหัสใหม่ที่ตั้งไว้เท่านั้น (nationalId ใช้ไม่ได้อีก)
  *
  *       **ระบบ Dual Login สำหรับ Admin/SuperAdmin:**
  *       - ใส่ `adminPassword` → `dashboardMode: 'admin'` หรือ `'superadmin'` (เข้าหน้า Admin Dashboard)
@@ -1384,8 +1385,8 @@
  *     description: |
  *       เปลี่ยนรหัสผ่านปกติของตัวเอง ต้องระบุรหัสปัจจุบันก่อนถึงจะเปลี่ยนได้
  *
- *       **รหัสผ่านเริ่มต้น** คือ `nationalId` (เลขบัตรประชาชน 13 หลัก)
- *       แนะนำให้เปลี่ยนหลัง login ครั้งแรก
+ *       **รหัสผ่านเริ่มต้น** คือ `nationalId` (เลขบัตรประชาชน 13 หลัก) ซึ่งระบบ hash เก็บไว้ตั้งแต่สร้าง account
+ *       หลังเปลี่ยนรหัสแล้ว `nationalId` จะใช้ login ไม่ได้อีก
  *
  *       > **หมายเหตุ:** API นี้เปลี่ยนเฉพาะรหัสปกติ (password/nationalId)
  *       > ไม่ใช่ `adminPassword` — สำหรับเข้าหน้า Admin Dashboard
@@ -2154,7 +2155,6 @@
  *         - emergent_relation
  *         - phone
  *         - email
- *         - password
  *         - birthDate
  *         - branchId
  *       properties:
@@ -2216,11 +2216,12 @@
  *           example: "somchai@example.com"
  *         password:
  *           type: string
- *           example: "1234567890123"
+ *           nullable: true
+ *           example: "MyCustomPass123"
  *           description: |
- *             รหัสผ่านเริ่มต้น — เก็บเป็น bcrypt hash ใน `password` column
- *             พนักงานจะใช้ค่านี้ login ตั้งแต่วันแรก
- *             แนะนำให้ตั้งเป็น nationalId เพื่อให้พนักงานจำได้ง่าย
+ *             รหัสผ่านเริ่มต้น (optional) — ถ้าไม่ระบุ ระบบจะใช้ `nationalId` เป็นรหัสเริ่มต้นให้อัตโนมัติ
+ *             ค่าที่ส่งมา (หรือ nationalId) จะถูก hash ด้วย bcrypt เก็บใน `password` column
+ *             พนักงาน login ด้วยค่านี้ได้ทันทีตั้งแต่วันแรก
  *         birthDate:
  *           type: string
  *           format: date

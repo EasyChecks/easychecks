@@ -124,7 +124,11 @@ function formatDateDisplay(dateStr: string) {
   return new Date(dateStr).toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-export default function EventManagementTab() {
+interface EventManagementTabProps {
+  locationsKey?: number;
+}
+
+export default function EventManagementTab({ locationsKey }: EventManagementTabProps) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -197,6 +201,14 @@ export default function EventManagementTab() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Re-fetch locations when the parent signals a change (e.g., a location was added/edited/deleted in the other tab)
+  useEffect(() => {
+    if (locationsKey !== undefined && locationsKey > 0) {
+      silentRefresh();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationsKey]);
 
   // Lazy-fetch users or branches when participantType needs them
   const fetchParticipantData = useCallback(async (type: ParticipantType) => {
@@ -920,7 +932,7 @@ export default function EventManagementTab() {
       />
 
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-2000 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={confirmDialog.onCancel}></div>
           <Card className="relative z-10 w-full max-w-md p-6">
             <h3 className="mb-2 text-lg font-semibold">{confirmDialog.title}</h3>

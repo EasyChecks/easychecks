@@ -2722,6 +2722,10 @@
  *       - ต้องระบุ eventName, startDateTime, endDateTime, participantType
  *       - startDateTime ต้องน้อยกว่า endDateTime
  *       - Location (mode A) ต้องมีอยู่จริงและยังไม่ถูกลบ
+ *
+ *       **เวลา/Timezone:**
+ *       - ส่งวันเวลาแบบ ISO 8601 หากต้องการเวลาไทย (UTC+7) **ต้องใช้ `+07:00` suffix** เช่น `2026-03-20T09:00:00.000+07:00`
+ *       - หากใช้ `Z` suffix เวลาจะถูกตีความว่า UTC (UTC+0) ซึ่งจะทำให้เวลาคลาดเคลื่อนไป 7 ชั่วโมง
  *     tags:
  *       - Events
  *     security:
@@ -2763,11 +2767,13 @@
  *               startDateTime:
  *                 type: string
  *                 format: date-time
- *                 example: "2026-03-10T09:00:00.000Z"
+ *                 description: "เวลาเริ่มต้น — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 09:00 น. ไทย = 2026-03-10T09:00:00.000+07:00"
+ *                 example: "2026-03-10T09:00:00.000+07:00"
  *               endDateTime:
  *                 type: string
  *                 format: date-time
- *                 example: "2026-03-10T17:00:00.000Z"
+ *                 description: "เวลาสิ้นสุด — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 17:00 น. ไทย = 2026-03-10T17:00:00.000+07:00"
+ *                 example: "2026-03-10T17:00:00.000+07:00"
  *               participantType:
  *                 type: string
  *                 enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
@@ -2796,8 +2802,8 @@
  *             eventName: "กิจกรรม Team Building"
  *             description: "กิจกรรมสร้างทีมประจำปี"
  *             locationId: 5
- *             startDateTime: "2026-03-20T09:00:00.000Z"
- *             endDateTime: "2026-03-20T17:00:00.000Z"
+ *             startDateTime: "2026-03-20T09:00:00.000+07:00"
+ *             endDateTime: "2026-03-20T17:00:00.000+07:00"
  *             participantType: "ALL"
  *     responses:
  *       201:
@@ -3165,6 +3171,10 @@
  *       - ถ้าเปลี่ยน participantType หรือ participants → ลบผู้เข้าร่วมเดิมและเพิ่มใหม่
  *       - startDateTime ต้องน้อยกว่า endDateTime (ถ้าส่งมาเปลี่ยน)
  *       - `locationId: null` จะล้าง location ออก
+ *
+ *       **เวลา/Timezone:**
+ *       - ส่งวันเวลาแบบ ISO 8601 หากต้องการเวลาไทย (UTC+7) **ต้องใช้ `+07:00` suffix** เช่น `2026-03-20T22:40:00.000+07:00`
+ *       - หากใช้ `Z` suffix เวลาจะถูกตีความว่า UTC (UTC+0) ซึ่งจะทำให้เวลาคลาดเคลื่อนไป 7 ชั่วโมง
  *     tags:
  *       - Events
  *     security:
@@ -3202,9 +3212,13 @@
  *               startDateTime:
  *                 type: string
  *                 format: date-time
+ *                 description: "เวลาเริ่มต้น — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 09:00 น. ไทย = 2026-03-10T09:00:00.000+07:00"
+ *                 example: "2026-03-20T09:00:00.000+07:00"
  *               endDateTime:
  *                 type: string
  *                 format: date-time
+ *                 description: "เวลาสิ้นสุด — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 18:00 น. ไทย = 2026-03-20T18:00:00.000+07:00"
+ *                 example: "2026-03-20T18:00:00.000+07:00"
  *               participantType:
  *                 type: string
  *                 enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
@@ -3227,7 +3241,7 @@
  *                       type: string
  *           example:
  *             eventName: "ประชุมประจำเดือน (แก้ไข)"
- *             endDateTime: "2026-03-20T18:00:00.000Z"
+ *             endDateTime: "2026-03-20T18:00:00.000+07:00"
  *     responses:
  *       200:
  *         description: แก้ไขกิจกรรมสำเร็จ

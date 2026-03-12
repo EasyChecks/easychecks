@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from '@/components/ui/card';
 import LocationManagement from '@/components/admin/LocationManagement';
@@ -8,6 +8,11 @@ import EventManagementTab from '@/components/admin/EventManagementTab';
 
 export default function MappingAndEventsPage() {
   const [activeTab, setActiveTab] = useState<'locations' | 'events'>('locations');
+  const [locationsVersion, setLocationsVersion] = useState(0);
+
+  const handleLocationsChanged = useCallback(() => {
+    setLocationsVersion(v => v + 1);
+  }, []);
 
   return (
     <div className="min-h-screen p-4 bg-slate-50 sm:p-6">
@@ -42,11 +47,11 @@ export default function MappingAndEventsPage() {
           </TabsList>
 
           <TabsContent value="locations" className="mt-0">
-            <LocationManagement />
+            <LocationManagement onLocationsChanged={handleLocationsChanged} />
           </TabsContent>
 
           <TabsContent value="events" className="mt-0">
-            <EventManagementTab />
+            <EventManagementTab locationsKey={locationsVersion} />
           </TabsContent>
         </Tabs>
       </Card>

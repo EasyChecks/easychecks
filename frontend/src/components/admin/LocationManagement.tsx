@@ -34,7 +34,11 @@ const EMPTY_FORM: CreateLocationRequest & { locationType: LocationType } = {
   isActive: true,
 };
 
-export default function LocationManagement() {
+interface LocationManagementProps {
+  onLocationsChanged?: () => void;
+}
+
+export default function LocationManagement({ onLocationsChanged }: LocationManagementProps) {
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingLocation, setIsAddingLocation] = useState(false);
@@ -152,6 +156,7 @@ export default function LocationManagement() {
       setIsAddingLocation(false);
       setPendingPosition(null);
       silentRefresh(); // replace temp item with real server data in background
+      onLocationsChanged?.();
     } catch (err) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const msg = (err as any)?.response?.data?.error || 'เกิดข้อผิดพลาด กรุณาลองใหม่';
@@ -213,6 +218,7 @@ export default function LocationManagement() {
       setEditingLocationId(null);
       setEditFormData({});
       silentRefresh(); // confirm sync in background
+      onLocationsChanged?.();
     } catch (err) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const msg = (err as any)?.response?.data?.error || 'เกิดข้อผิดพลาด กรุณาลองใหม่';
@@ -240,6 +246,7 @@ export default function LocationManagement() {
           await locationService.delete(location.locationId);
           setAlertDialog({ isOpen: true, type: 'success', title: 'ลบสำเร็จ', message: 'ลบสถานที่เรียบร้อยแล้ว' });
           silentRefresh(); // confirm sync in background
+          onLocationsChanged?.();
         } catch (err) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const msg = (err as any)?.response?.data?.error || 'ลบไม่สำเร็จ';
@@ -550,7 +557,7 @@ export default function LocationManagement() {
       />
 
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-2000 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={confirmDialog.onCancel}></div>
           <Card className="relative z-10 w-full max-w-md p-6">
             <h3 className="mb-2 text-lg font-semibold">{confirmDialog.title}</h3>

@@ -643,6 +643,7 @@ export const updateUser = async (
 
   // ── ขั้น 4: ตรวจ branch ใหม่ (ถ้ามีการย้ายสาขา) ────────────────────
   // Admin ย้ายได้เฉพาะในสาขาตัวเอง
+  if (data.branchId) {
     const branch = await prisma.branch.findUnique({
       where: { branchId: data.branchId },
     });

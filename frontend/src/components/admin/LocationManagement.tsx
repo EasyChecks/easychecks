@@ -34,6 +34,8 @@ const EMPTY_FORM: CreateLocationRequest & { locationType: LocationType } = {
   isActive: true,
 };
 
+const LOC_PER_PAGE = 9;
+
 interface LocationManagementProps {
   onLocationsChanged?: () => void;
 }
@@ -44,7 +46,7 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
   const [isAddingLocation, setIsAddingLocation] = useState(false);
   const [editingLocationId, setEditingLocationId] = useState<number | null>(null);
   const [pendingPosition, setPendingPosition] = useState<{ lat: number; lng: number } | null>(null);
-  const [showAllLocations, setShowAllLocations] = useState(false);
+  const [locPage, setLocPage] = useState(1);
   const [mapFlyTo, setMapFlyTo] = useState<{ lat: number; lng: number; zoom?: number; seq: number } | undefined>();
   const mapFlySeq = useRef(0);
 
@@ -263,6 +265,8 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
     () => locations.filter(l => l.isActive).map(toMapLocation),
     [locations]
   );
+  const locTotalPages = Math.max(1, Math.ceil(locations.length / LOC_PER_PAGE));
+  const safeLocPage = Math.min(locPage, locTotalPages);
   return (
     <div className="space-y-6">
       {/* Map + Add-form overlay */}
@@ -471,28 +475,6 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
             รายการพื้นที่เช็คอิน
             <span className="ml-2 text-sm font-normal text-gray-400">({locations.length} รายการ)</span>
           </h2>
-          {locations.length > 3 && (
-            <button
-              onClick={() => setShowAllLocations(v => !v)}
-              className="flex items-center gap-1.5 text-sm text-orange-600 hover:text-orange-700 font-medium transition-colors"
-            >
-              {showAllLocations ? (
-                <>
-                  ยุบรายการ
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                  </svg>
-                </>
-              ) : (
-                <>
-                  แสดงทั้งหมด {locations.length} รายการ
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </>
-              )}
-            </button>
-          )}
         </div>
 
         {loading ? (
@@ -512,7 +494,7 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {(showAllLocations ? locations : locations.slice(0, 3)).map((location) => (
+              {locations.slice((safeLocPage - 1) * LOC_PER_PAGE, safeLocPage * LOC_PER_PAGE).map((location) => (
                 <LocationCard
                   key={location.locationId}
                   location={location}
@@ -532,16 +514,24 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
                 />
               ))}
             </div>
-            {!showAllLocations && locations.length > 3 && (
-              <button
-                onClick={() => setShowAllLocations(true)}
-                className="mt-4 w-full py-2.5 rounded-xl border border-dashed border-gray-300 text-sm text-gray-500 hover:border-orange-400 hover:text-orange-600 hover:bg-orange-50/50 transition-all flex items-center justify-center gap-1.5"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-                ซ่อนอยู่อีก {locations.length - 3} รายการ — คลิกเพื่อแสดงทั้งหมด
-              </button>
+            {locTotalPages > 1 && (
+              <div className="flex items-center justify-center gap-3 mt-4">
+                <button
+                  onClick={() => setLocPage(p => Math.max(1, p - 1))}
+                  disabled={safeLocPage <= 1}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  ← ก่อนหน้า
+                </button>
+                <span className="text-sm text-gray-500">หน้า {safeLocPage} / {locTotalPages}</span>
+                <button
+                  onClick={() => setLocPage(p => Math.min(locTotalPages, p + 1))}
+                  disabled={safeLocPage >= locTotalPages}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  ถัดไป →
+                </button>
+              </div>
             )}
           </>
         )}

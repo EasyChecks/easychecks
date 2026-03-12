@@ -288,7 +288,18 @@ async function formatUsersWithAvatars(users: any[]): Promise<any[]> {
 // ============================================
 
 /**
- * ➕ สร้างผู้ใช้ใหม่
+ * ➕ สร้างพนักงานใหม่
+ *
+ * ขั้นตอนทั้งหมด:
+ * 1. ตรวจ branchId มีอยู่จริง
+ * 2. Auto-generate employeeId จาก branchCode + running number
+ * 3. ตรวจสิทธิ์: Admin สร้างได้เฉพาะสาขาตัวเอง, SuperAdmin สร้างได้ทุกสาขา
+ * 4. ตรวจ email/nationalId ซ้ำ
+ * 5. Hash password ด้วย bcrypt → เก็บใน password column
+ *    (พนักงานใช้ตัวนี้ login เป็นรหัสแรก nationalId ยังคงเป็น fallback ถ้า password = null)
+ * 6. Upload avatar อัตโนมัติตามเพศ ไป Supabase Storage
+ * 7. บันทึก Audit Log
+ * 8. Return ข้อมูล user โดยไม่มี password field
  */
 export const createUser = async (data: CreateUserDTO) => {
   // 1. ตรวจสอบ branchId (บังคับสำหรับสร้าง employeeId)
@@ -333,10 +344,13 @@ export const createUser = async (data: CreateUserDTO) => {
     }
   }
 
-  // 6. Hash password
+  // ── ขั้น 6: Hash password และบันทึกลง password column ─────────────────
+  // password column ใช้ล็อกอินครั้งแรก (ถ้าตั้งเป็น nationalId)
+  // ถ้าพนักงานเปลี่ยนรหัสภายหลัง จะ overwrite ค่านี้ด้วย bcrypt hash ใหม่
   const hashedPassword = await hashPassword(data.password);
 
-  // 7. Upload avatar to Supabase (ใช้ gender จริง)
+  // ── ขั้น 7: Upload avatar ไปยัง Supabase Storage ─────────────────────
+  // fallback เป็น ui-avatars.com ถ้า upload ล้มเหลว
   let avatarUrl: string | null = null;
   try {
     const avatarGender = data.gender === 'FEMALE' ? 'female' : 'male';
@@ -347,7 +361,7 @@ export const createUser = async (data: CreateUserDTO) => {
     avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(data.firstName + ' ' + data.lastName)}&background=random&size=200`;
   }
 
-  // 8. Parse birthDate
+  // ── ขั้น 8: Parse birthDate ──────────────────────────────────────────
   let birthDate: Date | null = null;
   if (data.birthDate) {
     birthDate = typeof data.birthDate === 'string' 
@@ -355,7 +369,7 @@ export const createUser = async (data: CreateUserDTO) => {
       : data.birthDate;
   }
 
-  // 9. สร้าง user
+  // ── ขั้น 9: สร้าง user ใน database ──────────────────────────────────
   const user = await prisma.user.create({
     data: {
       employeeId,
@@ -390,7 +404,7 @@ export const createUser = async (data: CreateUserDTO) => {
     },
   });
 
-  // 10. บันทึก Audit Log
+  // ── ขั้น 10: บันทึก Audit Log (ใครสร้างใคร) ────────────────────────
   if (data.createdByUserId) {
     await createAuditLog({
       userId: data.createdByUserId,
@@ -577,7 +591,14 @@ export const getUserById = async (
 };
 
 /**
- * 🔄 อัปเดตผู้ใช้
+ * 🔄 อัปเดตข้อมูลพนักงาน
+ *
+ * ขั้นตอน:
+ * 1. ตรวจสิทธิ์สาขา: Admin แก้ได้เฉพาะคนในสาขาตัวเอง, SuperAdmin แก้ได้ทุกคน
+ * 2. ตรวจ email/nationalId ซ้ำ (ถ้ามีการเปลี่ยน)
+ * 3. ถ้า Admin ย้าย branchId ไม่ได้ (ต้องเป็นสาขาเดียวกัน)
+ * 4. ถ้ามี field `password` ใน body → reset รหัสผ่านทันที (hash bcrypt เก็บใน password column)
+ * 5. บันทึก Audit Log
  */
 export const updateUser = async (
   userId: number,
@@ -586,7 +607,7 @@ export const updateUser = async (
   updaterBranchId: number | undefined,
   data: UpdateUserDTO
 ) => {
-  // 1. ดึงข้อมูล user เดิม
+  // ── ขั้น 1: ดึงข้อมูล user เดิม ───────────────────────────────────────
   const existingUser = await prisma.user.findUnique({
     where: { userId },
   });
@@ -595,12 +616,13 @@ export const updateUser = async (
     throw new Error('ไม่พบผู้ใช้');
   }
 
-  // 2. ตรวจสอบสิทธิ์
+  // ── ขั้น 2: ตรวจสิทธิ์สาขา ─────────────────────────────────────────
+  // Admin แก้ได้เฉพาะคนในสาขาตัวเอง, SuperAdmin แก้ได้ทุกคน
   if (!canAccessBranch(updaterRole, updaterBranchId, existingUser.branchId)) {
     throw new Error('คุณไม่มีสิทธิ์แก้ไขข้อมูลผู้ใช้สาขาอื่น');
   }
 
-  // 3. ถ้าเปลี่ยน email หรือ nationalId ต้องตรวจสอบซ้ำ
+  // ── ขั้น 3: ตรวจ email/nationalId ซ้ำ (เฉพาะกรณีมีการเปลี่ยน) ─────
   if (data.email && data.email !== existingUser.email) {
     const emailExists = await prisma.user.findUnique({
       where: { email: data.email },
@@ -619,8 +641,8 @@ export const updateUser = async (
     }
   }
 
-  // 4. ตรวจสอบ branch ใหม่ (ถ้ามี)
-  if (data.branchId) {
+  // ── ขั้น 4: ตรวจ branch ใหม่ (ถ้ามีการย้ายสาขา) ────────────────────
+  // Admin ย้ายได้เฉพาะในสาขาตัวเอง
     const branch = await prisma.branch.findUnique({
       where: { branchId: data.branchId },
     });
@@ -633,7 +655,8 @@ export const updateUser = async (
     }
   }
 
-  // 5. เตรียมข้อมูลอัปเดต
+  // ── ขั้น 5: เตรียมข้อมูลอัปเดต ─────────────────────────────────────
+  // เฉพาะ field ที่ส่งมาเท่านั้นจะถูก update (undefined = ไม่เปลี่ยน)
   const updateData: any = {
     updatedByUserId,
   };
@@ -655,9 +678,10 @@ export const updateUser = async (
   if (data.position !== undefined) updateData.position = data.position || null;
   if (data.bloodType !== undefined) updateData.bloodType = data.bloodType || null;
 
-  // ตั้ง custom password (admin reset password)
+  // Admin reset password: hash ด้วย bcrypt และบันทึกใน password column
+  // พนักงานจะต้อง login ด้วยรหัสนี้ได้ทันที
   if (data.password) {
-    updateData.customPassword = await hashPassword(data.password);
+    updateData.password = await hashPassword(data.password);
   }
 
   // Parse birthDate
@@ -680,7 +704,7 @@ export const updateUser = async (
     }
   }
 
-  // 6. อัปเดต user
+  // ── ขั้น 6: บันทึกลง database ──────────────────────────────────────
   const updatedUser = await prisma.user.update({
     where: { userId },
     data: updateData,
@@ -717,7 +741,7 @@ export const updateUser = async (
     },
   });
 
-  // 7. บันทึก Audit Log
+  // ── ขั้น 7: บันทึก Audit Log (ใครแก้ใคร เปลี่ยนอะไร) ────────────────
   await createAuditLog({
     userId: updatedByUserId,
     action: AuditAction.UPDATE_USER,

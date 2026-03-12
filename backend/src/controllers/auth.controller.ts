@@ -2,13 +2,23 @@ import type { Request, Response } from 'express';
 import { authService } from '../services/auth.service.js';
 
 /**
- * 🔐 AUTH CONTROLLER - Database Session
+ * 🔐 AUTH CONTROLLER - รับ HTTP request และส่งต่อให้ authService
+ *
+ * Endpoints:
+ * - POST /api/auth/login           → เข้าสู่ระบบ (public)
+ * - POST /api/auth/logout          → ออกจากระบบ (ต้องมี token)
+ * - POST /api/auth/refresh         → ขอ accessToken ใหม่ (public)
+ * - POST /api/auth/change-password → เปลี่ยนรหัสผ่าน (ต้องมี token)
  */
 
 export const authController = {
   /**
    * POST /api/auth/login
-   * Body: { employeeId, password (nationalId) }
+   *
+   * รับ employeeId + password แล้วส่งต่อให้ authService.login()
+   * password อาจเป็น: nationalId (default) | รหัสที่เปลี่ยนแล้ว | adminPassword
+   *
+   * Rate limit: 5 ครั้งต่อ 60 วินาที ต่อ IP (กำหนดใน auth.routes.ts)
    */
   async login(req: Request, res: Response) {
     try {
@@ -38,6 +48,9 @@ export const authController = {
 
   /**
    * POST /api/auth/logout
+   *
+   * ดึง token จาก Authorization header แล้วลบ session ออก database
+   * หลัง logout token ใช้ไม่ได้ทันที แม้ JWT ยังไม่หมดอายุ
    */
   async logout(req: Request, res: Response) {
     try {
@@ -60,6 +73,12 @@ export const authController = {
 
   /**
    * POST /api/auth/change-password
+   * Body: { currentPassword, newPassword }
+   *
+   * เปลี่ยนรหัสผ่านปกติของตัวเอง (ไม่ใช่ adminPassword)
+   * - currentPassword: nationalId (ถ้ายังไม่เคยเปลี่ยน) หรือรหัสที่เปลี่ยนไว้แล้ว
+   * - newPassword: ต้องมีความยาว ≥ 6 ตัวอักษร
+   * หลังเปลี่ยนสำเร็จ → session ทั้งหมดถูกลบ → บังคับ login ใหม่
    */
   async changePassword(req: Request, res: Response) {
     try {
@@ -93,7 +112,10 @@ export const authController = {
 
   /**
    * POST /api/auth/refresh
-   * ใช้ refreshToken เพื่อได้ accessToken ใหม่
+   * Body: { refreshToken }
+   *
+   * ใช้ refreshToken (อายุ 7 วัน) เพื่อออก accessToken ใหม่ (อายุ 30 นาที)
+   * Frontend ควร intercept response 401 แล้ว call endpoint นี้อัตโนมัติ
    */
   async refresh(req: Request, res: Response) {
     try {

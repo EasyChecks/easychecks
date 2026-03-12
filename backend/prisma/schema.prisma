@@ -21,8 +21,7 @@ model User {
   emergent_relation                                       String               @map("emergent_relation")
   phone                                                   String               @map("phone")
   email                                                   String               @unique
-  password                                                String               @map("password")
-  customPassword                                          String?              @map("custom_password")
+  password                                                String?              @map("password")
   adminPassword                                           String?              @map("admin_password")
   avatarUrl                                               String?              @map("avatar_url")
   birthDate                                               DateTime?            @map("birth_date") @db.Date

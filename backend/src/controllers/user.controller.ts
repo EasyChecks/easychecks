@@ -6,45 +6,36 @@ import { parse } from 'csv-parse/sync';
 
 /**
  * 👤 User Controller - จัดการ API เกี่ยวกับผู้ใช้
- * 
- * 🔴 หมายเหตุ: ตอนนี้ยังไม่มี Auth Middleware
- * - รับ userId, role, branchId จาก body แทน req.user
- * - รอเพื่อนทำ Auth เสร็จค่อยเปลี่ยน
- * 
- * สิทธิ์การเข้าถึง:
- * - SuperAdmin: ดู/สร้าง/แก้/ลบ ได้ทุกสาขา
- * - Admin: ดู/สร้าง/แก้/ลบ ได้เฉพาะสาขาตัวเอง
- * - User: ดูได้เฉพาะข้อมูลตัวเอง
+ *
+ * สิทธิ์การเข้าถึง (Role-based Access Control):
+ * ┌────────────┬───────┬──────────────┬──────────────┬──────────────┐
+ * │ Action     │ USER  │ MANAGER      │ ADMIN        │ SUPERADMIN   │
+ * ├────────────┼───────┼──────────────┼──────────────┼──────────────┤
+ * │ Create     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+ * │ Read (all) │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+ * │ Read (own) │  ✓    │  ✓           │  ✓           │  ✓           │
+ * │ Update     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+ * │ Delete     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+ * └────────────┴───────┴──────────────┴──────────────┴──────────────┘
+ *
+ * ทุก endpoint ใช้ข้อมูล requester จาก req.user (ผ่าน authenticate middleware)
  */
 
 /**
- * ➕ สร้างผู้ใช้ใหม่ (Admin/SuperAdmin only)
+ * ➕ สร้างพนักงานใหม่ (Admin/SuperAdmin only)
  * POST /api/users
- * 
- * Body: {
- *   createdByUserId: number,   // (จำเป็น) ผู้สร้าง
- *   creatorRole: string,       // (จำเป็น) ADMIN หรือ SUPERADMIN
- *   creatorBranchId?: number,  // (จำเป็นถ้าเป็น ADMIN) สาขาของผู้สร้าง
- *   title: string,             // (จำเป็น) MR (นาย), MRS (นาง), MISS (นางสาว)
- *   firstName: string,         // (จำเป็น) ชื่อ
- *   lastName: string,          // (จำเป็น) นามสกุล
- *   nickname?: string,         // (optional) ชื่อเล่น
- *   gender: string,            // (จำเป็น) MALE หรือ FEMALE
- *   nationalId: string,        // (จำเป็น) เลขบัตรประชาชน
- *   emergent_tel: string,      // (จำเป็น) เบอร์ติดต่อฉุกเฉิน
- *   emergent_first_name: string,     // (จำเป็น) ชื่อจริงผู้ติดต่อคือกเฉิน
- *   emergent_last_name: string,     // (จำเป็น) นามสกุลผู้ติดต่อคือกเฉิน
- *   emergent_relation: string, // (จำเป็น) ความสัมพันธ์
- *   phone: string,             // (จำเป็น) เบอร์โทร
- *   email: string,             // (จำเป็น) อีเมล
- *   password: string,          // (จำเป็น) รหัสผ่าน
- *   birthDate: string,         // (จำเป็น) วันเกิด YYYY-MM-DD
- *   branchId: number,          // (จำเป็น) รหัสสาขา (สำหรับสร้าง employeeId)
- *   role?: string,             // (optional) Role: USER, MANAGER, ADMIN, SUPERADMIN
- * }
- * 
- * ⚡ employeeId จะถูก auto-generate จาก branchCode + running number
- *    เช่น BKK001, CNX002, HKT003
+ *
+ * ขั้นตอน:
+ * 1. ตรวจ role จาก req.user (ผ่าน authenticate)
+ * 2. Validate required fields
+ * 3. ส่งต่อให้ userService.createUser() ซึ่งจะ:
+ *    - Auto-generate employeeId จาก branchCode (เช่น BKK001)
+ *    - Hash password ด้วย bcrypt
+ *    - Upload avatar อัตโนมัติตามเพศ
+ *    - บันทึก Audit Log
+ * 4. Broadcast WebSocket เพื่ออัพเดท real-time
+ *
+ * Admin สร้างได้เฉพาะสาขาตัวเอง, SuperAdmin สร้างได้ทุกสาขา
  */
 export const createUser = async (req: Request, res: Response) => {
   try {
@@ -175,18 +166,16 @@ export const getUserById = async (req: Request, res: Response) => {
 };
 
 /**
- * 🔄 อัปเดตผู้ใช้
+ * 🔄 อัปเดตข้อมูลพนักงาน (Admin/SuperAdmin only)
  * PUT /api/users/:id
- * 
- * Body: {
- *   updatedByUserId: number,   // (จำเป็น) ผู้แก้ไข
- *   updaterRole: string,       // (จำเป็น) Role ของผู้แก้ไข
- *   updaterBranchId?: number,  // (ถ้าเป็น ADMIN) สาขาของผู้แก้ไข
- *   firstName?, lastName?, nickname?, nationalId?,
- *   emergent_tel?, emergent_first_name?, emergent_last_name?, emergent_relation?,
- *   phone?, email?, password?, birthDate?,
- *   branchId?, role?, status?, avatarGender?
- * }
+ *
+ * สามารถแก้ไขได้: ชื่อ, เบอร์, อีเมล, nationalId, แผนก, ตำแหน่ง ฯลฯ
+ * การ reset รหัสผ่าน: ส่ง field `password` มาใน body
+ *   → service จะ hash ด้วย bcrypt แล้วบันทึกใน password column
+ *   → พนักงานจะต้อง login ด้วยรหัสใหม่ได้ทันที
+ *
+ * Admin แก้ได้เฉพาะคนในสาขาตัวเอง, SuperAdmin แก้ได้ทุกคน
+ * Admin ไม่สามารถย้ายพนักงานไปสาขาอื่นได้
  */
 export const updateUser = async (req: Request, res: Response) => {
   try {
@@ -223,15 +212,12 @@ export const updateUser = async (req: Request, res: Response) => {
 };
 
 /**
- * 🗑️ ลบผู้ใช้ (soft delete - เปลี่ยน status เป็น RESIGNED)
+ * 🗑️ ลบพนักงาน — Soft Delete (Admin/SuperAdmin only)
  * DELETE /api/users/:id
- * 
- * Body: { 
- *   deletedByUserId: number,   // (จำเป็น) ผู้ลบ
- *   deleterRole: string,       // (จำเป็น) Role ของผู้ลบ
- *   deleterBranchId?: number,  // (ถ้าเป็น ADMIN) สาขาของผู้ลบ
- *   deleteReason: string       // (จำเป็น) เหตุผลในการลบ
- * }
+ *
+ * ไม่ได้ลบข้อมูลออกจาก database จริง แต่เปลี่ยน status เป็น RESIGNED
+ * เพื่อรักษาประวัติ Attendance, Leave Request และ Audit Log ไว้
+ * Body: { deleteReason: string } — จำเป็น เพื่อบันทึกใน Audit Log
  */
 export const deleteUser = async (req: Request, res: Response) => {
   try {

@@ -1226,9 +1226,13 @@
  *       **Token เป็น JWT (HS256)** signed ด้วย `JWT_SECRET` — เก็บใน database ด้วย (รองรับ revoke ผ่าน logout)
  *       JWT Payload: `sub` (userId), `employeeId`, `role`, `dashboardMode`, `jti`
  *
+ *       **ระบบ Password:**
+ *       - ถ้ายังไม่เคยเปลี่ยนรหัส → ใส่ `nationalId` (เลขบัตรประชาชน 13 หลัก)
+ *       - ถ้าเคยเปลี่ยนรหัสแล้ว → ใส่รหัสผ่านที่เปลี่ยนไว้ (bcrypt hash เก็บใน `password` column)
+ *
  *       **ระบบ Dual Login สำหรับ Admin/SuperAdmin:**
  *       - ใส่ `adminPassword` → `dashboardMode: 'admin'` หรือ `'superadmin'` (เข้าหน้า Admin Dashboard)
- *       - ใส่รหัสปกติ (nationalId / customPassword) → `dashboardMode: 'user'` (เข้าหน้า User Dashboard)
+ *       - ใส่รหัสปกติ (nationalId หรือรหัสที่เปลี่ยนไว้) → `dashboardMode: 'user'` (เข้าหน้า User Dashboard)
  *
  *       **Rate Limit:** 5 ครั้งต่อ 60 วินาที ต่อ IP
  *     tags:
@@ -1383,7 +1387,7 @@
  *       **รหัสผ่านเริ่มต้น** คือ `nationalId` (เลขบัตรประชาชน 13 หลัก)
  *       แนะนำให้เปลี่ยนหลัง login ครั้งแรก
  *
- *       > **หมายเหตุ:** API นี้เปลี่ยนเฉพาะรหัสปกติ (customPassword/nationalId)
+ *       > **หมายเหตุ:** API นี้เปลี่ยนเฉพาะรหัสปกติ (password/nationalId)
  *       > ไม่ใช่ `adminPassword` — สำหรับเข้าหน้า Admin Dashboard
  *
  *       **ข้อกำหนดรหัสผ่าน:**
@@ -2188,7 +2192,7 @@
  *         nationalId:
  *           type: string
  *           example: "1234567890123"
- *           description: เลขบัตรประชาชน 13 หลัก (ใช้เป็นรหัสผ่านเริ่มต้นด้วย)
+ *           description: เลขบัตรประชาชน 13 หลัก
  *         emergent_tel:
  *           type: string
  *           example: "0812345678"
@@ -2213,7 +2217,10 @@
  *         password:
  *           type: string
  *           example: "1234567890123"
- *           description: รหัสผ่านเริ่มต้น (แนะนำให้ใช้ nationalId)
+ *           description: |
+ *             รหัสผ่านเริ่มต้น — เก็บเป็น bcrypt hash ใน `password` column
+ *             พนักงานจะใช้ค่านี้ login ตั้งแต่วันแรก
+ *             แนะนำให้ตั้งเป็น nationalId เพื่อให้พนักงานจำได้ง่าย
  *         birthDate:
  *           type: string
  *           format: date
@@ -2317,7 +2324,7 @@
  *           type: string
  *           example: "NewPass@2026"
  *           description: |
- *             รีเซ็ตรหัสผ่านพนักงาน — จะถูก hash ด้วย bcrypt และเก็บใน customPassword
+ *             รีเซ็ตรหัสผ่านพนักงาน — จะถูก hash ด้วย bcrypt และเก็บใน password
  *             พนักงานสามารถใช้รหัสนี้ login เข้าระบบได้ทันที
  *             ถ้าไม่ระบุ = รหัสผ่านเดิมไม่เปลี่ยน
  */

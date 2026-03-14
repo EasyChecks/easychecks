@@ -7,6 +7,8 @@ import { setupAttendanceWebSocket } from './websocket/attendance.websocket.js';
 import { setupEventWebSocket } from './websocket/event.websocket.js';
 import { setupSwagger } from './config/swagger.js';
 import { startAuditCleanupCron } from './services/audit-cron.service.js';
+import { toThaiIso } from './utils/timezone.js';
+import { AppError } from './utils/custom-errors.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -22,7 +24,7 @@ setupSwagger(app);
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
-    timestamp: new Date().toISOString(),
+    timestamp: toThaiIso(new Date()),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development'
   });
@@ -45,8 +47,14 @@ app.use((req, res) => {
 import type { Request, Response, NextFunction } from 'express';
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
-  res.status(500).json({
+
+  const statusCode = err instanceof AppError
+    ? err.statusCode
+    : (typeof (err as any)?.statusCode === 'number' ? (err as any).statusCode : 500);
+
+  res.status(statusCode).json({
     success: false,
+    statusCode,
     error: err.message || 'Internal server error'
   });
 });

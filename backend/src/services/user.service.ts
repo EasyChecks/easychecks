@@ -392,7 +392,6 @@ export const createUser = async (data: CreateUserDTO) => {
       branchId: data.branchId,
       role: data.role || 'USER',
       status: data.status || 'ACTIVE',
-      updatedByUserId: data.createdByUserId || null,
     },
     include: {
       branch: {
@@ -659,9 +658,7 @@ export const updateUser = async (
 
   // ── ขั้น 5: เตรียมข้อมูลอัปเดต ─────────────────────────────────────
   // เฉพาะ field ที่ส่งมาเท่านั้นจะถูก update (undefined = ไม่เปลี่ยน)
-  const updateData: any = {
-    updatedByUserId,
-  };
+  const updateData: any = {};
 
   if (data.firstName !== undefined) updateData.firstName = data.firstName;
   if (data.lastName !== undefined) updateData.lastName = data.lastName;
@@ -809,7 +806,6 @@ export const deleteUser = async (
     where: { userId },
     data: {
       status: 'RESIGNED',
-      updatedByUserId: deletedByUserId,
     },
   });
 
@@ -1048,7 +1044,6 @@ export const bulkCreateUsers = async (
           branchId,
           role,
           status: 'ACTIVE',
-          updatedByUserId: createdByUserId,
         },
       });
 

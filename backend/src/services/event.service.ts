@@ -91,7 +91,7 @@ async function createEvent(data: CreateEventDTO): Promise<Event> {
     }
 
     // 🚫 ตรวจสอบว่าสถานที่ยังใช้งานได้อยู่ (ไม่ถูก soft delete)
-    if (location.deletedAt) {
+    if (location.deleteReason) {
       throw new Error('ไม่สามารถสร้างกิจกรรมในสถานที่ที่ถูกลบแล้ว');
     }
   }
@@ -259,9 +259,9 @@ async function getAllEvents(params: SearchEventParams): Promise<{
 
   // กรอง deleted events ตาม parameter
   if (params.onlyDeleted) {
-    where.deletedAt = { not: null }; // แสดงเฉพาะที่ถูกลบ
+    where.deleteReason = { not: null }; // แสดงเฉพาะที่ถูกลบ
   } else if (!params.includeDeleted) {
-    where.deletedAt = null; // 🚫 กรองเฉพาะที่ยังไม่ถูก soft delete (deletedAt IS NULL)
+    where.deleteReason = null;
   }
 
   // 🔍 เพิ่มเงื่อนไขค้นหาแบบ OR เพื่อค้นหาจากหลายฟิลด์
@@ -340,14 +340,6 @@ async function getAllEvents(params: SearchEventParams): Promise<{
             branchId: true,
           },
         },
-        updatedBy: {
-          select: {
-            userId: true,
-            firstName: true,
-            lastName: true,
-            branchId: true,
-          },
-        },
         _count: {
           select: {
             event_participants: true,
@@ -384,20 +376,6 @@ async function getEventById(eventId: number): Promise<Event | null> {
           lastName: true,
           email: true,
           role: true,
-        },
-      },
-      updatedBy: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      deletedBy: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
         },
       },
       event_participants: {
@@ -445,7 +423,7 @@ async function updateEvent(
     throw new Error('ไม่พบกิจกรรม');
   }
 
-  if (event.deletedAt) {
+  if (event.deleteReason) {
     throw new Error('ไม่สามารถแก้ไขกิจกรรมที่ถูกลบแล้ว');
   }
 
@@ -491,19 +469,10 @@ async function updateEvent(
       endDateTime: data.endDateTime,
       participantType: data.participantType,
       isActive: data.isActive,
-      updatedByUserId: data.updatedByUserId,
-      updatedAt: new Date(),
     },
     include: {
       location: true,
       creator: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      updatedBy: {
         select: {
           userId: true,
           firstName: true,
@@ -540,7 +509,7 @@ async function deleteEvent(
     throw new Error('ไม่พบกิจกรรม');
   }
 
-  if (event.deletedAt) {
+  if (event.deleteReason) {
     throw new Error('กิจกรรมนี้ถูกลบไปแล้ว');
   }
 
@@ -553,21 +522,12 @@ async function deleteEvent(
   const deletedEvent = await prisma.event.update({
     where: { eventId },
     data: {
-      deletedAt: new Date(),
-      deletedByUserId: data.deletedByUserId,
       deleteReason: data.deleteReason,
       isActive: false, // ปิดการใช้งานทันที
     },
     include: {
       location: true,
       creator: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      deletedBy: {
         select: {
           userId: true,
           firstName: true,
@@ -583,7 +543,7 @@ async function deleteEvent(
     targetTable: 'events',
     targetId: eventId,
     oldValues: { eventName: event.eventName, isActive: event.isActive },
-    newValues: { deletedAt: new Date(), deleteReason: data.deleteReason },
+    newValues: { deleted: true, deleteReason: data.deleteReason },
   });
 
   return deletedEvent;
@@ -601,16 +561,15 @@ async function restoreEvent(eventId: number, restoredByUserId?: number): Promise
     throw new Error('ไม่พบกิจกรรม');
   }
 
-  if (!event.deletedAt) {
+  if (!event.deleteReason) {
     throw new Error('กิจกรรมนี้ยังไม่ถูกลบ');
   }
 
   const restoredEvent = await prisma.event.update({
     where: { eventId },
     data: {
-      deletedAt: null,
-      deletedByUserId: null,
       deleteReason: null,
+      isActive: true,
     },
     include: {
       location: true,
@@ -629,8 +588,8 @@ async function restoreEvent(eventId: number, restoredByUserId?: number): Promise
     action: AuditAction.RESTORE_EVENT,
     targetTable: 'events',
     targetId: eventId,
-    oldValues: { deletedAt: event.deletedAt, deleteReason: event.deleteReason },
-    newValues: { deletedAt: null },
+    oldValues: { deleteReason: event.deleteReason, isActive: event.isActive },
+    newValues: { deleteReason: null, isActive: true },
   });
 
   return restoredEvent;
@@ -677,7 +636,7 @@ async function getMyEvents(userId: number): Promise<Event[]> {
   // )
   const events = await prisma.event.findMany({
     where: {
-      deletedAt: null,
+      deleteReason: null,
       isActive: true,
       endDateTime: { gte: now }, // แสดงเฉพาะกิจกรรมที่ยังไม่จบ
       OR: [
@@ -750,13 +709,13 @@ async function getEventStatistics(): Promise<{
 
   // ⚡ Query สถิติแบบ parallel เพื่อลดเวลาresponse
   // SQL: ทำ 7 queries พร้อมกัน:
-  //   1. SELECT COUNT(*) FROM Event WHERE deletedAt IS NULL
-  //   2. SELECT COUNT(*) FROM Event WHERE deletedAt IS NULL AND isActive = true
+  //   1. SELECT COUNT(*) FROM Event WHERE deleteReason IS NULL
+  //   2. SELECT COUNT(*) FROM Event WHERE deleteReason IS NULL AND isActive = true
   //   3. SELECT COUNT(*) FROM Event WHERE ... AND startDateTime > NOW() (กิจกรรมที่ยังไม่เริ่ม)
   //   4. SELECT COUNT(*) FROM Event WHERE ... AND startDateTime <= NOW() AND endDateTime >= NOW() (กำลังดำเนินการ)
   //   5. SELECT COUNT(*) FROM Event WHERE ... AND endDateTime < NOW() (ผ่านไปแล้ว)
-  //   6. SELECT COUNT(*) FROM Event WHERE deletedAt IS NOT NULL (ถูกลบ)
-  //   7. SELECT participantType, COUNT(*) FROM Event WHERE deletedAt IS NULL GROUP BY participantType
+  //   6. SELECT COUNT(*) FROM Event WHERE deleteReason IS NOT NULL (ถูกลบ)
+  //   7. SELECT participantType, COUNT(*) FROM Event WHERE deleteReason IS NULL GROUP BY participantType
   const [
     totalEvents,
     activeEvents,
@@ -766,26 +725,26 @@ async function getEventStatistics(): Promise<{
     deletedEvents,
     byTypeRaw,
   ] = await Promise.all([
-    prisma.event.count({ where: { deletedAt: null } }),
-    prisma.event.count({ where: { deletedAt: null, isActive: true } }),
+    prisma.event.count({ where: { deleteReason: null } }),
+    prisma.event.count({ where: { deleteReason: null, isActive: true } }),
     prisma.event.count({
-      where: { deletedAt: null, isActive: true, startDateTime: { gt: now } },
+      where: { deleteReason: null, isActive: true, startDateTime: { gt: now } },
     }),
     prisma.event.count({
       where: {
-        deletedAt: null,
+        deleteReason: null,
         isActive: true,
         startDateTime: { lte: now },
         endDateTime: { gte: now },
       },
     }),
     prisma.event.count({
-      where: { deletedAt: null, endDateTime: { lt: now } },
+      where: { deleteReason: null, endDateTime: { lt: now } },
     }),
-    prisma.event.count({ where: { deletedAt: { not: null } } }),
+    prisma.event.count({ where: { deleteReason: { not: null } } }),
     prisma.event.groupBy({
       by: ['participantType'],
-      where: { deletedAt: null },
+      where: { deleteReason: null },
       _count: true,
     }),
   ]);
@@ -890,7 +849,7 @@ async function eventCheckIn(data: EventCheckInDTO) {
   });
 
   if (!event) throw new Error('ไม่พบกิจกรรม');
-  if (event.deletedAt) throw new Error('กิจกรรมนี้ถูกลบแล้ว');
+  if (event.deleteReason) throw new Error('กิจกรรมนี้ถูกลบแล้ว');
   if (!event.isActive) throw new Error('กิจกรรมนี้ถูกปิดใช้งานแล้ว');
 
   const now = new Date();

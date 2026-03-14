@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import fetch from 'node-fetch';
-import { Readable } from 'stream';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -11,6 +10,68 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+type AttendancePhotoKind = 'check-in' | 'check-out';
+
+function parseImageInput(photo: string): { buffer: Buffer; contentType: string; extension: string } {
+  const dataUrlMatch = photo.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (dataUrlMatch?.[1] && dataUrlMatch?.[2]) {
+    const contentType = dataUrlMatch[1];
+    const base64 = dataUrlMatch[2];
+    const extension = contentType.split('/')[1]?.split('+')[0] || 'jpg';
+    return {
+      buffer: Buffer.from(base64, 'base64'),
+      contentType,
+      extension,
+    };
+  }
+
+  // รองรับกรณี frontend ส่ง base64 ตรงๆ (ไม่มี data URL prefix)
+  return {
+    buffer: Buffer.from(photo, 'base64'),
+    contentType: 'image/jpeg',
+    extension: 'jpg',
+  };
+}
+
+/**
+ * อัปโหลดรูป check-in/check-out ไป Supabase Storage และคืน public URL
+ */
+export async function uploadAttendancePhotoToSupabase(
+  userId: number,
+  photo: string,
+  kind: AttendancePhotoKind,
+): Promise<string> {
+  if (!photo || photo.trim().length === 0) {
+    throw new Error('รูปภาพว่าง ไม่สามารถอัปโหลดได้');
+  }
+
+  // ถ้าส่งมาเป็น URL อยู่แล้ว (เช่น รีไทรจาก client) ให้ใช้ต่อได้เลย
+  if (/^https?:\/\//i.test(photo)) {
+    return photo;
+  }
+
+  const { buffer, contentType, extension } = parseImageInput(photo);
+  const now = new Date();
+  const yyyy = String(now.getUTCFullYear());
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(now.getUTCDate()).padStart(2, '0');
+  const fileName = `attendance/${kind}/${yyyy}/${mm}/${dd}/u${userId}-${Date.now()}.${extension}`;
+
+  const { error } = await supabase.storage
+    .from(bucketName)
+    .upload(fileName, buffer, {
+      contentType,
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(`อัปโหลดรูป ${kind} ไป Supabase ไม่สำเร็จ: ${error.message}`);
+  }
+
+  const { data: publicData } = supabase.storage.from(bucketName).getPublicUrl(fileName);
+  return publicData.publicUrl;
+}
 
 /**
  * ดาวน์โหลดรูปจาก RandomUser API และอัปโหลดไป Supabase Storage

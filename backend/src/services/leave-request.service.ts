@@ -1,7 +1,8 @@
 import { prisma } from '../lib/prisma.js';
-import type { LeaveRequest, LeaveStatus, LeaveType, Gender } from '@prisma/client';
+import type { LeaveRequest, LeaveStatus, LeaveType, Gender, ApprovalActionType } from '@prisma/client';
 import { differenceInBusinessDays, parseISO, format, isWeekend, startOfYear, endOfYear } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
+import { BadRequestError, ConflictError, NotFoundError } from '../utils/custom-errors.js';
 
 /**
  * Leave Request Service - จัดการใบลา
@@ -65,8 +66,12 @@ export const LEAVE_RULES = {
 export interface CreateLeaveRequestDTO {
   userId: number;
   leaveType: LeaveType;
+  isHourly?: boolean;
   startDate: Date;
   endDate: Date;
+  startTime?: string;
+  endTime?: string;
+  leaveHours?: number;
   reason?: string;
   attachmentUrl?: string;
   medicalCertificateUrl?: string; // ใบรับรองแพทย์
@@ -74,11 +79,33 @@ export interface CreateLeaveRequestDTO {
 
 export interface UpdateLeaveRequestDTO {
   leaveType?: LeaveType;
+  isHourly?: boolean;
   startDate?: Date;
   endDate?: Date;
+  startTime?: string;
+  endTime?: string;
+  leaveHours?: number;
   reason?: string;
   attachmentUrl?: string;
   medicalCertificateUrl?: string;
+}
+
+function isValidTimeFormat(time: string): boolean {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(time);
+}
+
+function calculateLeaveHours(startTime: string, endTime: string): number {
+  const [startHour, startMinute] = startTime.split(':').map(Number);
+  const [endHour, endMinute] = endTime.split(':').map(Number);
+  const startTotal = (startHour ?? 0) * 60 + (startMinute ?? 0);
+  const endTotal = (endHour ?? 0) * 60 + (endMinute ?? 0);
+  const diffMinutes = endTotal - startTotal;
+
+  if (diffMinutes <= 0) {
+    throw new BadRequestError('เวลาเริ่มต้องน้อยกว่าเวลาสิ้นสุดสำหรับการลาเป็นชั่วโมง');
+  }
+
+  return Number((diffMinutes / 60).toFixed(2));
 }
 
 export interface ApproveLeaveRequestDTO {
@@ -89,6 +116,108 @@ export interface ApproveLeaveRequestDTO {
 export interface RejectLeaveRequestDTO {
   approvedByUserId: number;
   rejectionReason: string;
+}
+
+interface LeaveApproverSummary {
+  userId: number;
+  firstName: string;
+  lastName: string;
+  employeeId?: string;
+  email?: string;
+  role?: string;
+  gender?: Gender;
+}
+
+type LeaveRequestWithApprover = LeaveRequest & {
+  approvedByUserId: number | null;
+  approver: LeaveApproverSummary | null;
+};
+
+type LeaveApprovalActionRow = {
+  leaveId: number;
+  actorUserId: number;
+  action: ApprovalActionType;
+  adminComment: string | null;
+  rejectionReason: string | null;
+  actor: {
+    userId: number;
+    firstName: string;
+    lastName: string;
+    employeeId: string;
+    email: string;
+    role: string;
+    gender: Gender;
+  };
+};
+
+async function getLatestLeaveApprovalMap(leaveIds: number[]): Promise<Map<number, LeaveApprovalActionRow>> {
+  if (leaveIds.length === 0) {
+    return new Map();
+  }
+
+  const actions = await prisma.approvalAction.findMany({
+    where: {
+      leaveId: { in: leaveIds },
+    },
+    orderBy: [
+      { approvalActionId: 'desc' },
+    ],
+    select: {
+      leaveId: true,
+      actorUserId: true,
+      action: true,
+      adminComment: true,
+      rejectionReason: true,
+      actor: {
+        select: {
+          userId: true,
+          firstName: true,
+          lastName: true,
+          employeeId: true,
+          email: true,
+          role: true,
+          gender: true,
+        },
+      },
+    },
+  });
+
+  const latestMap = new Map<number, LeaveApprovalActionRow>();
+  for (const action of actions) {
+    if (action.leaveId && !latestMap.has(action.leaveId)) {
+      latestMap.set(action.leaveId, action as LeaveApprovalActionRow);
+    }
+  }
+
+  return latestMap;
+}
+
+function attachLeaveApprover<T extends LeaveRequest>(
+  requests: T[],
+  latestMap: Map<number, LeaveApprovalActionRow>
+): LeaveRequestWithApprover[] {
+  return requests.map((request) => {
+    const latest = latestMap.get(request.leaveId);
+    const approver = latest
+      ? {
+          userId: latest.actor.userId,
+          firstName: latest.actor.firstName,
+          lastName: latest.actor.lastName,
+          employeeId: latest.actor.employeeId,
+          email: latest.actor.email,
+          role: latest.actor.role,
+          gender: latest.actor.gender,
+        }
+      : null;
+
+    return {
+      ...request,
+      approvedByUserId: latest?.actorUserId ?? null,
+      approver,
+      adminComment: request.adminComment ?? latest?.adminComment ?? null,
+      rejectionReason: request.rejectionReason ?? latest?.rejectionReason ?? null,
+    };
+  });
 }
 
 /**
@@ -148,7 +277,6 @@ async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): P
       userId,
       leaveType,
       status: 'APPROVED',
-      deletedAt: null,
       startDate: {
         gte: yearStart,
         lte: yearEnd,
@@ -174,7 +302,6 @@ async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType
       userId,
       leaveType,
       status: 'APPROVED',
-      deletedAt: null,
       startDate: {
         gte: yearStart,
         lte: yearEnd,
@@ -305,13 +432,13 @@ async function validateLeaveRequest(
  */
 async function createLeaveRequest(
   data: CreateLeaveRequestDTO
-): Promise<LeaveRequest> {
+): Promise<LeaveRequestWithApprover> {
   // Validate dates
   const startDate = new Date(data.startDate);
   const endDate = new Date(data.endDate);
 
   if (startDate > endDate) {
-    throw new Error('วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด');
+    throw new BadRequestError('วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด');
   }
 
   // Check if user exists
@@ -321,14 +448,36 @@ async function createLeaveRequest(
   });
 
   if (!user) {
-    throw new Error('ไม่พบผู้ใช้');
+    throw new NotFoundError('ไม่พบผู้ใช้');
+  }
+
+  const isHourly = data.isHourly === true;
+
+  if (isHourly) {
+    if (!data.startTime || !data.endTime) {
+      throw new BadRequestError('การลาเป็นชั่วโมงต้องระบุ startTime และ endTime');
+    }
+    if (!isValidTimeFormat(data.startTime) || !isValidTimeFormat(data.endTime)) {
+      throw new BadRequestError('รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM)');
+    }
+    const startDateOnly = startDate.toISOString().slice(0, 10);
+    const endDateOnly = endDate.toISOString().slice(0, 10);
+    if (startDateOnly !== endDateOnly) {
+      throw new BadRequestError('การลาเป็นชั่วโมงต้องอยู่ภายในวันเดียวกัน');
+    }
   }
 
   // Calculate number of business days
-  const numberOfDays = calculateBusinessDays(startDate, endDate);
+  const numberOfDays = isHourly ? 0 : calculateBusinessDays(startDate, endDate);
 
-  if (numberOfDays <= 0) {
-    throw new Error('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
+  const leaveHours = isHourly
+    ? (data.leaveHours && data.leaveHours > 0
+      ? data.leaveHours
+      : calculateLeaveHours(data.startTime as string, data.endTime as string))
+    : null;
+
+  if (!isHourly && numberOfDays <= 0) {
+    throw new BadRequestError('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
   }
 
   // Validate leave request based on type
@@ -340,7 +489,7 @@ async function createLeaveRequest(
   );
 
   if (!validation.isValid) {
-    throw new Error(validation.message || 'ข้อมูลการลาไม่ถูกต้อง');
+    throw new BadRequestError(validation.message || 'ข้อมูลการลาไม่ถูกต้อง');
   }
 
   // Check for overlapping leave requests
@@ -348,7 +497,6 @@ async function createLeaveRequest(
     where: {
       userId: data.userId,
       status: { not: 'REJECTED' },
-      deletedAt: null,
       AND: [
         { startDate: { lte: endDate } },
         { endDate: { gte: startDate } },
@@ -357,18 +505,22 @@ async function createLeaveRequest(
   });
 
   if (overlappingLeave) {
-    throw new Error('มีใบลาที่ทับซ้อนกับช่วงวันที่นี้');
+    throw new ConflictError('มีใบลาที่ทับซ้อนกับช่วงวันที่นี้');
   }
 
   // Calculate paid days
-  const paidDays = calculatePaidDays(data.leaveType, numberOfDays);
+  const paidDays = isHourly ? 0 : calculatePaidDays(data.leaveType, numberOfDays);
 
   const newLeaveRequest = await prisma.leaveRequest.create({
     data: {
       userId: data.userId,
       leaveType: data.leaveType,
+      isHourly,
       startDate,
       endDate,
+      startTime: isHourly ? data.startTime ?? null : null,
+      endTime: isHourly ? data.endTime ?? null : null,
+      leaveHours,
       reason: data.reason,
       attachmentUrl: data.attachmentUrl,
       medicalCertificateUrl: data.medicalCertificateUrl,
@@ -386,26 +538,32 @@ async function createLeaveRequest(
           gender: true,
         },
       },
-      approver: {
-        select: {
-          userId: true,
-          employeeId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
     },
   });
+
+  const latestMap = await getLatestLeaveApprovalMap([newLeaveRequest.leaveId]);
+  const [enriched] = attachLeaveApprover([newLeaveRequest], latestMap);
 
   await createAuditLog({
     userId: data.userId,
     action: AuditAction.CREATE_LEAVE,
     targetTable: 'leave_requests',
     targetId: newLeaveRequest.leaveId,
-    newValues: { leaveType: data.leaveType, startDate, endDate, numberOfDays, paidDays, reason: data.reason },
+    newValues: {
+      leaveType: data.leaveType,
+      isHourly,
+      startDate,
+      endDate,
+      startTime: isHourly ? data.startTime ?? null : null,
+      endTime: isHourly ? data.endTime ?? null : null,
+      leaveHours,
+      numberOfDays,
+      paidDays,
+      reason: data.reason,
+    },
   });
 
-  return newLeaveRequest;
+  return enriched;
 }
 
 /**
@@ -416,7 +574,7 @@ async function getLeaveRequestsByUser(
   status?: LeaveStatus,
   skip?: number,
   take?: number
-): Promise<{ data: LeaveRequest[]; total: number }> {
+): Promise<{ data: LeaveRequestWithApprover[]; total: number }> {
   const where: any = { userId };
 
   if (status) {
@@ -428,7 +586,7 @@ async function getLeaveRequestsByUser(
       where,
       skip: skip || 0,
       take: take || 10,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { leaveId: 'desc' },
       include: {
         user: {
           select: {
@@ -438,26 +596,20 @@ async function getLeaveRequestsByUser(
             email: true,
           },
         },
-        approver: {
-          select: {
-            userId: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
       },
     }),
     prisma.leaveRequest.count({ where }),
   ]);
 
-  return { data, total };
+  const latestMap = await getLatestLeaveApprovalMap(data.map((request) => request.leaveId));
+  return { data: attachLeaveApprover(data, latestMap), total };
 }
 
 /**
  * ดึงใบลาด้วย ID
  */
 async function getLeaveRequestById(leaveId: number) {
-  return prisma.leaveRequest.findUnique({
+  const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
     include: {
       user: {
@@ -470,15 +622,16 @@ async function getLeaveRequestById(leaveId: number) {
           role: true,
         },
       },
-      approver: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
     },
   });
+
+  if (!leaveRequest) {
+    return null;
+  }
+
+  const latestMap = await getLatestLeaveApprovalMap([leaveId]);
+  const [enriched] = attachLeaveApprover([leaveRequest], latestMap);
+  return enriched;
 }
 
 /**
@@ -487,25 +640,49 @@ async function getLeaveRequestById(leaveId: number) {
 async function updateLeaveRequest(
   leaveId: number,
   data: UpdateLeaveRequestDTO
-): Promise<LeaveRequest> {
+): Promise<LeaveRequestWithApprover> {
   const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
   });
 
   if (!leaveRequest) {
-    throw new Error('ไม่พบใบลา');
+    throw new NotFoundError('ไม่พบใบลา');
   }
 
   if (leaveRequest.status !== 'PENDING') {
-    throw new Error('สามารถแก้ไขได้เฉพาะใบลาที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
+    throw new ConflictError('สามารถแก้ไขได้เฉพาะใบลาที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
+
+  const currentLeave = leaveRequest as unknown as {
+    isHourly?: boolean;
+    startTime?: string | null;
+    endTime?: string | null;
+    leaveHours?: number | null;
+  };
+  const isHourly = data.isHourly ?? currentLeave.isHourly ?? false;
 
   const startDate = data.startDate ? new Date(data.startDate) : leaveRequest.startDate;
   const endDate = data.endDate ? new Date(data.endDate) : leaveRequest.endDate;
+  const startTime = data.startTime ?? currentLeave.startTime ?? null;
+  const endTime = data.endTime ?? currentLeave.endTime ?? null;
 
   // Validate dates
   if (startDate > endDate) {
-    throw new Error('วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด');
+    throw new BadRequestError('วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด');
+  }
+
+  if (isHourly) {
+    if (!startTime || !endTime) {
+      throw new BadRequestError('การลาเป็นชั่วโมงต้องระบุ startTime และ endTime');
+    }
+    if (!isValidTimeFormat(startTime) || !isValidTimeFormat(endTime)) {
+      throw new BadRequestError('รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM)');
+    }
+    const startDateOnly = startDate.toISOString().slice(0, 10);
+    const endDateOnly = endDate.toISOString().slice(0, 10);
+    if (startDateOnly !== endDateOnly) {
+      throw new BadRequestError('การลาเป็นชั่วโมงต้องอยู่ภายในวันเดียวกัน');
+    }
   }
 
   // Check for overlapping leave requests
@@ -523,33 +700,39 @@ async function updateLeaveRequest(
     });
 
     if (overlappingLeave) {
-      throw new Error('มีใบลาที่ทับซ้อนกับช่วงวันที่นี้');
+      throw new ConflictError('มีใบลาที่ทับซ้อนกับช่วงวันที่นี้');
     }
   }
 
   // Calculate number of days
-  const numberOfDays = calculateBusinessDays(startDate, endDate);
+  const numberOfDays = isHourly ? 0 : calculateBusinessDays(startDate, endDate);
+  const leaveHours = isHourly
+    ? (data.leaveHours && data.leaveHours > 0 ? data.leaveHours : calculateLeaveHours(startTime as string, endTime as string))
+    : null;
 
-  if (numberOfDays <= 0) {
-    throw new Error('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
+  if (!isHourly && numberOfDays <= 0) {
+    throw new BadRequestError('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
   }
 
   // Calculate paid days if leaveType is provided
   const leaveType = data.leaveType || leaveRequest.leaveType;
-  const paidDays = calculatePaidDays(leaveType, numberOfDays);
+  const paidDays = isHourly ? 0 : calculatePaidDays(leaveType, numberOfDays);
 
   const updatedLeave = await prisma.leaveRequest.update({
     where: { leaveId },
     data: {
       ...(data.leaveType && { leaveType: data.leaveType }),
+      isHourly,
       startDate,
       endDate,
+      startTime: isHourly ? startTime : null,
+      endTime: isHourly ? endTime : null,
+      leaveHours,
       numberOfDays: numberOfDays,
       paidDays: paidDays,
       ...(data.reason && { reason: data.reason }),
       ...(data.attachmentUrl && { attachmentUrl: data.attachmentUrl }),
       ...(data.medicalCertificateUrl && { medicalCertificateUrl: data.medicalCertificateUrl }),
-      updatedAt: new Date(),
     },
     include: {
       user: {
@@ -561,27 +744,40 @@ async function updateLeaveRequest(
           gender: true,
         },
       },
-      approver: {
-        select: {
-          userId: true,
-          employeeId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
     },
   });
+
+  const latestMap = await getLatestLeaveApprovalMap([updatedLeave.leaveId]);
+  const [enriched] = attachLeaveApprover([updatedLeave], latestMap);
 
   await createAuditLog({
     userId: leaveRequest.userId,
     action: AuditAction.UPDATE_LEAVE,
     targetTable: 'leave_requests',
     targetId: leaveId,
-    oldValues: { leaveType: leaveRequest.leaveType, startDate: leaveRequest.startDate, endDate: leaveRequest.endDate, reason: leaveRequest.reason },
-    newValues: { leaveType: updatedLeave.leaveType, startDate: updatedLeave.startDate, endDate: updatedLeave.endDate, reason: updatedLeave.reason },
+    oldValues: {
+      leaveType: leaveRequest.leaveType,
+      isHourly: currentLeave.isHourly ?? false,
+      startDate: leaveRequest.startDate,
+      endDate: leaveRequest.endDate,
+      startTime: currentLeave.startTime ?? null,
+      endTime: currentLeave.endTime ?? null,
+      leaveHours: currentLeave.leaveHours ?? null,
+      reason: leaveRequest.reason,
+    },
+    newValues: {
+      leaveType: updatedLeave.leaveType,
+      isHourly,
+      startDate: updatedLeave.startDate,
+      endDate: updatedLeave.endDate,
+      startTime: isHourly ? startTime : null,
+      endTime: isHourly ? endTime : null,
+      leaveHours,
+      reason: updatedLeave.reason,
+    },
   });
 
-  return updatedLeave;
+  return enriched;
 }
 
 /**
@@ -593,11 +789,11 @@ async function deleteLeaveRequest(leaveId: number): Promise<LeaveRequest> {
   });
 
   if (!leaveRequest) {
-    throw new Error('ไม่พบใบลา');
+    throw new NotFoundError('ไม่พบใบลา');
   }
 
   if (leaveRequest.status !== 'PENDING') {
-    throw new Error('สามารถลบได้เฉพาะใบลาที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
+    throw new ConflictError('สามารถลบได้เฉพาะใบลาที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
 
   const deletedLeave = await prisma.leaveRequest.delete({
@@ -664,7 +860,7 @@ async function getAllLeaveRequests(
   status?: LeaveStatus,
   skip?: number,
   take?: number
-): Promise<{ data: LeaveRequest[]; total: number }> {
+): Promise<{ data: LeaveRequestWithApprover[]; total: number }> {
   const where: any = {};
 
   if (status) {
@@ -676,7 +872,7 @@ async function getAllLeaveRequests(
       where,
       skip: skip || 0,
       take: take || 10,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { leaveId: 'desc' },
       include: {
         user: {
           select: {
@@ -688,19 +884,13 @@ async function getAllLeaveRequests(
             role: true,
           },
         },
-        approver: {
-          select: {
-            userId: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
       },
     }),
     prisma.leaveRequest.count({ where }),
   ]);
 
-  return { data, total };
+  const latestMap = await getLatestLeaveApprovalMap(data.map((request) => request.leaveId));
+  return { data: attachLeaveApprover(data, latestMap), total };
 }
 
 /**
@@ -709,47 +899,54 @@ async function getAllLeaveRequests(
 async function approveLeaveRequest(
   leaveId: number,
   data: ApproveLeaveRequestDTO
-): Promise<LeaveRequest> {
+): Promise<LeaveRequestWithApprover> {
   const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
   });
 
   if (!leaveRequest) {
-    throw new Error('ไม่พบใบลา');
+    throw new NotFoundError('ไม่พบใบลา');
   }
 
   if (leaveRequest.status !== 'PENDING') {
-    throw new Error('ไม่สามารถอนุมัติใบลาที่มีสถานะอื่นได้');
+    throw new ConflictError('ไม่สามารถอนุมัติใบลาที่มีสถานะอื่นได้');
   }
 
-  const approvedLeave = await prisma.leaveRequest.update({
-    where: { leaveId },
-    data: {
-      status: 'APPROVED',
-      approvedByUserId: data.approvedByUserId,
-      adminComment: data.adminComment,
-      approvedAt: new Date(),
-      updatedAt: new Date(),
-    },
-    include: {
-      user: {
-        select: {
-          userId: true,
-          employeeId: true,
-          firstName: true,
-          lastName: true,
-          email: true,
+  const approvedLeave = await prisma.$transaction(async (tx) => {
+    const updated = await tx.leaveRequest.update({
+      where: { leaveId },
+      data: {
+        status: 'APPROVED',
+        adminComment: data.adminComment,
+        rejectionReason: null,
+      },
+      include: {
+        user: {
+          select: {
+            userId: true,
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
         },
       },
-      approver: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
+    });
+
+    await tx.approvalAction.create({
+      data: {
+        leaveId,
+        actorUserId: data.approvedByUserId,
+        action: 'APPROVED',
+        adminComment: data.adminComment,
       },
-    },
+    });
+
+    return updated;
   });
+
+  const latestMap = await getLatestLeaveApprovalMap([approvedLeave.leaveId]);
+  const [enriched] = attachLeaveApprover([approvedLeave], latestMap);
 
   await createAuditLog({
     userId: data.approvedByUserId,
@@ -760,7 +957,7 @@ async function approveLeaveRequest(
     newValues: { status: 'APPROVED', adminComment: data.adminComment },
   });
 
-  return approvedLeave;
+  return enriched;
 }
 
 /**
@@ -769,47 +966,53 @@ async function approveLeaveRequest(
 async function rejectLeaveRequest(
   leaveId: number,
   data: RejectLeaveRequestDTO
-): Promise<LeaveRequest> {
+): Promise<LeaveRequestWithApprover> {
   const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
   });
 
   if (!leaveRequest) {
-    throw new Error('ไม่พบใบลา');
+    throw new NotFoundError('ไม่พบใบลา');
   }
 
   if (leaveRequest.status !== 'PENDING') {
-    throw new Error('ไม่สามารถปฏิเสธใบลาที่มีสถานะอื่นได้');
+    throw new ConflictError('ไม่สามารถปฏิเสธใบลาที่มีสถานะอื่นได้');
   }
 
-  const rejectedLeave = await prisma.leaveRequest.update({
-    where: { leaveId },
-    data: {
-      status: 'REJECTED',
-      approvedByUserId: data.approvedByUserId,
-      rejectionReason: data.rejectionReason,
-      approvedAt: new Date(),
-      updatedAt: new Date(),
-    },
-    include: {
-      user: {
-        select: {
-          userId: true,
-          employeeId: true,
-          firstName: true,
-          lastName: true,
-          email: true,
+  const rejectedLeave = await prisma.$transaction(async (tx) => {
+    const updated = await tx.leaveRequest.update({
+      where: { leaveId },
+      data: {
+        status: 'REJECTED',
+        rejectionReason: data.rejectionReason,
+      },
+      include: {
+        user: {
+          select: {
+            userId: true,
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
         },
       },
-      approver: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
+    });
+
+    await tx.approvalAction.create({
+      data: {
+        leaveId,
+        actorUserId: data.approvedByUserId,
+        action: 'REJECTED',
+        rejectionReason: data.rejectionReason,
       },
-    },
+    });
+
+    return updated;
   });
+
+  const latestMap = await getLatestLeaveApprovalMap([rejectedLeave.leaveId]);
+  const [enriched] = attachLeaveApprover([rejectedLeave], latestMap);
 
   await createAuditLog({
     userId: data.approvedByUserId,
@@ -820,7 +1023,7 @@ async function rejectLeaveRequest(
     newValues: { status: 'REJECTED', rejectionReason: data.rejectionReason },
   });
 
-  return rejectedLeave;
+  return enriched;
 }
 
 // ========================================================================================

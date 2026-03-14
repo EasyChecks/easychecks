@@ -65,7 +65,7 @@ const options: swaggerJsdoc.Options = {
         Shift: {
           type: 'object',
           properties: {
-            id: {
+            shiftId: {
               type: 'integer',
               example: 1,
             },
@@ -118,13 +118,18 @@ const options: swaggerJsdoc.Options = {
               nullable: true,
               example: '2026-02-15',
             },
-            createdAt: {
-              type: 'string',
-              format: 'date-time',
+            isActive: {
+              type: 'boolean',
+              example: true,
             },
-            updatedAt: {
+            isDeleted: {
+              type: 'boolean',
+              example: false,
+            },
+            deleteReason: {
               type: 'string',
-              format: 'date-time',
+              nullable: true,
+              example: null,
             },
           },
         },
@@ -220,13 +225,13 @@ const options: swaggerJsdoc.Options = {
             checkInTime: {
               type: 'string',
               format: 'date-time',
-              example: '2026-02-13T08:00:00Z',
+              example: '2026-02-13T08:00:00+07:00',
             },
             checkOutTime: {
               type: 'string',
               format: 'date-time',
               nullable: true,
-              example: '2026-02-13T17:00:00Z',
+              example: '2026-02-13T17:00:00+07:00',
             },
             checkInPhoto: {
               type: 'string',
@@ -282,29 +287,16 @@ const options: swaggerJsdoc.Options = {
               type: 'integer',
               example: 0,
             },
-            createdAt: {
-              type: 'string',
-              format: 'date-time',
-            },
-            updatedAt: {
-              type: 'string',
-              format: 'date-time',
-            },
           },
         },
         CheckInRequest: {
           type: 'object',
-          required: ['userId'],
+          required: ['shiftId', 'latitude', 'longitude'],
           properties: {
-            userId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัสผู้ใช้',
-            },
             shiftId: {
               type: 'integer',
               example: 1,
-              description: 'รหัสกะงาน (optional)',
+              description: 'รหัสกะงาน (required)',
             },
             locationId: {
               type: 'integer',
@@ -320,13 +312,13 @@ const options: swaggerJsdoc.Options = {
               type: 'number',
               format: 'double',
               example: 13.7563,
-              description: 'ละติจูด GPS (optional)',
+              description: 'ละติจูด GPS (required)',
             },
             longitude: {
               type: 'number',
               format: 'double',
               example: 100.5018,
-              description: 'ลองจิจูด GPS (optional)',
+              description: 'ลองจิจูด GPS (required)',
             },
             address: {
               type: 'string',
@@ -665,11 +657,8 @@ const options: swaggerJsdoc.Options = {
               example: 'ALL',
             },
             isActive: { type: 'boolean', example: true },
-            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000Z' },
-            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000Z' },
-            createdAt: { type: 'string', format: 'date-time' },
-            updatedAt: { type: 'string', format: 'date-time', nullable: true },
-            deletedAt: { type: 'string', format: 'date-time', nullable: true },
+            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000+07:00' },
+            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000+07:00' },
             deleteReason: { type: 'string', nullable: true },
             location: {
               type: 'object',
@@ -706,8 +695,8 @@ const options: swaggerJsdoc.Options = {
             eventName: { type: 'string', example: 'ประชุมประจำเดือน', description: 'ชื่อกิจกรรม' },
             description: { type: 'string', example: 'ประชุมสรุปผลงาน', description: 'รายละเอียด (optional)' },
             locationId: { type: 'integer', example: 1, description: 'ID สถานที่จัดกิจกรรม' },
-            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000Z', description: 'วันเวลาเริ่ม' },
-            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000Z', description: 'วันเวลาสิ้นสุด' },
+            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000+07:00', description: 'วันเวลาเริ่ม (เวลาไทย)' },
+            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000+07:00', description: 'วันเวลาสิ้นสุด (เวลาไทย)' },
             participantType: {
               type: 'string',
               enum: ['ALL', 'INDIVIDUAL', 'BRANCH', 'ROLE'],
@@ -783,29 +772,6 @@ const options: swaggerJsdoc.Options = {
           },
         },
 
-        // ──────────────────────────────────────────────
-        // Download Report Schemas
-        // ──────────────────────────────────────────────
-        DownloadLog: {
-          type: 'object',
-          description: 'ประวัติการดาวน์โหลดรายงาน',
-          properties: {
-            downloadLogId: { type: 'integer', example: 1 },
-            userId: { type: 'integer', example: 1 },
-            fileName: { type: 'string', example: 'attendance_1708588800000.xlsx' },
-            reportType: { type: 'string', example: 'attendance' },
-            downloadAt: { type: 'string', format: 'date-time' },
-            user: {
-              type: 'object',
-              properties: {
-                employeeId: { type: 'string', example: 'BKK001' },
-                firstName: { type: 'string', example: 'สมชาย' },
-                lastName: { type: 'string', example: 'ใจดี' },
-              },
-            },
-          },
-        },
-
         // ───────────────────────────────────────────
         // 📢 Announcement Schemas
         // ───────────────────────────────────────────
@@ -819,13 +785,8 @@ const options: swaggerJsdoc.Options = {
             targetBranchIds:  { type: 'array', items: { type: 'integer' }, example: [1, 2] },
             status:           { type: 'string', enum: ['DRAFT','SENT'], example: 'DRAFT' },
             createdByUserId:  { type: 'integer', example: 3 },
-            updatedByUserId:  { type: 'integer', nullable: true, example: null },
             sentByUserId:     { type: 'integer', nullable: true, example: null },
-            sentAt:           { type: 'string',  format: 'date-time', nullable: true, example: null },
-            deletedAt:        { type: 'string',  format: 'date-time', nullable: true, example: null },
             deleteReason:     { type: 'string',  nullable: true, example: null },
-            createdAt:        { type: 'string',  format: 'date-time' },
-            updatedAt:        { type: 'string',  format: 'date-time' },
             creator: {
               type: 'object',
               properties: {
@@ -851,7 +812,6 @@ const options: swaggerJsdoc.Options = {
                       recipientId:    { type: 'integer', example: 10 },
                       announcementId: { type: 'integer', example: 1 },
                       userId:         { type: 'integer', example: 7 },
-                      sentAt:         { type: 'string', format: 'date-time' },
                       user: {
                         type: 'object',
                         properties: {

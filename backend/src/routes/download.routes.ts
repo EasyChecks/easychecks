@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { requireRole } from '../middleware/role.middleware.js';
 import {
   handleDownloadReport,
-  handleDownloadHistory,
 } from '../controllers/download.controller.js';
 
 /**
@@ -11,11 +10,9 @@ import {
  * ทำไมต้องมี Download routes?
  * - User ต้องดาวน์โหลด attendance/shift report เป็น Excel
  * - ต้อง authorize ให้เฉพาะ ADMIN/SUPERADMIN เท่านั้น
- * - ต้องเก็บ audit log (history) ว่าใครดาวน์โหลดอะไร เมื่อไร
  * 
  * Route structure:
  * /api/download/report - ดาวน์โหลดรายงาน
- * /api/download/history - ดูประวัติการดาวน์โหลด
  */
 
 const router = Router();
@@ -43,29 +40,5 @@ const router = Router();
  * GET /api/download/report?type=shift&format=excel&branchId=2
  */
 router.get('/report', requireRole(['ADMIN', 'SUPERADMIN']), handleDownloadReport);
-
-/**
- * GET /api/download/history - ดูประวัติการดาวน์โหลด
- * 
- * Security: requireRole(['ADMIN', 'SUPERADMIN'])
- * 
- * ทำไมต้อง history endpoint?
- * - Audit trail: รู้ว่าใครดาวน์โหลดรายงาน เมื่อไร ดาวน์โหลดอะไร
- * - Compliance: ต้องบันทึก data access สำหรับ GDPR/regulation
- * - Security monitoring: ตรวจจับการดาวน์โหลดผิดปกติ
- * 
- * Role-based behavior:
- * - ADMIN: เห็นเฉพาะ download history ของตัวเอง
- * - SUPERADMIN: เห็นทั้งหมด (check ใน service/controller)
- * 
- * Query Parameters:
- * - limit: number (default: 10) - จำนวน record ต่อหน้า
- * - offset: number (default: 0) - ข้าม record กี่อันสำหรับ pagination
- * 
- * Example:
- * GET /api/download/history?limit=20&offset=0 - page 1
- * GET /api/download/history?limit=20&offset=20 - page 2
- */
-router.get('/history', requireRole(['ADMIN', 'SUPERADMIN']), handleDownloadHistory);
 
 export default router;

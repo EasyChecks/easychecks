@@ -1,10 +1,11 @@
 import type { Response } from 'express';
+import { toThaiIso } from './timezone.js';
 
 /**
  * 📤 Response Utilities - ฟังก์ชันช่วยส่ง Response แบบ standardized
  */
 
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   message?: string;
   data?: T;
@@ -15,19 +16,13 @@ export interface ApiResponse<T = any> {
  * 🕐 Convert UTC date to Thailand time (UTC+7)
  */
 export function convertToThaiTime(date: Date | string | null | undefined): string | null {
-  if (!date) return null;
-  
-  const utcDate = new Date(date);
-  if (isNaN(utcDate.getTime())) return null;
-
-  // Convert to Thailand time (UTC+7)
-  return new Date(utcDate.getTime() + 7 * 60 * 60 * 1000).toISOString().replace('Z', '+07:00');
+  return toThaiIso(date);
 }
 
 /**
  * 🕐 Convert object dates to Thailand time recursively
  */
-export function convertDatesToThaiTime(obj: any): any {
+export function convertDatesToThaiTime(obj: unknown): unknown {
   if (obj === null || obj === undefined) return obj;
   
   if (obj instanceof Date) {
@@ -39,11 +34,29 @@ export function convertDatesToThaiTime(obj: any): any {
   }
   
   if (typeof obj === 'object') {
-    const converted: any = {};
+    const converted: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
-      // Convert checkIn, checkOut, createdAt, updatedAt, deletedAt เป็น Thailand time
-      if (['checkIn', 'checkOut', 'createdAt', 'updatedAt', 'deletedAt', 'customDate'].includes(key)) {
-        converted[key] = convertToThaiTime(value as any);
+      // Convert common date/time keys to Thailand time
+      if (
+        [
+          'checkIn',
+          'checkOut',
+          'createdAt',
+          'updatedAt',
+          'deletedAt',
+          'customDate',
+          'timestamp',
+          'startDateTime',
+          'endDateTime',
+          'approvedAt',
+          'expiresAt',
+          'refreshTokenExpiresAt',
+          'sentAt',
+          'checkInTime',
+          'checkOutTime',
+        ].includes(key)
+      ) {
+        converted[key] = convertToThaiTime(value as Date | string | null | undefined);
       } else if (typeof value === 'object') {
         converted[key] = convertDatesToThaiTime(value);
       } else {
@@ -62,10 +75,12 @@ export function sendSuccess<T>(
   message: string = 'Success',
   statusCode: number = 200
 ): void {
+  const convertedData = data === undefined ? undefined : (convertDatesToThaiTime(data) as T);
+
   const response: ApiResponse<T> = {
     success: true,
     message,
-    ...(data !== undefined && { data: convertDatesToThaiTime(data) }),
+    ...(convertedData !== undefined && { data: convertedData }),
   };
   res.status(statusCode).json(response);
 }

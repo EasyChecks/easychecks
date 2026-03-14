@@ -11,6 +11,14 @@ function qs(v: unknown): string | undefined {
   return undefined;
 }
 
+function deriveHttpStatus(message: string): number {
+  if (message.includes('ไปแล้ว')) return 409;
+  if (message.includes('ไม่พบ')) return 404;
+  if (message.includes('ไม่มีสิทธิ์')) return 403;
+  if (message.includes('กรุณา') || message.includes('ต้อง')) return 400;
+  return 500;
+}
+
 /**
  * 📋 Shift Controller — API จัดการตารางงาน/กะ
  *
@@ -134,8 +142,8 @@ export const createShift = async (req: Request, res: Response) => {
     // [7] Response 201 Created พร้อม shift record ที่เพิ่ง INSERT
     sendSuccess(res, shift, 'สร้างกะเรียบร้อยแล้ว', 201);
   } catch (error: unknown) {
-    // [8] service throw Error พร้อม message ภาษาไทย เช่น "Admin ข้ามสาขาไม่ได้"
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้างกะ');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้างกะ';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -169,7 +177,8 @@ export const getShifts = async (req: Request, res: Response) => {
     const shifts = await shiftService.getShifts(requesterId, requesterRole, requesterBranchId, filters);
     sendSuccess(res, shifts);
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -185,7 +194,8 @@ export const getActiveShiftsToday = async (req: Request, res: Response) => {
     const shifts = await shiftService.getActiveShiftsForToday(userId);
     sendSuccess(res, shifts);
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะวันนี้');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะวันนี้';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -201,7 +211,8 @@ export const getShiftById = async (req: Request, res: Response) => {
     const shift = await shiftService.getShiftById(shiftId);
     sendSuccess(res, shift);
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลกะ';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -249,7 +260,8 @@ export const updateShift = async (req: Request, res: Response) => {
     broadcastShiftUpdate('UPDATE', updatedShift);
     sendSuccess(res, updatedShift, 'อัปเดตกะเรียบร้อยแล้ว');
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอัปเดตกะ');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอัปเดตกะ';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -282,7 +294,8 @@ export const deleteShift = async (req: Request, res: Response) => {
     broadcastShiftUpdate('DELETE', { shiftId, deleteReason });
     sendSuccess(res, null, 'ลบกะเรียบร้อยแล้ว');
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบกะ');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบกะ';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 

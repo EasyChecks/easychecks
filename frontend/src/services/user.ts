@@ -31,6 +31,24 @@ export interface GetUsersResponse {
   totalPages: number;
 }
 
+function normalizeUserArray(data: unknown): UserServiceUser[] {
+  if (Array.isArray(data)) {
+    return data as UserServiceUser[];
+  }
+
+  if (data && typeof data === 'object') {
+    const record = data as Record<string, unknown>;
+    if (Array.isArray(record.users)) {
+      return record.users as UserServiceUser[];
+    }
+    if (Array.isArray(record.data)) {
+      return record.data as UserServiceUser[];
+    }
+  }
+
+  return [];
+}
+
 /**
  * แปลง backend user object → frontend User type
  */
@@ -140,7 +158,7 @@ export const userService = {
    */
   async getAll(): Promise<UserServiceUser[]> {
     const response = await api.get('/users');
-    return response.data.data || response.data;
+    return normalizeUserArray(response.data?.data ?? response.data);
   },
 
   /**

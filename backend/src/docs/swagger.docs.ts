@@ -1248,18 +1248,18 @@
  *             Login ปกติ (User):
  *               summary: Login ด้วย employeeId และ nationalId → dashboardMode user
  *               value:
- *                 employeeId: "BKK001"
- *                 password: "1234567890123"
+ *                 employeeId: "BKK0001"
+ *                 password: "4850495039640"
  *             Login Admin ด้วย adminPassword:
  *               summary: Admin ใช้ adminPassword → dashboardMode admin
  *               value:
  *                 employeeId: "BKK0001"
- *                 password: "adm456"
+ *                 password: "adm0034"
  *             Login Admin ด้วยรหัสปกติ:
  *               summary: Admin ใส่ nationalId → dashboardMode user
  *               value:
  *                 employeeId: "BKK0001"
- *                 password: "1234567890123"
+ *                 password: "4850495039640"
  *             Login หลังเปลี่ยนรหัส:
  *               summary: Login หลังเปลี่ยนรหัสผ่านแล้ว
  *               value:
@@ -2009,11 +2009,11 @@
  *         employeeId:
  *           type: string
  *           description: รหัสพนักงาน เช่น BKK001, CNX002
- *           example: "BKK001"
+ *           example: "BKK0001"
  *         password:
  *           type: string
  *           description: รหัสผ่าน (nationalId เริ่มต้น หรือรหัสที่เปลี่ยนแล้ว)
- *           example: "1234567890123"
+ *           example: "4850495039640"
  *
  *     LoginResponse:
  *       type: object

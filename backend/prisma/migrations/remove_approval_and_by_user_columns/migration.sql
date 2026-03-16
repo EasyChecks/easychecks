@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS approval_actions (
   CONSTRAINT approval_actions_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES users(user_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+ALTER TABLE approval_actions
+  ADD COLUMN IF NOT EXISTS action_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
 CREATE INDEX IF NOT EXISTS approval_actions_leave_id_action_at_idx
   ON approval_actions (leave_id, action_at DESC);
 
@@ -31,57 +35,77 @@ CREATE INDEX IF NOT EXISTS approval_actions_late_request_id_action_at_idx
 CREATE INDEX IF NOT EXISTS approval_actions_actor_user_id_idx
   ON approval_actions (actor_user_id);
 
--- Backfill leave approver history
-INSERT INTO approval_actions (
-  leave_id,
-  actor_user_id,
-  action,
-  admin_comment,
-  rejection_reason,
-  action_at,
-  created_at
-)
-SELECT
-  lr.leave_id,
-  lr.approved_by_user_id,
-  CASE
-    WHEN lr.status = 'REJECTED' THEN 'REJECTED'::"ApprovalActionType"
-    ELSE 'APPROVED'::"ApprovalActionType"
-  END,
-  lr.admin_comment,
-  lr.rejection_reason,
-  COALESCE(lr.approved_at, lr.updated_at, lr.created_at),
-  NOW()
-FROM leave_requests lr
-WHERE lr.approved_by_user_id IS NOT NULL
-  AND lr.status IN ('APPROVED', 'REJECTED')
-ON CONFLICT DO NOTHING;
+-- Backfill leave approver history when legacy columns still exist
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'leave_requests'
+      AND column_name = 'approved_by_user_id'
+  ) THEN
+    INSERT INTO approval_actions (
+      leave_id,
+      actor_user_id,
+      action,
+      admin_comment,
+      rejection_reason,
+      action_at,
+      created_at
+    )
+    SELECT
+      lr.leave_id,
+      lr.approved_by_user_id,
+      CASE
+        WHEN lr.status = 'REJECTED' THEN 'REJECTED'::"ApprovalActionType"
+        ELSE 'APPROVED'::"ApprovalActionType"
+      END,
+      lr.admin_comment,
+      lr.rejection_reason,
+      COALESCE(lr.approved_at, lr.updated_at, lr.created_at),
+      NOW()
+    FROM leave_requests lr
+    WHERE lr.approved_by_user_id IS NOT NULL
+      AND lr.status IN ('APPROVED', 'REJECTED')
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
 
--- Backfill late approver history
-INSERT INTO approval_actions (
-  late_request_id,
-  actor_user_id,
-  action,
-  admin_comment,
-  rejection_reason,
-  action_at,
-  created_at
-)
-SELECT
-  ltr.late_request_id,
-  ltr.approved_by_user_id,
-  CASE
-    WHEN ltr.status = 'REJECTED' THEN 'REJECTED'::"ApprovalActionType"
-    ELSE 'APPROVED'::"ApprovalActionType"
-  END,
-  ltr.admin_comment,
-  ltr.rejection_reason,
-  COALESCE(ltr.approved_at, ltr.updated_at, ltr.created_at),
-  NOW()
-FROM late_requests ltr
-WHERE ltr.approved_by_user_id IS NOT NULL
-  AND ltr.status IN ('APPROVED', 'REJECTED')
-ON CONFLICT DO NOTHING;
+-- Backfill late approver history when legacy columns still exist
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'late_requests'
+      AND column_name = 'approved_by_user_id'
+  ) THEN
+    INSERT INTO approval_actions (
+      late_request_id,
+      actor_user_id,
+      action,
+      admin_comment,
+      rejection_reason,
+      action_at,
+      created_at
+    )
+    SELECT
+      ltr.late_request_id,
+      ltr.approved_by_user_id,
+      CASE
+        WHEN ltr.status = 'REJECTED' THEN 'REJECTED'::"ApprovalActionType"
+        ELSE 'APPROVED'::"ApprovalActionType"
+      END,
+      ltr.admin_comment,
+      ltr.rejection_reason,
+      COALESCE(ltr.approved_at, ltr.updated_at, ltr.created_at),
+      NOW()
+    FROM late_requests ltr
+    WHERE ltr.approved_by_user_id IS NOT NULL
+      AND ltr.status IN ('APPROVED', 'REJECTED')
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
 
 -- Remove by-user columns as requested
 ALTER TABLE users

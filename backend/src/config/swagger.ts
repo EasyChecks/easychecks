@@ -380,12 +380,12 @@ const options: swaggerJsdoc.Options = {
           properties: {
             employeeId: {
               type: 'string',
-              example: 'BKK001',
-              description: 'รหัสพนักงาน เช่น BKK001, CNX002',
+              example: 'BKK0001',
+              description: 'รหัสพนักงาน เช่น BKK0001, CNX0002',
             },
             password: {
               type: 'string',
-              example: '1234567890123',
+              example: '4850495039640',
               description: 'รหัสผ่าน (nationalId เริ่มต้น หรือรหัสที่เปลี่ยนแล้ว)',
             },
           },
@@ -418,7 +418,7 @@ const options: swaggerJsdoc.Options = {
           description: 'ข้อมูลผู้ใช้ที่ได้รับหลัง Login สำเร็จ',
           properties: {
             userId: { type: 'integer', example: 5 },
-            employeeId: { type: 'string', example: 'BKK001' },
+            employeeId: { type: 'string', example: 'BKK0001' },
             firstName: { type: 'string', example: 'สมชาย' },
             lastName: { type: 'string', example: 'ใจดี' },
             email: { type: 'string', example: 'somchai@example.com' },
@@ -442,7 +442,7 @@ const options: swaggerJsdoc.Options = {
             userId: { type: 'integer', example: 5 },
             employeeId: {
               type: 'string',
-              example: 'BKK001',
+              example: 'BKK0001',
               description: 'รหัสพนักงาน auto-generate',
             },
             title: {

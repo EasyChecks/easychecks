@@ -3241,6 +3241,7 @@
  *                       type: string
  *           example:
  *             eventName: "ประชุมประจำเดือน (แก้ไข)"
+ *             startDateTime: "2026-03-20T09:00:00.000+07:00"
  *             endDateTime: "2026-03-20T18:00:00.000+07:00"
  *     responses:
  *       200:

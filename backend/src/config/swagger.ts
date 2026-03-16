@@ -20,7 +20,7 @@ const options: swaggerJsdoc.Options = {
         description: 'Development server',
       },
       {
-        url: 'https://api.easycheck.com',
+        url: 'https://easycheck-backend.onrender.com/api',
         description: 'Production server',
       },
     ],

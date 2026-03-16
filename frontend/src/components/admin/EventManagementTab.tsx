@@ -124,13 +124,19 @@ function formatDateDisplay(dateStr: string) {
   return new Date(dateStr).toLocaleString('th-TH', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-export default function EventManagementTab() {
+const EVT_PER_PAGE = 9;
+
+interface EventManagementTabProps {
+  locationsKey?: number;
+}
+
+export default function EventManagementTab({ locationsKey }: EventManagementTabProps) {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddingEvent, setIsAddingEvent] = useState(false);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
-  const [showAllEvents, setShowAllEvents] = useState(false);
+  const [evtPage, setEvtPage] = useState(1);
   const [mapFlyTo, setMapFlyTo] = useState<{ lat: number; lng: number; zoom?: number; seq: number } | undefined>();
   const mapFlySeq = useRef(0);
   const [pendingPosition, setPendingPosition] = useState<{ lat: number; lng: number } | null>(null);
@@ -197,6 +203,14 @@ export default function EventManagementTab() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Re-fetch locations when the parent signals a change (e.g., a location was added/edited/deleted in the other tab)
+  useEffect(() => {
+    if (locationsKey !== undefined && locationsKey > 0) {
+      silentRefresh();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationsKey]);
 
   // Lazy-fetch users or branches when participantType needs them
   const fetchParticipantData = useCallback(async (type: ParticipantType) => {
@@ -569,6 +583,8 @@ export default function EventManagementTab() {
       return new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime();
     });
   }, [events]);
+  const evtTotalPages = Math.max(1, Math.ceil(sortedEvents.length / EVT_PER_PAGE));
+  const safeEvtPage = Math.min(evtPage, evtTotalPages);
 
   return (
     <div className="space-y-6">
@@ -819,18 +835,6 @@ export default function EventManagementTab() {
             <span className="ml-2 text-sm font-normal text-gray-400">({events.length} รายการ)</span>
           </h2>
           <div className="flex items-center gap-3">
-            {events.length > 3 && (
-              <button
-                onClick={() => setShowAllEvents(v => !v)}
-                className="flex items-center gap-1.5 text-sm text-orange-600 hover:text-orange-700 font-medium transition-colors"
-              >
-                {showAllEvents ? (
-                  <>ยุบรายการ <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg></>
-                ) : (
-                  <>แสดงทั้งหมด {events.length} รายการ <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></>
-                )}
-              </button>
-            )}
             <Button
               onClick={() => { setIsAddingEvent(!isAddingEvent); setEditingEventId(null); setPendingPosition(null); }}
               className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"
@@ -860,7 +864,7 @@ export default function EventManagementTab() {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {(showAllEvents ? sortedEvents : sortedEvents.slice(0, 3)).map((event) => (
+              {sortedEvents.slice((safeEvtPage - 1) * EVT_PER_PAGE, safeEvtPage * EVT_PER_PAGE).map((event) => (
                 <EventCard
                   key={event.eventId}
                   event={event}
@@ -897,14 +901,24 @@ export default function EventManagementTab() {
                 />
               ))}
             </div>
-            {!showAllEvents && events.length > 3 && (
-              <button
-                onClick={() => setShowAllEvents(true)}
-                className="mt-4 w-full py-2.5 rounded-xl border border-dashed border-gray-300 text-sm text-gray-500 hover:border-orange-400 hover:text-orange-600 hover:bg-orange-50/50 transition-all flex items-center justify-center gap-1.5"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                ซ่อนอยู่อีก {events.length - 3} รายการ — คลิกเพื่อแสดงทั้งหมด
-              </button>
+            {evtTotalPages > 1 && (
+              <div className="flex items-center justify-center gap-3 mt-4">
+                <button
+                  onClick={() => setEvtPage(p => Math.max(1, p - 1))}
+                  disabled={safeEvtPage <= 1}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  ← ก่อนหน้า
+                </button>
+                <span className="text-sm text-gray-500">หน้า {safeEvtPage} / {evtTotalPages}</span>
+                <button
+                  onClick={() => setEvtPage(p => Math.min(evtTotalPages, p + 1))}
+                  disabled={safeEvtPage >= evtTotalPages}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  ถัดไป →
+                </button>
+              </div>
             )}
           </>
         )}
@@ -920,7 +934,7 @@ export default function EventManagementTab() {
       />
 
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-2000 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={confirmDialog.onCancel}></div>
           <Card className="relative z-10 w-full max-w-md p-6">
             <h3 className="mb-2 text-lg font-semibold">{confirmDialog.title}</h3>

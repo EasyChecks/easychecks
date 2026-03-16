@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { shiftService } from '@/services/shift';
-import { userService, User } from '@/services/user';
+import { userService, type UserServiceUser } from '@/services/user';
 import { Shift, CreateShiftRequest, UpdateShiftRequest } from '@/types/attendance';
 
 const weekDays = [
@@ -26,7 +26,7 @@ const shiftTypes = [
 
 export default function ShiftManagementPage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<UserServiceUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<Shift | null>(null);

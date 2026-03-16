@@ -138,7 +138,7 @@ export const getAnnouncements = async (
 
   // Soft Delete guard — ต้องใส่ทุกครั้งที่ query announcement
   // ไม่ filter ตรงนี้ = ประกาศที่ถูกลบโผล่ขึ้น UI
-  whereClause.deletedAt = null;
+  whereClause.deleteReason = null;
 
   const announcements = await prisma.announcement.findMany({
     where: whereClause,
@@ -153,7 +153,7 @@ export const getAnnouncements = async (
       },
     },
     orderBy: {
-      createdAt: 'desc',
+      announcementId: 'desc',
     },
   });
 
@@ -185,11 +185,10 @@ export const getAnnouncements = async (
  *     AND a.deleted_at IS NULL
  */
 export const getAnnouncementById = async (announcementId: number) => {
-  const announcement = await prisma.announcement.findUnique({
+  const announcement = await prisma.announcement.findFirst({
     where: {
       announcementId,
-      // Soft Delete guard — ถ้าประกาศถูกลบแล้วต้องโยน 404 ไม่ใช่ return data
-      deletedAt: null,
+      deleteReason: null,
     },
     include: {
       creator: {
@@ -276,7 +275,6 @@ export const updateAnnouncement = async (
       ...(data.targetRoles !== undefined && { targetRoles: data.targetRoles }),
       ...(data.targetBranchIds !== undefined && { targetBranchIds: data.targetBranchIds }),
       ...(data.targetUserIds !== undefined && { targetUserIds: data.targetUserIds }),
-      updatedByUserId,
     },
     include: {
       creator: {
@@ -420,7 +418,6 @@ export const sendAnnouncement = async (
         data: recipientIds.map((userId) => ({
           announcementId,
           userId,
-          sentAt: new Date(),
         })),
       });
     }
@@ -431,7 +428,6 @@ export const sendAnnouncement = async (
       where: { announcementId },
       data: {
         status: 'SENT',
-        sentAt: new Date(),
         sentByUserId,
       },
     });
@@ -445,7 +441,7 @@ export const sendAnnouncement = async (
     action: AuditAction.SEND_ANNOUNCEMENT,
     targetTable: 'announcements',
     targetId: announcementId,
-    newValues: { status: 'SENT', sentAt: new Date(), recipientCount: recipientIds.length },
+    newValues: { status: 'SENT', recipientCount: recipientIds.length },
   });
 
   // ส่งอีเมล fire-and-forget — ไม่ await เพราะไม่อยากให้ email delay
@@ -456,11 +452,12 @@ export const sendAnnouncement = async (
     .map((u) => ({ email: u.email!, firstName: u.firstName, lastName: u.lastName }));
 
   if (emailRecipients.length > 0) {
+    const sentAt = new Date();
     sendBulkAnnouncementEmails(
       emailRecipients,
       announcement.title,
       announcement.content,
-      updated.sentAt ?? new Date()
+      sentAt
     ).then(({ success, failed }) => {
       console.log(`[EmailService] ส่งอีเมลประกาศ "${announcement.title}": สำเร็จ=${success}, ล้มเหลว=${failed}`);
     }).catch((err) => {
@@ -502,13 +499,8 @@ export const deleteAnnouncement = async (
     throw new Error('ไม่พบประกาศที่ระบุ');
   }
 
-  // Soft Delete: set deletedAt แทนการลบแถวออกจาก DB
-  const deleted = await prisma.announcement.update({
+  const deleted = await prisma.announcement.delete({
     where: { announcementId },
-    data: {
-      deletedAt: new Date(),
-      deleteReason,
-    },
   });
 
   // บันทึก deleteReason ใน audit เพื่อให้ทราบว่าลบเพราะอะไร
@@ -518,7 +510,7 @@ export const deleteAnnouncement = async (
     targetTable: 'announcements',
     targetId: announcementId,
     oldValues: existing,
-    newValues: { deletedAt: new Date(), deleteReason },
+    newValues: { deleted: true, deleteReason },
   });
 
   return deleted;

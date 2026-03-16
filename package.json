@@ -1,7 +1,8 @@
 {
   "scripts": {
     "format": "prettier --write .",
-    "check-format": "prettier --check ."
+    "check-format": "prettier --check .",
+    "test:core-apis": "bash ./test-apis.sh"
   },
   "devDependencies": {
     "prettier": "3.8.0",

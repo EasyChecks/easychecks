@@ -410,7 +410,7 @@ export default function EventMap({
     : null;
 
   return (
-    <div className="relative overflow-hidden border-2 border-gray-200 rounded-2xl shadow-sm">
+    <div className="relative isolate overflow-hidden border-2 border-gray-200 rounded-2xl shadow-sm">
       {/* Search overlay */}
       {onMapClick && (
         <MapSearchOverlay locations={locations} onSelect={handleSearchSelect} />

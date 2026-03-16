@@ -28,7 +28,7 @@ function deriveHttpStatus(message: string): number {
   // 404 Not Found — ไม่พบ record ที่ต้องการ
   if (message.includes('ไม่พบ')) return 404;
   // 403 Forbidden — ไม่มีสิทธิ์ เช่น กะไม่ใช่ของตัวเอง, ถูกปิด
-  if (message.includes('ไม่ใช่ของคุณ') || message.includes('ปิดใช้งาน')) return 403;
+  if (message.includes('ไม่ใช่ของคุณ') || message.includes('ปิดใช้งาน') || message.includes('ใบลาอนุมัติ') || message.includes('เฉพาะ admin')) return 403;
   // 422 Unprocessable — GPS นอกพื้นที่, ข้อมูลไม่ตรงเงื่อนไข
   if (message.includes('นอกพื้นที่') || message.includes('GPS') || message.includes('พิกัด')) return 422;
   // 400 Bad Request — ข้อมูลขาด/ไม่ถูกต้อง (default สำหรับ known error)
@@ -351,13 +351,25 @@ export const updateAttendance = async (req: Request, res: Response) => {
 
     // updatedByUserId ดึงจาก req.user แทนการรับจาก body เพื่อความปลอดภัย
     const updatedByUserId = req.user?.userId;
+    const updaterRole = req.user?.role;
 
     const { status, note, checkIn, checkOut } = req.body as {
       status?: string;
       note?: string;
       checkIn?: string;
       checkOut?: string;
+      editReason?: string;
     };
+
+    const editReason = (req.body as { editReason?: string }).editReason;
+
+    if (note !== undefined && updaterRole !== 'ADMIN' && updaterRole !== 'SUPERADMIN') {
+      return sendError(res, 'สามารถแก้ note ได้เฉพาะ admin/superadmin เท่านั้น', 403);
+    }
+
+    if ((checkIn !== undefined || checkOut !== undefined) && (!editReason || editReason.trim().length === 0)) {
+      return sendError(res, 'การแก้เวลาเข้างาน/ออกงานต้องระบุเหตุผล (editReason)', 400);
+    }
 
     type UpdateData = Parameters<typeof attendanceService.updateAttendance>[1];
     const data: UpdateData = {};
@@ -365,6 +377,7 @@ export const updateAttendance = async (req: Request, res: Response) => {
     if (note !== undefined) data.note = note;
     if (checkIn !== undefined) data.checkIn = new Date(checkIn);
     if (checkOut !== undefined) data.checkOut = new Date(checkOut);
+    if (editReason !== undefined) data.editReason = editReason;
 
     const updatedAtt = await attendanceService.updateAttendance(attendanceId, data, updatedByUserId);
 

@@ -67,7 +67,6 @@ export async function getAttendanceSummary(user: User, branchId?: number, date?:
       status: 'APPROVED',
       startDate: { lte: today },
       endDate: { gte: today },
-      deletedAt: null,
       user: {
         branchId: queryBranchId,
       },
@@ -155,7 +154,6 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
       status: 'APPROVED',
       startDate: { lte: today },
       endDate: { gte: today },
-      deletedAt: null,
       user: {
         branchId: queryBranchId,
       },

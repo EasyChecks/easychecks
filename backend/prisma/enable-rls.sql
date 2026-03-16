@@ -8,7 +8,6 @@ ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE download_logs ENABLE ROW LEVEL SECURITY;
 
 -- ========================================
 -- USERS TABLE POLICIES
@@ -226,30 +225,6 @@ CREATE POLICY "Service role can create notifications"
 ON notifications FOR INSERT
 TO service_role
 WITH CHECK (true);
-
--- ========================================
--- DOWNLOAD_LOGS TABLE POLICIES
--- ========================================
-
--- Users can view their own download logs
-CREATE POLICY "Users can view own download logs"
-ON download_logs FOR SELECT
-USING (auth.uid()::text = user_id);
-
--- Admins can view all download logs
-CREATE POLICY "Admins can view all download logs"
-ON download_logs FOR SELECT
-USING (
-  auth.uid()::text IN (
-    SELECT user_id FROM users WHERE role IN ('ADMIN', 'SUPERADMIN')
-  )
-);
-
--- System can insert download logs
-CREATE POLICY "Backend can insert download logs"
-ON download_logs FOR INSERT
-TO authenticated
-WITH CHECK (auth.uid()::text = user_id);
 
 -- ========================================
 -- IMPORTANT NOTES:

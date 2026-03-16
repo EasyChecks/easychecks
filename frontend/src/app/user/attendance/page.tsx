@@ -51,11 +51,19 @@ export default function AttendancePage() {
   const [selectedShift, setSelectedShift] = useState<number | null>(null);
   const [successResult, setSuccessResult] = useState<{ time: string; status: string } | null>(null);
   const [countdown, setCountdown] = useState(0); // นับถอยหลังก่อน redirect กลับ dashboard
+  const [messageModal, setMessageModal] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: '',
+  });
   const [todayStatus, setTodayStatus] = useState<{
     hasCheckedIn: boolean;
     hasCheckedOut: boolean;
     attendance?: Attendance;
   }>({ hasCheckedIn: false, hasCheckedOut: false });               // สถานะเข้า-ออกงานวันนี้
+
+  const openMessageModal = useCallback((message: string) => {
+    setMessageModal({ open: true, message });
+  }, []);
 
   // ── Refs สำหรับกล้อง ──
   const videoRef = useRef<HTMLVideoElement>(null);  // แสดง live preview จากกล้อง
@@ -132,7 +140,7 @@ export default function AttendancePage() {
       const result = await navigator.permissions.query({ name: 'camera' as PermissionName });
       
       if (result.state === 'denied') {
-        alert('คุณได้ปฏิเสธการเข้าถึงกล้องแล้ว กรุณาเปิดการอนุญาตในการตั้งค่าเบราว์เซอร์');
+        openMessageModal('คุณได้ปฏิเสธการเข้าถึงกล้องแล้ว กรุณาเปิดการอนุญาตในการตั้งค่าเบราว์เซอร์');
         return false;
       }
       
@@ -140,7 +148,7 @@ export default function AttendancePage() {
     } catch {
       return true; // ไม่รองรับ Permissions API → ลองเปิดกล้องตรงๆ
     }
-  }, []);
+  }, [openMessageModal]);
 
   /**
    * startCamera() — เปิดกล้องหน้า (facingMode: 'user') แสดงใน <video>
@@ -164,13 +172,13 @@ export default function AttendancePage() {
       console.error('Camera error:', error);
       const err = error as { name?: string };
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        alert('กรุณาอนุญาตการเข้าถึงกล้องเพื่อบันทึกเวลาเข้างาน');
+        openMessageModal('กรุณาอนุญาตการเข้าถึงกล้องเพื่อบันทึกเวลาเข้างาน');
       } else {
-        alert('ไม่สามารถเปิดกล้องได้ กรุณาลองอีกครั้ง');
+        openMessageModal('ไม่สามารถเปิดกล้องได้ กรุณาลองอีกครั้ง');
       }
       setUi(prev => ({ ...prev, isCameraActive: false, loading: false }));
     }
-  }, [requestCameraPermission]);
+  }, [openMessageModal, requestCameraPermission]);
 
   /** stopCamera() — หยุด stream กล้องทั้งหมด (ป้องกัน indicator กล้องค้างบน browser) */
   const stopCamera = useCallback(() => {
@@ -226,16 +234,16 @@ export default function AttendancePage() {
    */
   const handleSubmit = useCallback(async () => {
     if (!photo.data) {
-      alert('กรุณาถ่ายรูปก่อนยืนยัน');
+      openMessageModal('กรุณาถ่ายรูปก่อนยืนยัน');
       return;
     }
     // ─ GPS validation: ต้องมีพิกัดจริง ไม่ใช่ (0,0) ─
     if (!location || (location.lat === 0 && location.lng === 0)) {
-      alert('ไม่สามารถรับพิกัด GPS ได้ กรุณาเปิด GPS แล้วลองใหม่');
+      openMessageModal('ไม่สามารถรับพิกัด GPS ได้ กรุณาเปิด GPS แล้วลองใหม่');
       return;
     }
     if (shifts.length > 1 && !selectedShift) {
-      alert('กรุณาเลือกกะทำงาน');
+      openMessageModal('กรุณาเลือกกะทำงาน');
       return;
     }
 
@@ -292,10 +300,10 @@ export default function AttendancePage() {
       console.error('Error submitting attendance:', error);
       const err = error as { response?: { data?: { error?: string; message?: string } } };
       const errorMsg = err.response?.data?.error || err.response?.data?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
-      alert(errorMsg);
+      openMessageModal(errorMsg);
       setUi(prev => ({ ...prev, loading: false }));
     }
-  }, [photo.data, location, selectedShift, mode, shifts.length, router]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [photo.data, location, selectedShift, mode, shifts.length, openMessageModal, router]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * handleCancel() — กดปุ่ม "ยกเลิก" หรือ "กลับ"
@@ -518,6 +526,21 @@ export default function AttendancePage() {
                 className="w-full py-4 rounded-2xl bg-[#f26623] hover:bg-[#e05a1a] text-white font-bold text-base transition-all"
               >
                 กลับสู่หน้าหลัก
+              </button>
+            </div>
+          </div>
+        )}
+
+        {messageModal.open && (
+          <div className="fixed inset-0 z-100000 flex items-end justify-center bg-black/60">
+            <div className="w-full bg-white rounded-t-3xl p-6 text-center space-y-4 pb-10">
+              <h3 className="text-xl font-bold text-gray-900">แจ้งเตือน</h3>
+              <p className="text-sm text-gray-600 whitespace-pre-line">{messageModal.message}</p>
+              <button
+                onClick={() => setMessageModal({ open: false, message: '' })}
+                className="w-full py-4 rounded-2xl bg-[#f26623] hover:bg-[#e05a1a] text-white font-bold text-base transition-all"
+              >
+                ตกลง
               </button>
             </div>
           </div>

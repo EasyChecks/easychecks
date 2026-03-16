@@ -30,7 +30,8 @@
  *
  *       **ข้อมูล Login:**
  *       - username: `employeeId` เช่น BKK001
- *       - password: `nationalId` (เลขบัตรประชาชน) หรือรหัสผ่านที่เปลี่ยนแล้ว
+ *       - password: `nationalId` (เลขบัตรประชาชน) — รหัสเริ่มต้นที่ระบบ hash ไว้ตั้งแต่สร้าง account
+ *       - เมื่อเปลี่ยนรหัสแล้ว → ใช้รหัสใหม่เท่านั้น (nationalId ใช้ไม่ได้อีก)
  *
  *       **Dual Login (Admin/SuperAdmin):**
  *       - ใช้ `adminPassword` → เข้าหน้า Admin/SuperAdmin Dashboard
@@ -1227,8 +1228,8 @@
  *       JWT Payload: `sub` (userId), `employeeId`, `role`, `dashboardMode`, `jti`
  *
  *       **ระบบ Password:**
- *       - ถ้ายังไม่เคยเปลี่ยนรหัส → ใส่ `nationalId` (เลขบัตรประชาชน 13 หลัก)
- *       - ถ้าเคยเปลี่ยนรหัสแล้ว → ใส่รหัสผ่านที่เปลี่ยนไว้ (bcrypt hash เก็บใน `password` column)
+ *       - รหัสเริ่มต้น = `nationalId` (ระบบ hash ไว้ใน `password` column ตั้งแต่สร้าง account)
+ *       - เปลี่ยนรหัสแล้ว → ใช้รหัสใหม่ที่ตั้งไว้เท่านั้น (nationalId ใช้ไม่ได้อีก)
  *
  *       **ระบบ Dual Login สำหรับ Admin/SuperAdmin:**
  *       - ใส่ `adminPassword` → `dashboardMode: 'admin'` หรือ `'superadmin'` (เข้าหน้า Admin Dashboard)
@@ -1247,18 +1248,18 @@
  *             Login ปกติ (User):
  *               summary: Login ด้วย employeeId และ nationalId → dashboardMode user
  *               value:
- *                 employeeId: "BKK001"
- *                 password: "1234567890123"
+ *                 employeeId: "BKK0001"
+ *                 password: "4850495039640"
  *             Login Admin ด้วย adminPassword:
  *               summary: Admin ใช้ adminPassword → dashboardMode admin
  *               value:
  *                 employeeId: "BKK0001"
- *                 password: "adm456"
+ *                 password: "adm0034"
  *             Login Admin ด้วยรหัสปกติ:
  *               summary: Admin ใส่ nationalId → dashboardMode user
  *               value:
  *                 employeeId: "BKK0001"
- *                 password: "1234567890123"
+ *                 password: "4850495039640"
  *             Login หลังเปลี่ยนรหัส:
  *               summary: Login หลังเปลี่ยนรหัสผ่านแล้ว
  *               value:
@@ -1384,8 +1385,8 @@
  *     description: |
  *       เปลี่ยนรหัสผ่านปกติของตัวเอง ต้องระบุรหัสปัจจุบันก่อนถึงจะเปลี่ยนได้
  *
- *       **รหัสผ่านเริ่มต้น** คือ `nationalId` (เลขบัตรประชาชน 13 หลัก)
- *       แนะนำให้เปลี่ยนหลัง login ครั้งแรก
+ *       **รหัสผ่านเริ่มต้น** คือ `nationalId` (เลขบัตรประชาชน 13 หลัก) ซึ่งระบบ hash เก็บไว้ตั้งแต่สร้าง account
+ *       หลังเปลี่ยนรหัสแล้ว `nationalId` จะใช้ login ไม่ได้อีก
  *
  *       > **หมายเหตุ:** API นี้เปลี่ยนเฉพาะรหัสปกติ (password/nationalId)
  *       > ไม่ใช่ `adminPassword` — สำหรับเข้าหน้า Admin Dashboard
@@ -2008,11 +2009,11 @@
  *         employeeId:
  *           type: string
  *           description: รหัสพนักงาน เช่น BKK001, CNX002
- *           example: "BKK001"
+ *           example: "BKK0001"
  *         password:
  *           type: string
  *           description: รหัสผ่าน (nationalId เริ่มต้น หรือรหัสที่เปลี่ยนแล้ว)
- *           example: "1234567890123"
+ *           example: "4850495039640"
  *
  *     LoginResponse:
  *       type: object
@@ -2154,7 +2155,6 @@
  *         - emergent_relation
  *         - phone
  *         - email
- *         - password
  *         - birthDate
  *         - branchId
  *       properties:
@@ -2216,11 +2216,12 @@
  *           example: "somchai@example.com"
  *         password:
  *           type: string
- *           example: "1234567890123"
+ *           nullable: true
+ *           example: "MyCustomPass123"
  *           description: |
- *             รหัสผ่านเริ่มต้น — เก็บเป็น bcrypt hash ใน `password` column
- *             พนักงานจะใช้ค่านี้ login ตั้งแต่วันแรก
- *             แนะนำให้ตั้งเป็น nationalId เพื่อให้พนักงานจำได้ง่าย
+ *             รหัสผ่านเริ่มต้น (optional) — ถ้าไม่ระบุ ระบบจะใช้ `nationalId` เป็นรหัสเริ่มต้นให้อัตโนมัติ
+ *             ค่าที่ส่งมา (หรือ nationalId) จะถูก hash ด้วย bcrypt เก็บใน `password` column
+ *             พนักงาน login ด้วยค่านี้ได้ทันทีตั้งแต่วันแรก
  *         birthDate:
  *           type: string
  *           format: date
@@ -2721,6 +2722,10 @@
  *       - ต้องระบุ eventName, startDateTime, endDateTime, participantType
  *       - startDateTime ต้องน้อยกว่า endDateTime
  *       - Location (mode A) ต้องมีอยู่จริงและยังไม่ถูกลบ
+ *
+ *       **เวลา/Timezone:**
+ *       - ส่งวันเวลาแบบ ISO 8601 หากต้องการเวลาไทย (UTC+7) **ต้องใช้ `+07:00` suffix** เช่น `2026-03-20T09:00:00.000+07:00`
+ *       - หากใช้ `Z` suffix เวลาจะถูกตีความว่า UTC (UTC+0) ซึ่งจะทำให้เวลาคลาดเคลื่อนไป 7 ชั่วโมง
  *     tags:
  *       - Events
  *     security:
@@ -2762,11 +2767,13 @@
  *               startDateTime:
  *                 type: string
  *                 format: date-time
- *                 example: "2026-03-10T09:00:00.000Z"
+ *                 description: "เวลาเริ่มต้น — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 09:00 น. ไทย = 2026-03-10T09:00:00.000+07:00"
+ *                 example: "2026-03-10T09:00:00.000+07:00"
  *               endDateTime:
  *                 type: string
  *                 format: date-time
- *                 example: "2026-03-10T17:00:00.000Z"
+ *                 description: "เวลาสิ้นสุด — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 17:00 น. ไทย = 2026-03-10T17:00:00.000+07:00"
+ *                 example: "2026-03-10T17:00:00.000+07:00"
  *               participantType:
  *                 type: string
  *                 enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
@@ -2795,8 +2802,8 @@
  *             eventName: "กิจกรรม Team Building"
  *             description: "กิจกรรมสร้างทีมประจำปี"
  *             locationId: 5
- *             startDateTime: "2026-03-20T09:00:00.000Z"
- *             endDateTime: "2026-03-20T17:00:00.000Z"
+ *             startDateTime: "2026-03-20T09:00:00.000+07:00"
+ *             endDateTime: "2026-03-20T17:00:00.000+07:00"
  *             participantType: "ALL"
  *     responses:
  *       201:
@@ -3164,6 +3171,10 @@
  *       - ถ้าเปลี่ยน participantType หรือ participants → ลบผู้เข้าร่วมเดิมและเพิ่มใหม่
  *       - startDateTime ต้องน้อยกว่า endDateTime (ถ้าส่งมาเปลี่ยน)
  *       - `locationId: null` จะล้าง location ออก
+ *
+ *       **เวลา/Timezone:**
+ *       - ส่งวันเวลาแบบ ISO 8601 หากต้องการเวลาไทย (UTC+7) **ต้องใช้ `+07:00` suffix** เช่น `2026-03-20T22:40:00.000+07:00`
+ *       - หากใช้ `Z` suffix เวลาจะถูกตีความว่า UTC (UTC+0) ซึ่งจะทำให้เวลาคลาดเคลื่อนไป 7 ชั่วโมง
  *     tags:
  *       - Events
  *     security:
@@ -3201,9 +3212,13 @@
  *               startDateTime:
  *                 type: string
  *                 format: date-time
+ *                 description: "เวลาเริ่มต้น — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 09:00 น. ไทย = 2026-03-10T09:00:00.000+07:00"
+ *                 example: "2026-03-20T09:00:00.000+07:00"
  *               endDateTime:
  *                 type: string
  *                 format: date-time
+ *                 description: "เวลาสิ้นสุด — ใช้ offset +07:00 สำหรับเวลาไทย เช่น 18:00 น. ไทย = 2026-03-20T18:00:00.000+07:00"
+ *                 example: "2026-03-20T18:00:00.000+07:00"
  *               participantType:
  *                 type: string
  *                 enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
@@ -3226,7 +3241,8 @@
  *                       type: string
  *           example:
  *             eventName: "ประชุมประจำเดือน (แก้ไข)"
- *             endDateTime: "2026-03-20T18:00:00.000Z"
+ *             startDateTime: "2026-03-20T09:00:00.000+07:00"
+ *             endDateTime: "2026-03-20T18:00:00.000+07:00"
  *     responses:
  *       200:
  *         description: แก้ไขกิจกรรมสำเร็จ

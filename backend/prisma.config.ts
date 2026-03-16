@@ -10,7 +10,7 @@ export default defineConfig({
     path: 'prisma/migrations',
   },
   datasource: {
-    // ใช้ DIRECT_URL สำหรับ migrations (ต้องใช้ direct connection ไม่ใช่ pooler)
-    url: process.env['DIRECT_URL'] as string,
+    // ใช้ DIRECT_URL สำหรับ migrations; fallback เป็น DATABASE_URL เมื่อ environment ยังไม่ตั้ง DIRECT_URL
+    url: (process.env['DIRECT_URL'] || process.env['DATABASE_URL']) as string,
   },
 });

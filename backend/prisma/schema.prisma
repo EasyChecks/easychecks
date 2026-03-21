@@ -274,6 +274,7 @@ enum Title {
 enum AttendanceStatus {
   ON_TIME
   LATE
+  LATE_APPROVED // มาสายแต่ได้รับการอนุมัติคำขอมาสายแล้ว
   ABSENT
   LEAVE_APPROVED  // ลาได้รับอนุมัติแล้ว แต่มาเข้างานจริง (ถือว่า on-time)
 }

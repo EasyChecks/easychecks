@@ -7,6 +7,7 @@ import { setupAttendanceWebSocket } from './websocket/attendance.websocket.js';
 import { setupEventWebSocket } from './websocket/event.websocket.js';
 import { setupSwagger } from './config/swagger.js';
 import { startAuditCleanupCron } from './services/audit-cron.service.js';
+import { startAttendanceAutoCheckoutCron } from './services/attendance-cron.service.js';
 import { toThaiIso } from './utils/timezone.js';
 import { AppError } from './utils/custom-errors.js';
 
@@ -48,9 +49,11 @@ import type { Request, Response, NextFunction } from 'express';
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
 
+  const maybeAppError = err as Error & { statusCode?: number };
+
   const statusCode = err instanceof AppError
     ? err.statusCode
-    : (typeof (err as any)?.statusCode === 'number' ? (err as any).statusCode : 500);
+    : (typeof maybeAppError.statusCode === 'number' ? maybeAppError.statusCode : 500);
 
   res.status(statusCode).json({
     success: false,
@@ -103,4 +106,5 @@ server.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
   // เริ่ม cron job ลบ audit log เก่า — เรียกครั้งเดียวตอน server start
   startAuditCleanupCron();
+  startAttendanceAutoCheckoutCron();
 });

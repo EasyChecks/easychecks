@@ -6,6 +6,9 @@ import { createAuditLog, AuditAction } from './audit.service.js';
 import { getThaiDayRange, getThaiTimeHHMM } from '../utils/timezone.js';
 import { uploadAttendancePhotoToSupabase } from '../utils/supabase-storage.js';
 
+const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
+const AUTO_CHECKOUT_GRACE_MINUTES = 30;
+
 /**
  * 📋 Attendance Service — บริการจัดการการเข้า-ออกงาน
  *
@@ -87,6 +90,109 @@ function calculateDistance(
     { latitude: lat1, longitude: lon1 },
     { latitude: lat2, longitude: lon2 },
   );
+}
+
+function getShiftEndDateFromCheckIn(checkIn: Date, shiftEndTime: string): Date {
+  const [endHour, endMinute] = shiftEndTime.split(':').map((v) => Number(v));
+
+  const thaiCheckIn = new Date(checkIn.getTime() + THAI_OFFSET_MS);
+  const thaiShiftEnd = new Date(thaiCheckIn);
+  thaiShiftEnd.setUTCHours(endHour ?? 0, endMinute ?? 0, 0, 0);
+
+  // กะข้ามวัน: เวลาเลิก <= เวลาเข้างานในวันเดียวกัน ให้เลื่อนไปวันถัดไป
+  if (thaiShiftEnd.getTime() <= thaiCheckIn.getTime()) {
+    thaiShiftEnd.setUTCDate(thaiShiftEnd.getUTCDate() + 1);
+  }
+
+  return new Date(thaiShiftEnd.getTime() - THAI_OFFSET_MS);
+}
+
+function getShiftDurationMinutes(startTime: string, endTime: string): number {
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  let diff = end - start;
+  if (diff <= 0) diff += 24 * 60;
+  return diff;
+}
+
+async function getApprovedHourlyLeaveMinutes(userId: number, baseDate: Date): Promise<number> {
+  const { start: dayStart } = getThaiDayRange(baseDate);
+
+  const hourlyLeaves = await prisma.leaveRequest.findMany({
+    where: {
+      userId,
+      status: 'APPROVED',
+      isHourly: true,
+      startDate: { lte: dayStart },
+      endDate: { gte: dayStart },
+    },
+    select: {
+      leaveHours: true,
+      startTime: true,
+      endTime: true,
+    },
+  });
+
+  if (hourlyLeaves.length === 0) return 0;
+
+  return hourlyLeaves.reduce((sum, leave) => {
+    if (leave.leaveHours !== null && leave.leaveHours !== undefined) {
+      return sum + Math.max(0, Math.round(leave.leaveHours * 60));
+    }
+
+    if (leave.startTime && leave.endTime) {
+      let duration = timeToMinutes(leave.endTime) - timeToMinutes(leave.startTime);
+      if (duration < 0) duration += 24 * 60;
+      return sum + Math.max(0, duration);
+    }
+
+    return sum;
+  }, 0);
+}
+
+type AttendanceWithShiftForSummary = {
+  userId: number;
+  checkIn: Date;
+  checkOut: Date | null;
+  shift: Pick<Shift, 'startTime' | 'endTime'> | null;
+};
+
+async function enrichWithWorkSummary<T extends AttendanceWithShiftForSummary>(attendance: T): Promise<T & {
+  workedMinutes: number | null;
+  breakDeductedMinutes: number;
+  leaveDeductedMinutes: number;
+  netWorkedMinutes: number | null;
+}> {
+  if (!attendance.checkOut) {
+    return {
+      ...attendance,
+      workedMinutes: null,
+      breakDeductedMinutes: 0,
+      leaveDeductedMinutes: 0,
+      netWorkedMinutes: null,
+    };
+  }
+
+  const workedMinutes = Math.max(
+    0,
+    Math.round((attendance.checkOut.getTime() - attendance.checkIn.getTime()) / 60000),
+  );
+
+  const shiftDurationMinutes = attendance.shift
+    ? getShiftDurationMinutes(attendance.shift.startTime, attendance.shift.endTime)
+    : 0;
+
+  const breakDeductedMinutes = shiftDurationMinutes > 5 * 60 ? 60 : 0;
+  const leaveDeductedMinutes = await getApprovedHourlyLeaveMinutes(attendance.userId, attendance.checkIn);
+  const netWorkedMinutes = Math.max(0, workedMinutes - breakDeductedMinutes - leaveDeductedMinutes);
+
+  return {
+    ...attendance,
+    workedMinutes,
+    breakDeductedMinutes,
+    leaveDeductedMinutes,
+    netWorkedMinutes,
+  };
 }
 
 /**
@@ -271,15 +377,31 @@ export const checkIn = async (data: CheckInDTO) => {
   // ใช้ manual offset ให้ได้ format "HH:MM" ที่แน่นอนเสมอ
   const checkInTime = getThaiTimeHHMM();
 
+  // ถ้ามีคำขอมาสายที่อนุมัติแล้วของวันนี้ ให้ override เป็น LATE_APPROVED ตาม policy
+  const approvedLateRequest = await prisma.lateRequest.findFirst({
+    where: {
+      userId,
+      status: 'APPROVED',
+      requestDate: { gte: today, lt: tomorrow },
+    },
+    orderBy: { lateRequestId: 'desc' },
+  });
+
   let status: AttendanceStatus = 'ON_TIME';
   let lateMinutes = 0;
   let message = 'เข้างาน';
 
-  // มีกะ → คำนวณด้วย gracePeriodMinutes และ lateThresholdMinutes ของกะนั้น
-  const result = calculateAttendanceStatus(checkInTime, shift);
-  status = result.status;           // ON_TIME / LATE / ABSENT
-  lateMinutes = result.lateMinutes; // จำนวนนาทีที่สาย
-  message = result.message;         // ข้อความสำหรับบันทึกใน note
+  if (approvedLateRequest) {
+    status = 'LATE_APPROVED' as AttendanceStatus;
+    lateMinutes = approvedLateRequest.lateMinutes;
+    message = `มาสายอนุมัติแล้ว ${approvedLateRequest.lateMinutes} นาที`;
+  } else {
+    // มีกะ → คำนวณด้วย gracePeriodMinutes และ lateThresholdMinutes ของกะนั้น
+    const result = calculateAttendanceStatus(checkInTime, shift);
+    status = result.status;           // ON_TIME / LATE / ABSENT
+    lateMinutes = result.lateMinutes; // จำนวนนาทีที่สาย
+    message = result.message;         // ข้อความสำหรับบันทึกใน note
+  }
 
   // ===== 5. บันทึกลง Database =====
   // SQL: INSERT INTO "Attendance" (...) VALUES (...) RETURNING *
@@ -439,7 +561,9 @@ export const checkOut = async (data: CheckOutDTO) => {
     newValues: updatedAttendance,        // สภาพหลัง update (มี checkOut แล้ว)
   });
 
-  return updatedAttendance; // ส่งกลับ controller → WebSocket broadcast
+  const responseAttendance = await enrichWithWorkSummary(updatedAttendance);
+
+  return responseAttendance; // ส่งกลับ controller → WebSocket broadcast
 };
 
 /**
@@ -457,11 +581,13 @@ export const checkOut = async (data: CheckOutDTO) => {
 export const getTodayAttendance = async (userId: number) => {
   const { start: today, end: tomorrow } = getThaiDayRange();
 
-  return prisma.attendance.findMany({
+  const rows = await prisma.attendance.findMany({
     where: { userId, isDeleted: false, checkIn: { gte: today, lt: tomorrow } },
     include: { shift: true, location: true },
     orderBy: { checkIn: 'desc' },
   });
+
+  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -478,7 +604,7 @@ export const getAttendanceHistory = async (
   userId: number,
   filters?: { startDate?: Date; endDate?: Date; status?: AttendanceStatus },
 ) => {
-  return prisma.attendance.findMany({
+  const rows = await prisma.attendance.findMany({
     where: {
       userId,
       isDeleted: false,
@@ -489,6 +615,8 @@ export const getAttendanceHistory = async (
     include: { shift: true, location: true },
     orderBy: { checkIn: 'desc' },
   });
+
+  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -511,7 +639,7 @@ export const getAllAttendances = async (filters?: {
   endDate?: Date;
   status?: AttendanceStatus;
 }) => {
-  return prisma.attendance.findMany({
+  const rows = await prisma.attendance.findMany({
     where: {
       isDeleted: false,
       ...(filters?.userId !== undefined && { userId: filters.userId }),
@@ -528,6 +656,8 @@ export const getAllAttendances = async (filters?: {
     },
     orderBy: { checkIn: 'desc' },
   });
+
+  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -623,6 +753,67 @@ export const deleteAttendance = async (
   return { message: 'ลบข้อมูลการเข้างานเรียบร้อยแล้ว (Soft Delete)' };
 };
 
+/**
+ * 🤖 Auto Checkout
+ * ปิดงานอัตโนมัติเมื่อเลยเวลาเลิกกะ + grace แล้ว แต่ยังไม่ได้ check-out
+ */
+export const autoCheckoutOverdueAttendances = async (): Promise<number> => {
+  const now = new Date();
+
+  const openAttendances = await prisma.attendance.findMany({
+    where: {
+      isDeleted: false,
+      checkOut: null,
+      shiftId: { not: null },
+    },
+    include: {
+      shift: true,
+    },
+    orderBy: { checkIn: 'asc' },
+  });
+
+  let updatedCount = 0;
+
+  for (const attendance of openAttendances) {
+    if (!attendance.shift) continue;
+
+    const shiftEndDate = getShiftEndDateFromCheckIn(attendance.checkIn, attendance.shift.endTime);
+    const autoCheckoutAt = new Date(shiftEndDate.getTime() + AUTO_CHECKOUT_GRACE_MINUTES * 60 * 1000);
+
+    if (now < autoCheckoutAt) continue;
+
+    await prisma.attendance.update({
+      where: { attendanceId: attendance.attendanceId },
+      data: {
+        checkOut: autoCheckoutAt,
+        isAutoCheckout: true,
+        note: attendance.note
+          ? `${attendance.note} | auto-checkout`
+          : 'auto-checkout',
+      },
+    });
+
+    await createAuditLog({
+      userId: attendance.userId,
+      action: AuditAction.AUTO_CHECK_OUT,
+      targetTable: 'attendance',
+      targetId: attendance.attendanceId,
+      oldValues: {
+        checkOut: attendance.checkOut,
+        isAutoCheckout: attendance.isAutoCheckout,
+      },
+      newValues: {
+        checkOut: autoCheckoutAt,
+        isAutoCheckout: true,
+      },
+    });
+
+    updatedCount += 1;
+  }
+
+  return updatedCount;
+};
+
 // ============================================
 // 📤 Export
 // ============================================
@@ -635,6 +826,7 @@ export const attendanceService = {
   getAllAttendances,
   updateAttendance,
   deleteAttendance,
+  autoCheckoutOverdueAttendances,
 };
 
 export default attendanceService;

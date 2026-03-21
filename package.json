@@ -2,7 +2,8 @@
   "scripts": {
     "format": "prettier --write .",
     "check-format": "prettier --check .",
-    "test:core-apis": "bash ./test-apis.sh"
+    "test:core-apis": "bash ./test-apis.sh",
+    "prisma:generate": "npm --prefix backend run prisma:generate"
   },
   "devDependencies": {
     "prettier": "3.8.0",

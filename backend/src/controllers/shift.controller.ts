@@ -12,7 +12,7 @@ function qs(v: unknown): string | undefined {
 }
 
 function deriveHttpStatus(message: string): number {
-  if (message.includes('ไปแล้ว')) return 409;
+  if (message.includes('ไปแล้ว') || message.includes('active shift') || message.includes('อยู่แล้ว')) return 409;
   if (message.includes('ไม่พบ')) return 404;
   if (message.includes('ไม่มีสิทธิ์')) return 403;
   if (message.includes('กรุณา') || message.includes('ต้อง')) return 400;
@@ -89,6 +89,7 @@ export const createShift = async (req: Request, res: Response) => {
     //     locationId?       → ผูก GPS radius กับกะนี้
     const {
       userId,
+      replaceExisting,
       name,
       shiftType,
       startTime,
@@ -100,6 +101,7 @@ export const createShift = async (req: Request, res: Response) => {
       locationId,
     } = req.body as {
       userId?: number;
+      replaceExisting?: boolean;
       name?: string;
       shiftType?: string;
       startTime?: string;
@@ -131,6 +133,7 @@ export const createShift = async (req: Request, res: Response) => {
       customDate,
       locationId: locationId !== undefined ? Number(locationId) : undefined,
       userId: Number(userId),
+      replaceExisting: replaceExisting === true,
       createdByUserId,   // ผู้สร้าง (จาก token)
       creatorRole,       // บทบาท (จาก token) — service ใช้ตรวจสิทธิ์ครอสสาขา
       creatorBranchId,   // สาขาผู้สร้าง (จาก token)
@@ -246,7 +249,9 @@ export const updateShift = async (req: Request, res: Response) => {
       specificDays,
       customDate,
       locationId,
+      userId,
       isActive,
+      replaceExisting,
     } = req.body as Parameters<typeof shiftService.updateShift>[4];
 
     const updatedShift = await shiftService.updateShift(
@@ -254,7 +259,7 @@ export const updateShift = async (req: Request, res: Response) => {
       updatedByUserId,
       updaterRole,
       updaterBranchId,
-      { name, startTime, endTime, gracePeriodMinutes, lateThresholdMinutes, specificDays, customDate, locationId, isActive },
+      { name, startTime, endTime, gracePeriodMinutes, lateThresholdMinutes, specificDays, customDate, locationId, userId, isActive, replaceExisting },
     );
 
     broadcastShiftUpdate('UPDATE', updatedShift);

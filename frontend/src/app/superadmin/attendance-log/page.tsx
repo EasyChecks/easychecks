@@ -16,10 +16,11 @@
  *       เพราะ backend ตรวจสิทธิ์จาก role (ADMIN | SUPERADMIN) เหมือนกัน
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { ClipboardList, Search, FileX, FilePenLine, Trash2 } from 'lucide-react';
 import { attendanceService } from '@/services/attendance';
 import { Attendance, UpdateAttendanceRequest } from '@/types/attendance';
 
@@ -28,6 +29,7 @@ import { Attendance, UpdateAttendanceRequest } from '@/types/attendance';
 const STATUS_OPTIONS = [
   { value: 'ON_TIME', label: 'ตรงเวลา', color: 'bg-green-100 text-green-800' },
   { value: 'LATE', label: 'สาย', color: 'bg-yellow-100 text-yellow-800' },
+  { value: 'LATE_APPROVED', label: 'สาย (อนุมัติ)', color: 'bg-amber-100 text-amber-800' },
   { value: 'ABSENT', label: 'ขาด', color: 'bg-red-100 text-red-800' },
   { value: 'LEAVE_APPROVED', label: 'ลา (อนุมัติ)', color: 'bg-blue-100 text-blue-800' },
 ] as const;
@@ -67,13 +69,17 @@ function formatThaiTime(iso: string | undefined): string {
 export default function AttendanceLogPage() {
   // --- State: ข้อมูลหลัก ---
   const [records, setRecords] = useState<Attendance[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   // --- State: ตัวกรอง ---
   const [searchName, setSearchName] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // --- State: Modal แก้ไข ---
   const [editRecord, setEditRecord] = useState<Attendance | null>(null);
@@ -88,7 +94,12 @@ export default function AttendanceLogPage() {
 
   // ========== โหลดข้อมูล ==========
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (hasLoadedOnce) {
+      setTableLoading(true);
+    } else {
+      setInitialLoading(true);
+    }
+
     try {
       const params: Record<string, string | number> = {};
       if (filterStatus) params.status = filterStatus;
@@ -101,22 +112,38 @@ export default function AttendanceLogPage() {
       console.error('Error loading attendance records:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูลบันทึกเวลา');
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setTableLoading(false);
+      setHasLoadedOnce(true);
     }
-  }, [filterStatus, filterStartDate, filterEndDate]);
+  }, [filterStatus, filterStartDate, filterEndDate, hasLoadedOnce]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   // ========== กรองตามชื่อ (client-side) ==========
-  const filteredRecords = records.filter((r) => {
+  const filteredRecords = useMemo(() => records.filter((r) => {
     if (!searchName) return true;
     const name = r.user?.name ?? '';
     const empId = r.user?.employeeId ?? '';
     const q = searchName.toLowerCase();
     return name.toLowerCase().includes(q) || empId.toLowerCase().includes(q);
-  });
+  }), [records, searchName]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / pageSize));
+  const paginatedRecords = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredRecords.slice(start, start + pageSize);
+  }, [filteredRecords, page, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchName, filterStatus, filterStartDate, filterEndDate, pageSize]);
 
   // ========== Handlers ==========
 
@@ -128,6 +155,7 @@ export default function AttendanceLogPage() {
       note: record.note ?? '',
       checkIn: record.checkIn ? new Date(record.checkIn).toISOString().slice(0, 16) : '',
       checkOut: record.checkOut ? new Date(record.checkOut).toISOString().slice(0, 16) : '',
+      editReason: '',
     });
   };
 
@@ -135,6 +163,15 @@ export default function AttendanceLogPage() {
   const handleSaveEdit = async () => {
     if (!editRecord) return;
     try {
+      const hasTimeChanged =
+        (editForm.checkIn ?? '') !== (editRecord.checkIn ? new Date(editRecord.checkIn).toISOString().slice(0, 16) : '')
+        || (editForm.checkOut ?? '') !== (editRecord.checkOut ? new Date(editRecord.checkOut).toISOString().slice(0, 16) : '');
+
+      if (hasTimeChanged && !editForm.editReason?.trim()) {
+        alert('การแก้เวลาเข้างาน/ออกงานต้องระบุเหตุผล');
+        return;
+      }
+
       await attendanceService.update(editRecord.id, editForm);
       alert('บันทึกการแก้ไขสำเร็จ');
       setEditRecord(null);
@@ -160,7 +197,7 @@ export default function AttendanceLogPage() {
     }
     try {
       // backend DELETE /api/attendance/:id — ส่ง deleteReason ใน body
-      await attendanceService.delete(deleteRecord.id);
+      await attendanceService.delete(deleteRecord.id, deleteReason.trim());
       alert('ลบบันทึกเวลาสำเร็จ');
       setDeleteRecord(null);
       await loadData();
@@ -171,7 +208,7 @@ export default function AttendanceLogPage() {
   };
 
   // ========== Render: Loading ==========
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="w-8 h-8 border-4 border-orange-500 rounded-full animate-spin border-t-transparent" />
@@ -186,7 +223,10 @@ export default function AttendanceLogPage() {
         {/* ===== Header ===== */}
         <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">📋 บันทึกเวลา</h1>
+            <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-800">
+              <ClipboardList className="w-6 h-6 text-gray-700" />
+              <span>บันทึกเวลา</span>
+            </h1>
             <p className="text-sm text-gray-500">จัดการและตรวจสอบบันทึกเข้า-ออกงานของพนักงาน</p>
           </div>
           <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50">
@@ -199,7 +239,7 @@ export default function AttendanceLogPage() {
           {/* ค้นหาชื่อ/รหัสพนักงาน */}
           <input
             type="text"
-            placeholder="🔍 ค้นหาชื่อ / รหัสพนักงาน"
+            placeholder="ค้นหาชื่อ / รหัสพนักงาน"
             value={searchName}
             onChange={(e) => setSearchName(e.target.value)}
             className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
@@ -234,11 +274,14 @@ export default function AttendanceLogPage() {
         {/* ===== ตาราง ===== */}
         {filteredRecords.length === 0 ? (
           <div className="py-12 text-center text-gray-400">
-            <p className="text-4xl mb-2">📭</p>
+            <FileX className="w-10 h-10 mx-auto mb-2" />
             <p>ไม่พบบันทึกเวลาที่ตรงกับเงื่อนไข</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
+            {tableLoading && (
+              <div className="py-2 text-xs text-center text-gray-500">กำลังโหลดข้อมูลล่าสุด...</div>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left border-b border-gray-200">
@@ -252,7 +295,7 @@ export default function AttendanceLogPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRecords.map((r) => {
+                {paginatedRecords.map((r) => {
                   const st = getStatusOption(r.status);
                   return (
                     <tr key={r.id} className="border-b border-gray-100 hover:bg-orange-50/50 transition-colors">
@@ -313,6 +356,42 @@ export default function AttendanceLogPage() {
                 })}
               </tbody>
             </table>
+
+            <div className="flex flex-col gap-3 px-1 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <span>แสดงต่อหน้า</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="px-2 py-1 text-sm border rounded-lg"
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                </select>
+                <span>
+                  หน้า {page} / {totalPages}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  ก่อนหน้า
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  ถัดไป
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </Card>
@@ -322,7 +401,10 @@ export default function AttendanceLogPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-lg p-6 bg-white max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-800">🔍 รายละเอียดบันทึกเวลา</h2>
+              <h2 className="flex items-center gap-2 text-lg font-bold text-gray-800">
+                <Search className="w-5 h-5" />
+                <span>รายละเอียดบันทึกเวลา</span>
+              </h2>
               <button onClick={() => setDetailRecord(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
             </div>
 
@@ -334,12 +416,15 @@ export default function AttendanceLogPage() {
               <DetailRow label="ออกงาน" value={formatThaiDateTime(detailRecord.checkOut)} />
               <DetailRow label="สถานะ" value={getStatusOption(detailRecord.status).label} />
               <DetailRow label="สาย (นาที)" value={String(detailRecord.lateMinutes ?? 0)} />
+              <DetailRow label="เวลาทำงานรวม (นาที)" value={detailRecord.workedMinutes != null ? String(detailRecord.workedMinutes) : '-'} />
+              <DetailRow label="หักพัก (นาที)" value={detailRecord.breakDeductedMinutes != null ? String(detailRecord.breakDeductedMinutes) : '-'} />
+              <DetailRow label="หักลารายชั่วโมง (นาที)" value={detailRecord.leaveDeductedMinutes != null ? String(detailRecord.leaveDeductedMinutes) : '-'} />
+              <DetailRow label="เวลาทำงานสุทธิ (นาที)" value={detailRecord.netWorkedMinutes != null ? String(detailRecord.netWorkedMinutes) : '-'} />
               <DetailRow label="หมายเหตุ" value={detailRecord.note ?? '-'} />
               <DetailRow label="ที่อยู่เข้างาน" value={detailRecord.checkInAddress ?? '-'} />
               <DetailRow label="ระยะห่าง (เข้า)" value={detailRecord.checkInDistance != null ? `${detailRecord.checkInDistance.toFixed(0)} ม.` : '-'} />
               <DetailRow label="ที่อยู่ออกงาน" value={detailRecord.checkOutAddress ?? '-'} />
               <DetailRow label="ระยะห่าง (ออก)" value={detailRecord.checkOutDistance != null ? `${detailRecord.checkOutDistance.toFixed(0)} ม.` : '-'} />
-              <DetailRow label="วันที่สร้าง" value={formatThaiDateTime(detailRecord.createdAt)} />
             </div>
 
             <div className="flex justify-end mt-6">
@@ -354,7 +439,10 @@ export default function AttendanceLogPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-lg p-6 bg-white max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-800">✏️ แก้ไขบันทึกเวลา</h2>
+              <h2 className="flex items-center gap-2 text-lg font-bold text-gray-800">
+                <FilePenLine className="w-5 h-5" />
+                <span>แก้ไขบันทึกเวลา</span>
+              </h2>
               <button onClick={() => setEditRecord(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
             </div>
 
@@ -412,6 +500,18 @@ export default function AttendanceLogPage() {
                   placeholder="ระบุหมายเหตุ (ถ้ามี)"
                 />
               </div>
+
+              {/* เหตุผลการแก้เวลา */}
+              <div>
+                <label className="block mb-1 text-sm font-medium text-gray-700">เหตุผลการแก้เวลา (จำเป็นเมื่อแก้เวลาเข้า/ออก)</label>
+                <textarea
+                  value={editForm.editReason ?? ''}
+                  onChange={(e) => setEditForm({ ...editForm, editReason: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none resize-none"
+                  placeholder="ตัวอย่าง: พนักงานลืมกดออกงานจริง"
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 mt-6">
@@ -426,7 +526,10 @@ export default function AttendanceLogPage() {
       {deleteRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-md p-6 bg-white">
-            <h2 className="mb-2 text-lg font-bold text-red-600">🗑️ ลบบันทึกเวลา</h2>
+            <h2 className="flex items-center gap-2 mb-2 text-lg font-bold text-red-600">
+              <Trash2 className="w-5 h-5" />
+              <span>ลบบันทึกเวลา</span>
+            </h2>
             <p className="mb-4 text-sm text-gray-600">
               คุณต้องการลบบันทึกเวลาของ <strong>{deleteRecord.user?.name ?? '-'}</strong> (เข้างาน {formatThaiDateTime(deleteRecord.checkIn)}) หรือไม่?
             </p>

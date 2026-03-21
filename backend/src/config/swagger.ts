@@ -197,6 +197,11 @@ const options: swaggerJsdoc.Options = {
               example: '2026-02-15',
               description: 'วันที่เฉพาะ (สำหรับ CUSTOM)',
             },
+            replaceExisting: {
+              type: 'boolean',
+              example: false,
+              description: 'ถ้า user มี active shift อยู่แล้ว ให้แทนที่กะเดิมเมื่อกำหนดเป็น true',
+            },
           },
         },
         
@@ -608,7 +613,7 @@ const options: swaggerJsdoc.Options = {
             employeeId: { type: 'string', example: 'BKK001' },
             name: { type: 'string', example: 'สมชาย ใจดี' },
             branch: { type: 'string', example: 'สำนักงานใหญ่' },
-            status: { type: 'string', enum: ['ON_TIME', 'LATE', 'ABSENT'], example: 'ON_TIME' },
+            status: { type: 'string', enum: ['ON_TIME', 'LATE', 'LATE_APPROVED', 'ABSENT', 'LEAVE_APPROVED'], example: 'ON_TIME' },
             checkIn: { type: 'string', example: '08:30', description: 'เวลาเข้างาน (HH:mm)' },
             checkOut: { type: 'string', nullable: true, example: '17:30', description: 'เวลาออกงาน (HH:mm)' },
             lateMinutes: { type: 'integer', example: 0 },

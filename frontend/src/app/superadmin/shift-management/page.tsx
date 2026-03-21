@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,32 @@ export default function ShiftManagementPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<Shift | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [filterShiftType, setFilterShiftType] = useState<'ALL' | 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM'>('ALL');
+  const [filterActive, setFilterActive] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+  const [filterUserId, setFilterUserId] = useState<number | 'ALL'>('ALL');
+  const [filterLocationId, setFilterLocationId] = useState<number | 'ALL'>('ALL');
+  const [filterBranchName, setFilterBranchName] = useState<string>('ALL');
+  const [page, setPage] = useState(1);
+  const pageSize = 9;
+  const [toggleTargetShift, setToggleTargetShift] = useState<Shift | null>(null);
+  const [deleteTargetShift, setDeleteTargetShift] = useState<Shift | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [reassignModal, setReassignModal] = useState<
+    | {
+      mode: 'edit';
+      message: string;
+      shiftId: number;
+      updateData: UpdateShiftRequest;
+    }
+    | {
+      mode: 'create';
+      baseCreateData: Omit<CreateShiftRequest, 'userId'>;
+      conflictUserIds: number[];
+      conflictUsersText: string;
+    }
+    | null
+  >(null);
   
   const [formData, setFormData] = useState<{
     name: string;
@@ -41,7 +67,7 @@ export default function ShiftManagementPage() {
     lateThresholdMinutes: number;
     specificDays: ('MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY')[];
     customDate: string;
-    userId: number | null;
+    userIds: number[];
   }>({
     name: '',
     shiftType: 'REGULAR',
@@ -51,7 +77,7 @@ export default function ShiftManagementPage() {
     lateThresholdMinutes: 30,
     specificDays: [],
     customDate: '',
-    userId: null,
+    userIds: [],
   });
 
   useEffect(() => {
@@ -86,7 +112,7 @@ export default function ShiftManagementPage() {
       lateThresholdMinutes: 30,
       specificDays: [],
       customDate: '',
-      userId: null,
+      userIds: [],
     });
     setShowCreateModal(true);
   };
@@ -102,9 +128,20 @@ export default function ShiftManagementPage() {
       lateThresholdMinutes: shift.lateThresholdMinutes,
       specificDays: shift.specificDays || [],
       customDate: shift.customDate || '',
-      userId: shift.userId || null,
+      userIds: shift.userId ? [shift.userId] : [],
     });
     setShowCreateModal(true);
+  };
+
+  const isActiveShiftConflictError = (message: string) => {
+    const lower = message.toLowerCase();
+    return lower.includes('active shift') || message.includes('ยืนยันการย้ายกะ') || message.includes('อยู่แล้ว');
+  };
+
+  const finalizeSaveSuccess = async (message: string) => {
+    await loadData();
+    setShowCreateModal(false);
+    alert(message);
   };
 
   const handleToggleWorkDay = (day: string) => {
@@ -134,10 +171,21 @@ export default function ShiftManagementPage() {
       return;
     }
 
+    if (formData.userIds.length === 0) {
+      alert('กรุณาเลือกพนักงานอย่างน้อย 1 คน');
+      return;
+    }
+
+    if (editingShift && formData.userIds.length > 1) {
+      alert('การแก้ไขกะรองรับพนักงานได้ครั้งละ 1 คน');
+      return;
+    }
+
     setLoading(true);
     try {
       if (editingShift) {
         // Update existing shift
+        const targetUserId = formData.userIds[0];
         const updateData: UpdateShiftRequest = {
           name: formData.name,
           shiftType: formData.shiftType,
@@ -145,7 +193,7 @@ export default function ShiftManagementPage() {
           endTime: formData.endTime,
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
-          userId: formData.userId || undefined,
+          userId: targetUserId,
         };
 
         if (formData.shiftType === 'SPECIFIC_DAY') {
@@ -154,31 +202,69 @@ export default function ShiftManagementPage() {
           updateData.customDate = formData.customDate;
         }
 
-        await shiftService.update(editingShift.id, updateData);
+        try {
+          await shiftService.update(editingShift.id, updateData);
+        } catch (error: any) {
+          const message = error?.response?.data?.message || error?.message || '';
+          if (!isActiveShiftConflictError(message)) throw error;
+
+          setReassignModal({
+            mode: 'edit',
+            message,
+            shiftId: editingShift.id,
+            updateData,
+          });
+          return;
+        }
       } else {
-        // Create new shift
-        const createData: CreateShiftRequest = {
+        // Create new shift (one shift pattern for many employees)
+        const baseCreateData: Omit<CreateShiftRequest, 'userId'> = {
           name: formData.name,
           shiftType: formData.shiftType,
           startTime: formData.startTime,
           endTime: formData.endTime,
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
-          userId: formData.userId || undefined,
         };
 
         if (formData.shiftType === 'SPECIFIC_DAY') {
-          createData.specificDays = formData.specificDays;
+          baseCreateData.specificDays = formData.specificDays;
         } else if (formData.shiftType === 'CUSTOM') {
-          createData.customDate = formData.customDate;
+          baseCreateData.customDate = formData.customDate;
         }
 
-        await shiftService.create(createData);
+        const conflictUserIds: number[] = [];
+
+        for (const userId of formData.userIds) {
+          try {
+            await shiftService.create({ ...baseCreateData, userId });
+          } catch (error: any) {
+            const message = error?.response?.data?.message || error?.message || '';
+            if (isActiveShiftConflictError(message)) {
+              conflictUserIds.push(userId);
+              continue;
+            }
+            throw error;
+          }
+        }
+
+        if (conflictUserIds.length > 0) {
+          const conflictUsers = users
+            .filter((u) => conflictUserIds.includes(u.id))
+            .map((u) => `${u.name} (${u.employeeId})`)
+            .join('\n- ');
+
+          setReassignModal({
+            mode: 'create',
+            baseCreateData,
+            conflictUserIds,
+            conflictUsersText: conflictUsers,
+          });
+          return;
+        }
       }
 
-      await loadData();
-      setShowCreateModal(false);
-      alert(editingShift ? 'แก้ไขกะงานสำเร็จ' : 'สร้างกะงานสำเร็จ');
+      await finalizeSaveSuccess(editingShift ? 'แก้ไขกะงานสำเร็จ' : 'สร้างกะงานสำเร็จ');
     } catch (error: any) {
       console.error('Error saving shift:', error);
       alert(error.response?.data?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
@@ -188,34 +274,90 @@ export default function ShiftManagementPage() {
   };
 
   const handleToggleActive = async (shift: Shift) => {
-    if (confirm(`คุณแน่ใจหรือไม่ที่จะ${shift.isActive ? 'ปิด' : 'เปิด'}ใช้งานกะนี้?`)) {
-      setLoading(true);
-      try {
-        await shiftService.update(shift.id, { isActive: !shift.isActive });
-        await loadData();
-      } catch (error: any) {
-        console.error('Error toggling shift:', error);
-        alert(error.response?.data?.message || 'เกิดข้อผิดพลาด');
-      } finally {
-        setLoading(false);
-      }
-    }
+    setToggleTargetShift(shift);
   };
 
   const handleDeleteShift = async (shift: Shift) => {
-    if (confirm('คุณแน่ใจหรือไม่ที่จะลบกะงานนี้?')) {
+    setDeleteTargetShift(shift);
+    setDeleteReason('');
+  };
+
+  const handleConfirmToggleActive = async () => {
+    if (!toggleTargetShift) return;
+
+    setLoading(true);
+    try {
+      await shiftService.update(toggleTargetShift.id, { isActive: !toggleTargetShift.isActive });
+      setToggleTargetShift(null);
+      await loadData();
+    } catch (error: any) {
+      console.error('Error toggling shift:', error);
+      alert(error.response?.data?.message || 'เกิดข้อผิดพลาด');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmDeleteShift = async () => {
+    if (!deleteTargetShift) return;
+    if (!deleteReason.trim()) {
+      alert('การลบกะต้องระบุเหตุผล');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await shiftService.delete(deleteTargetShift.id, deleteReason.trim());
+      setDeleteTargetShift(null);
+      setDeleteReason('');
+      await loadData();
+      alert('ลบกะงานสำเร็จ');
+    } catch (error: any) {
+      console.error('Error deleting shift:', error);
+      alert(error.response?.data?.message || 'เกิดข้อผิดพลาด');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmReassign = async () => {
+    if (!reassignModal) return;
+
+    setLoading(true);
+    try {
+      if (reassignModal.mode === 'edit') {
+        await shiftService.update(
+          reassignModal.shiftId,
+          { ...reassignModal.updateData, replaceExisting: true },
+        );
+        await finalizeSaveSuccess('แก้ไขกะงานสำเร็จ');
+      } else {
+        for (const userId of reassignModal.conflictUserIds) {
+          await shiftService.create({ ...reassignModal.baseCreateData, userId, replaceExisting: true });
+        }
+        await finalizeSaveSuccess('สร้างกะงานสำเร็จ');
+      }
+      setReassignModal(null);
+    } catch (error: any) {
+      console.error('Error replacing existing shifts:', error);
+      alert(error?.response?.data?.message || 'เกิดข้อผิดพลาดในการย้ายกะ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelReassign = async () => {
+    if (reassignModal?.mode === 'create') {
       setLoading(true);
       try {
-        await shiftService.delete(shift.id);
         await loadData();
-        alert('ลบกะงานสำเร็จ');
-      } catch (error: any) {
-        console.error('Error deleting shift:', error);
-        alert(error.response?.data?.message || 'เกิดข้อผิดพลาด');
+        setShowCreateModal(false);
+        alert('สร้างกะงานบางส่วนสำเร็จ (ข้ามพนักงานที่มีกะเดิม)');
       } finally {
         setLoading(false);
       }
     }
+    setReassignModal(null);
   };
 
   const getShiftTypeName = (type: string) => {
@@ -225,6 +367,95 @@ export default function ShiftManagementPage() {
   const getDayName = (day: string) => {
     return weekDays.find(d => d.en === day)?.th || day;
   };
+
+  const branchOptions = useMemo(() => {
+    const names = shifts
+      .map((s) => s.user?.branch?.name)
+      .filter((name): name is string => Boolean(name));
+    return Array.from(new Set(names)).sort();
+  }, [shifts]);
+
+  const locationOptions = useMemo(() => {
+    const values = shifts
+      .filter((s): s is Shift & { location: NonNullable<Shift['location']> } => Boolean(s.location?.id))
+      .map((s) => ({ id: s.location!.id, name: s.location!.name }));
+
+    const seen = new Map<number, string>();
+    values.forEach((v) => {
+      if (!seen.has(v.id)) seen.set(v.id, v.name);
+    });
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+  }, [shifts]);
+
+  const filteredShifts = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+
+    return shifts.filter((shift) => {
+      if (filterShiftType !== 'ALL' && shift.shiftType !== filterShiftType) return false;
+      if (filterActive === 'ACTIVE' && !shift.isActive) return false;
+      if (filterActive === 'INACTIVE' && shift.isActive) return false;
+      if (filterUserId !== 'ALL' && shift.userId !== filterUserId) return false;
+      if (filterLocationId !== 'ALL' && shift.location?.id !== filterLocationId) return false;
+      if (filterBranchName !== 'ALL' && shift.user?.branch?.name !== filterBranchName) return false;
+
+      if (!q) return true;
+      const merged = [
+        shift.name,
+        shift.user?.name,
+        shift.user?.employeeId,
+        shift.location?.name,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return merged.includes(q);
+    });
+  }, [
+    shifts,
+    searchText,
+    filterShiftType,
+    filterActive,
+    filterUserId,
+    filterLocationId,
+    filterBranchName,
+  ]);
+
+  const hasActiveFilters = useMemo(() => {
+    return Boolean(
+      searchText.trim()
+      || filterShiftType !== 'ALL'
+      || filterActive !== 'ALL'
+      || filterUserId !== 'ALL'
+      || filterLocationId !== 'ALL'
+      || filterBranchName !== 'ALL',
+    );
+  }, [searchText, filterShiftType, filterActive, filterUserId, filterLocationId, filterBranchName]);
+
+  const shiftStats = useMemo(() => {
+    const total = shifts.length;
+    const active = shifts.filter((s) => s.isActive).length;
+    const inactive = total - active;
+    return {
+      total,
+      active,
+      inactive,
+      filtered: filteredShifts.length,
+    };
+  }, [shifts, filteredShifts]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredShifts.length / pageSize));
+  const paginatedShifts = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredShifts.slice(start, start + pageSize);
+  }, [filteredShifts, page]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchText, filterShiftType, filterActive, filterUserId, filterLocationId, filterBranchName]);
 
   if (loading && shifts.length === 0) {
     return (
@@ -263,18 +494,133 @@ export default function ShiftManagementPage() {
           </Button>
         </div>
 
+        {/* Filters */}
+        <Card className="p-4 mb-6 border border-gray-200">
+          <div className="grid grid-cols-2 gap-3 mb-4 md:grid-cols-4">
+            <div className="p-3 rounded-xl border bg-white">
+              <p className="text-xs text-gray-500">ทั้งหมด</p>
+              <p className="text-xl font-bold text-gray-900">{shiftStats.total}</p>
+            </div>
+            <div className="p-3 rounded-xl border bg-white">
+              <p className="text-xs text-gray-500">เปิดใช้งาน</p>
+              <p className="text-xl font-bold text-green-700">{shiftStats.active}</p>
+            </div>
+            <div className="p-3 rounded-xl border bg-white">
+              <p className="text-xs text-gray-500">ปิดใช้งาน</p>
+              <p className="text-xl font-bold text-gray-700">{shiftStats.inactive}</p>
+            </div>
+            <div className="p-3 rounded-xl border bg-white">
+              <p className="text-xs text-gray-500">หลังกรอง</p>
+              <p className="text-xl font-bold text-orange-700">{shiftStats.filtered}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="ค้นหาชื่อกะ, พนักงาน, รหัส"
+              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+            />
+
+            <select
+              value={filterShiftType}
+              onChange={(e) => setFilterShiftType(e.target.value as 'ALL' | 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM')}
+              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+            >
+              <option value="ALL">ทุกประเภทกะ</option>
+              <option value="REGULAR">ทุกวัน</option>
+              <option value="SPECIFIC_DAY">เฉพาะวัน</option>
+              <option value="CUSTOM">กำหนดเอง</option>
+            </select>
+
+            <select
+              value={filterActive}
+              onChange={(e) => setFilterActive(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE')}
+              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+            >
+              <option value="ALL">ทุกสถานะ</option>
+              <option value="ACTIVE">เปิดใช้งาน</option>
+              <option value="INACTIVE">ปิดใช้งาน</option>
+            </select>
+
+            <select
+              value={String(filterUserId)}
+              onChange={(e) => setFilterUserId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+            >
+              <option value="ALL">ทุกพนักงาน</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>{user.name} ({user.employeeId})</option>
+              ))}
+            </select>
+
+            <select
+              value={String(filterLocationId)}
+              onChange={(e) => setFilterLocationId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+            >
+              <option value="ALL">ทุกสถานที่</option>
+              {locationOptions.map((location) => (
+                <option key={location.id} value={location.id}>{location.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={filterBranchName}
+              onChange={(e) => setFilterBranchName(e.target.value)}
+              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+            >
+              <option value="ALL">ทุกสาขา</option>
+              {branchOptions.map((branchName) => (
+                <option key={branchName} value={branchName}>{branchName}</option>
+              ))}
+            </select>
+          </div>
+
+          {hasActiveFilters && (
+            <div className="flex justify-end mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearchText('');
+                  setFilterShiftType('ALL');
+                  setFilterActive('ALL');
+                  setFilterUserId('ALL');
+                  setFilterLocationId('ALL');
+                  setFilterBranchName('ALL');
+                }}
+              >
+                ล้างตัวกรอง
+              </Button>
+            </div>
+          )}
+        </Card>
+
         {/* Shift List */}
         <div className="space-y-4">
-          {shifts.length === 0 ? (
+          {filteredShifts.length === 0 ? (
             <Card className="p-12 text-center">
-              <div className="text-6xl text-gray-400 mb-4">🕒</div>
-              <p className="text-lg text-gray-500">ยังไม่มีกะงาน</p>
-              <p className="text-sm text-gray-400 mt-2">คลิกปุ่ม &ldquo;สร้างกะงานใหม่&rdquo; เพื่อเริ่มต้น</p>
+              <div className="flex justify-center mb-4 text-gray-400">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-14 h-14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <p className="text-lg text-gray-500">{shifts.length === 0 ? 'ยังไม่มีกะงาน' : 'ไม่พบข้อมูลตามตัวกรอง'}</p>
+              <p className="text-sm text-gray-400 mt-2">
+                {shifts.length === 0
+                  ? 'คลิกปุ่ม “สร้างกะงานใหม่” เพื่อเริ่มต้น'
+                  : 'ลองปรับคำค้นหาหรือกดล้างตัวกรอง'}
+              </p>
             </Card>
           ) : (
-            shifts.map((shift) => (
-              <Card key={shift.id} className="p-6">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {paginatedShifts.map((shift) => (
+                  <Card key={shift.id} className="h-full p-6">
+                <div className="flex h-full flex-col gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
                       <h3 className="text-xl font-bold text-gray-900">{shift.name}</h3>
@@ -350,12 +696,12 @@ export default function ShiftManagementPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2 sm:flex-col">
+                  <div className="grid grid-cols-2 gap-2 mt-auto">
                     <Button
                       onClick={() => setShowDetailModal(shift)}
                       variant="outline"
                       size="sm"
-                      className="flex-1 sm:flex-none"
+                      className="w-full"
                     >
                       ดูรายละเอียด
                     </Button>
@@ -364,7 +710,7 @@ export default function ShiftManagementPage() {
                       variant="outline"
                       size="sm"
                       disabled={loading}
-                      className="flex-1 sm:flex-none"
+                      className="w-full"
                     >
                       แก้ไข
                     </Button>
@@ -373,7 +719,7 @@ export default function ShiftManagementPage() {
                       variant="outline"
                       size="sm"
                       disabled={loading}
-                      className="flex-1 sm:flex-none"
+                      className="w-full"
                     >
                       {shift.isActive ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}
                     </Button>
@@ -382,14 +728,40 @@ export default function ShiftManagementPage() {
                       variant="outline"
                       size="sm"
                       disabled={loading}
-                      className="flex-1 text-red-600 hover:text-red-700 hover:bg-red-50 sm:flex-none"
+                      className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
                     >
                       ลบ
                     </Button>
                   </div>
                 </div>
-              </Card>
-            ))
+                  </Card>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-gray-600">
+                  ทั้งหมด {filteredShifts.length} รายการ | หน้า {page} / {totalPages}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    ก่อนหน้า
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    ถัดไป
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </Card>
@@ -553,20 +925,54 @@ export default function ShiftManagementPage() {
                 {/* Employee Assignment */}
                 <div>
                   <label className="block mb-2 text-sm font-medium text-gray-700">
-                    มอบหมายพนักงาน (ไม่บังคับ)
+                    มอบหมายพนักงาน <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    value={formData.userId || ''}
-                    onChange={(e) => setFormData({ ...formData, userId: e.target.value ? parseInt(e.target.value) : null })}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
-                  >
-                    <option value="">-- ไม่มอบหมาย --</option>
-                    {users.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.name} ({user.employeeId})
-                      </option>
-                    ))}
-                  </select>
+                  {editingShift ? (
+                    <select
+                      value={formData.userIds[0] || ''}
+                      onChange={(e) => {
+                        const nextId = e.target.value ? parseInt(e.target.value) : undefined;
+                        setFormData({ ...formData, userIds: nextId ? [nextId] : [] });
+                      }}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                    >
+                      <option value="">-- เลือกพนักงาน --</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.name} ({user.employeeId})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
+                      {users.map((user) => {
+                        const checked = formData.userIds.includes(user.id);
+                        return (
+                          <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
+                            <span className="text-sm text-gray-800">{user.name} ({user.employeeId})</span>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  userIds: checked
+                                    ? prev.userIds.filter((id) => id !== user.id)
+                                    : [...prev.userIds, user.id],
+                                }));
+                              }}
+                              className="h-4 w-4"
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-gray-500">
+                    {editingShift
+                      ? 'แก้ไขได้ครั้งละ 1 พนักงาน'
+                      : `เลือกแล้ว ${formData.userIds.length} คน (สามารถสร้างกะเดียวกันให้หลายคนได้)`}
+                  </p>
                 </div>
 
                 {/* Submit Buttons */}
@@ -702,6 +1108,113 @@ export default function ShiftManagementPage() {
                   ปิด
                 </Button>
               </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Toggle Active Confirm Modal */}
+      {toggleTargetShift && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="w-full max-w-md p-6 bg-white">
+            <h3 className="text-lg font-bold text-gray-900">ยืนยันการเปลี่ยนสถานะกะ</h3>
+            <p className="mt-3 text-sm text-gray-600">
+              ต้องการ{toggleTargetShift.isActive ? 'ปิด' : 'เปิด'}ใช้งานกะ <strong>{toggleTargetShift.name}</strong> ใช่หรือไม่?
+            </p>
+            <div className="flex gap-2 mt-6">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setToggleTargetShift(null)}
+                disabled={loading}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                className="flex-1 bg-orange-600 hover:bg-orange-700"
+                onClick={handleConfirmToggleActive}
+                disabled={loading}
+              >
+                ยืนยัน
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Delete Reason Modal */}
+      {deleteTargetShift && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="w-full max-w-lg p-6 bg-white">
+            <h3 className="text-lg font-bold text-red-600">ลบกะงาน</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              คุณกำลังลบกะ <strong>{deleteTargetShift.name}</strong> กรุณาระบุเหตุผลในการลบ
+            </p>
+            <textarea
+              rows={3}
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="ตัวอย่าง: ปรับตารางใหม่ตามนโยบายทีม"
+              className="w-full px-3 py-2 mt-4 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none resize-none"
+            />
+            <div className="flex gap-2 mt-6">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  setDeleteTargetShift(null);
+                  setDeleteReason('');
+                }}
+                disabled={loading}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                className="flex-1 bg-red-600 hover:bg-red-700"
+                onClick={handleConfirmDeleteShift}
+                disabled={loading}
+              >
+                ยืนยันการลบ
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Reassign Confirmation Modal */}
+      {reassignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="w-full max-w-2xl p-6 bg-white">
+            <h3 className="text-lg font-bold text-gray-900">ยืนยันการย้ายกะ</h3>
+            {reassignModal.mode === 'edit' ? (
+              <p className="mt-3 text-sm text-gray-700 whitespace-pre-line">
+                {reassignModal.message}
+              </p>
+            ) : (
+              <div className="mt-3">
+                <p className="text-sm text-gray-700">พนักงานต่อไปนี้มี active shift อยู่แล้ว:</p>
+                <pre className="p-3 mt-2 text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-xl">
+{`- ${reassignModal.conflictUsersText}`}
+                </pre>
+                <p className="mt-2 text-sm text-gray-700">ต้องการย้ายกะและแทนที่กะเดิมหรือไม่?</p>
+              </div>
+            )}
+            <div className="flex gap-2 mt-6">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={handleCancelReassign}
+                disabled={loading}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                className="flex-1 bg-orange-600 hover:bg-orange-700"
+                onClick={handleConfirmReassign}
+                disabled={loading}
+              >
+                ยืนยันการย้ายกะ
+              </Button>
             </div>
           </Card>
         </div>

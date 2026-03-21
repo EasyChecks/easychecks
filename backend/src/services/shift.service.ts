@@ -14,6 +14,7 @@ export interface CreateShiftDTO {
   customDate?: Date | string;
   locationId?: number;
   userId: number;
+  replaceExisting?: boolean;
   createdByUserId: number;
   creatorRole: string;
   creatorBranchId?: number;
@@ -28,7 +29,9 @@ export interface UpdateShiftDTO {
   specificDays?: DayOfWeek[];
   customDate?: Date | string;
   locationId?: number;
+  userId?: number;
   isActive?: boolean;
+  replaceExisting?: boolean;
 }
 
 function isValidTimeFormat(time: string): boolean {
@@ -81,11 +84,23 @@ export const createShift = async (data: CreateShiftDTO) => {
     ? (typeof data.customDate === 'string' ? new Date(data.customDate) : data.customDate)
     : undefined;
 
-  // บังคับ 1 คนต่อ 1 กะที่ active โดยปิดกะเดิมทั้งหมดก่อนสร้างใหม่
-  await prisma.shift.updateMany({
+  const existingActiveShift = await prisma.shift.findFirst({
     where: { userId: data.userId, isActive: true, isDeleted: false },
-    data: { isActive: false, isDeleted: true, deleteReason: 'แทนที่ด้วยกะใหม่' },
+    select: { shiftId: true, name: true, startTime: true, endTime: true },
   });
+
+  if (existingActiveShift && !data.replaceExisting) {
+    throw new Error(
+      `พนักงานมี active shift อยู่แล้ว (${existingActiveShift.name} ${existingActiveShift.startTime}-${existingActiveShift.endTime}) กรุณายืนยันการย้ายกะ`,
+    );
+  }
+
+  if (existingActiveShift && data.replaceExisting) {
+    await prisma.shift.updateMany({
+      where: { userId: data.userId, isActive: true, isDeleted: false },
+      data: { isActive: false, isDeleted: true, deleteReason: 'แทนที่ด้วยกะใหม่' },
+    });
+  }
 
   const shift = await prisma.shift.create({
     data: {
@@ -226,6 +241,20 @@ export const updateShift = async (
     throw new Error('คุณไม่มีสิทธิ์แก้ไขกะของสาขาอื่น');
   }
 
+  const targetUserId = data.userId ?? existingShift.userId;
+
+  if (data.userId !== undefined) {
+    const targetUser = await prisma.user.findUnique({
+      where: { userId: data.userId },
+      select: { branchId: true },
+    });
+    if (!targetUser) throw new Error('ไม่พบพนักงานที่ระบุ');
+
+    if (!canAccessBranch(updaterRole, updaterBranchId, targetUser.branchId || undefined)) {
+      throw new Error('คุณไม่มีสิทธิ์มอบหมายกะให้พนักงานสาขาอื่น');
+    }
+  }
+
   if (data.startTime && !isValidTimeFormat(data.startTime)) {
     throw new Error('รูปแบบเวลาเริ่มต้นไม่ถูกต้อง (ต้องเป็น HH:MM)');
   }
@@ -233,18 +262,52 @@ export const updateShift = async (
     throw new Error('รูปแบบเวลาสิ้นสุดไม่ถูกต้อง (ต้องเป็น HH:MM)');
   }
 
-  const updateData: Prisma.ShiftUpdateInput = { ...data };
+  const { replaceExisting, ...rawUpdateData } = data;
+  const updateData: Prisma.ShiftUpdateInput = { ...rawUpdateData };
   if (data.customDate) {
     updateData.customDate = typeof data.customDate === 'string'
       ? new Date(data.customDate)
       : data.customDate;
   }
 
-  // บังคับ 1 คนต่อ 1 กะที่ active: ถ้ากำลังเปิดกะนี้ ให้ปิดกะอื่นของพนักงานก่อน
+  const willBeActive = data.isActive === undefined ? existingShift.isActive : data.isActive;
+
+  // บังคับ 1 คนต่อ 1 active shift: ก่อนเปิด/ย้ายกะ ต้องตรวจว่ามีกะอื่น active อยู่หรือไม่
+  if (willBeActive) {
+    const conflictActiveShift = await prisma.shift.findFirst({
+      where: {
+        userId: targetUserId,
+        isActive: true,
+        isDeleted: false,
+        shiftId: { not: shiftId },
+      },
+      select: { shiftId: true, name: true, startTime: true, endTime: true },
+    });
+
+    if (conflictActiveShift && !replaceExisting) {
+      throw new Error(
+        `พนักงานมี active shift อยู่แล้ว (${conflictActiveShift.name} ${conflictActiveShift.startTime}-${conflictActiveShift.endTime}) กรุณายืนยันการย้ายกะ`,
+      );
+    }
+
+    if (conflictActiveShift && replaceExisting) {
+      await prisma.shift.updateMany({
+        where: {
+          userId: targetUserId,
+          isActive: true,
+          isDeleted: false,
+          shiftId: { not: shiftId },
+        },
+        data: { isActive: false },
+      });
+    }
+  }
+
+  // keep current behavior when explicitly enabling an inactive shift
   if (data.isActive === true) {
     await prisma.shift.updateMany({
       where: {
-        userId: existingShift.userId,
+        userId: targetUserId,
         isActive: true,
         isDeleted: false,
         shiftId: { not: shiftId },

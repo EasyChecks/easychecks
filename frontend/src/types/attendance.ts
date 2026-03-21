@@ -25,6 +25,11 @@ export interface Shift {
     id: number;
     name: string;
     employeeId: string;
+    branchId?: number;
+    branch?: {
+      name: string;
+      code?: string;
+    };
   };
 }
 
@@ -45,8 +50,12 @@ export interface Attendance {
   checkOutAddress?: string;
   checkInDistance?: number;
   checkOutDistance?: number;
-  status: 'ON_TIME' | 'LATE' | 'ABSENT';
+  status: 'ON_TIME' | 'LATE' | 'ABSENT' | 'LEAVE_APPROVED' | 'LATE_APPROVED';
   lateMinutes?: number;
+  workedMinutes?: number;
+  breakDeductedMinutes?: number;
+  leaveDeductedMinutes?: number;
+  netWorkedMinutes?: number;
   note?: string;
   createdAt: string;
   updatedAt: string;
@@ -83,7 +92,7 @@ export interface CheckOutRequest {
 export interface AttendanceHistoryParams {
   startDate?: string;
   endDate?: string;
-  status?: 'ON_TIME' | 'LATE' | 'ABSENT';
+  status?: 'ON_TIME' | 'LATE' | 'ABSENT' | 'LEAVE_APPROVED' | 'LATE_APPROVED';
 }
 
 export interface AttendanceListParams extends AttendanceHistoryParams {
@@ -101,6 +110,8 @@ export interface CreateShiftRequest {
   customDate?: string;
   locationId?: number;
   userId?: number;
+  userIds?: number[];
+  replaceExisting?: boolean;
 }
 
 export interface UpdateShiftRequest {
@@ -115,6 +126,7 @@ export interface UpdateShiftRequest {
   locationId?: number;
   userId?: number;
   isActive?: boolean;
+  replaceExisting?: boolean;
 }
 
 export interface ShiftListParams {
@@ -124,8 +136,9 @@ export interface ShiftListParams {
 }
 
 export interface UpdateAttendanceRequest {
-  status?: 'ON_TIME' | 'LATE' | 'ABSENT';
+  status?: 'ON_TIME' | 'LATE' | 'ABSENT' | 'LEAVE_APPROVED' | 'LATE_APPROVED';
   note?: string;
   checkIn?: string;
   checkOut?: string;
+  editReason?: string;
 }

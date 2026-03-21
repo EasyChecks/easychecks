@@ -38,6 +38,18 @@ export const shiftService = {
   },
 
   /**
+   * Create one shift pattern for many users (creates one record per user)
+   */
+  async createMany(baseData: Omit<CreateShiftRequest, 'userId'>, userIds: number[]): Promise<Shift[]> {
+    const created: Shift[] = [];
+    for (const userId of userIds) {
+      const shift = await this.create({ ...baseData, userId });
+      created.push(shift);
+    }
+    return created;
+  },
+
+  /**
    * Get all shifts
    */
   async getAll(params?: ShiftListParams): Promise<Shift[]> {
@@ -73,8 +85,8 @@ export const shiftService = {
   /**
    * Delete shift (Admin only)
    */
-  async delete(id: number): Promise<void> {
-    await api.delete(`/shifts/${id}`);
+  async delete(id: number, deleteReason: string): Promise<void> {
+    await api.delete(`/shifts/${id}`, { data: { deleteReason } });
   },
 
   /**

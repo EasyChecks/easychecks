@@ -178,6 +178,10 @@
  *       - `REGULAR` — ใช้ทุกวัน ไม่กำหนดวัน
  *       - `SPECIFIC_DAY` — ต้องระบุ specificDays เช่น ["MONDAY","FRIDAY"]
  *       - `CUSTOM` — ต้องระบุ customDate วันเดียว เช่น "2026-03-15"
+ *
+ *       **replaceExisting (optional):**
+ *       ถ้าพนักงานมี active shift อยู่แล้ว ระบบจะตอบ 409 ก่อน
+ *       และต้องส่ง `replaceExisting=true` เพื่อยืนยันให้แทนที่กะเดิม
  *     tags:
  *       - Shifts
  *     security:
@@ -199,6 +203,7 @@
  *                 gracePeriodMinutes: 15
  *                 lateThresholdMinutes: 30
  *                 userId: 5
+ *                 replaceExisting: true
  *             กะเฉพาะวัน:
  *               summary: กะจันทร์-ศุกร์ SPECIFIC_DAY
  *               value:
@@ -244,6 +249,8 @@
  *         description: ไม่ได้ login หรือ Token หมดอายุ
  *       403:
  *         description: ไม่มีสิทธิ์ — หรือ Admin พยายามสร้างกะให้พนักงานสาขาอื่น
+ *       409:
+ *         description: พนักงานมี active shift อยู่แล้ว (ต้องส่ง replaceExisting=true เพื่อยืนยันแทนที่)
  *
  *   get:
  *     summary: ดึงรายการกะทั้งหมด (กรองตาม role อัตโนมัติ)
@@ -260,21 +267,6 @@
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - in: query
- *         name: requesterId
- *         required: true
- *         schema:
- *           type: integer
- *         description: รหัสผู้ใช้ที่ขอดูข้อมูล (ใช้กรองตาม role)
- *         example: 1
- *       - in: query
- *         name: requesterRole
- *         required: true
- *         schema:
- *           type: string
- *           enum: [USER, ADMIN, SUPERADMIN]
- *         description: Role ของผู้ขอ — ใช้ตัดสินว่าเห็นข้อมูลแค่ไหน
- *         example: ADMIN
  *       - in: query
  *         name: userId
  *         schema:
@@ -460,6 +452,14 @@
  *                 type: string
  *                 format: date
  *                 example: "2026-04-01"
+ *               userId:
+ *                 type: integer
+ *                 example: 8
+ *                 description: มอบหมายกะให้พนักงานคนใหม่
+ *               replaceExisting:
+ *                 type: boolean
+ *                 example: true
+ *                 description: true = ยืนยันให้แทนที่ active shift เดิมของพนักงานเป้าหมาย
  *     responses:
  *       200:
  *         description: อัปเดตสำเร็จ พร้อม audit log
@@ -478,6 +478,8 @@
  *                   $ref: '#/components/schemas/Shift'
  *       400:
  *         description: รูปแบบเวลาไม่ถูกต้อง
+ *       409:
+ *         description: พนักงานมี active shift อยู่แล้ว (ต้องส่ง replaceExisting=true)
  *       401:
  *         description: ไม่ได้ login
  *       403:
@@ -817,7 +819,7 @@
  *         name: status
  *         schema:
  *           type: string
- *           enum: [ON_TIME, LATE, ABSENT, LEAVE_APPROVED]
+ *           enum: [ON_TIME, LATE, LATE_APPROVED, ABSENT, LEAVE_APPROVED]
  *         description: กรองเฉพาะสถานะนี้ (optional)
  *     responses:
  *       200:
@@ -914,7 +916,7 @@
  *         name: status
  *         schema:
  *           type: string
- *           enum: [ON_TIME, LATE, ABSENT, LEAVE_APPROVED]
+ *           enum: [ON_TIME, LATE, LATE_APPROVED, ABSENT, LEAVE_APPROVED]
  *         description: กรองเฉพาะสถานะนี้ (optional)
  *     responses:
  *       200:
@@ -976,7 +978,7 @@
  *                 description: รหัส Admin ที่ทำการแก้ไข (สำหรับ audit trail)
  *               status:
  *                 type: string
- *                 enum: [ON_TIME, LATE, ABSENT, LEAVE_APPROVED]
+ *                 enum: [ON_TIME, LATE, LATE_APPROVED, ABSENT, LEAVE_APPROVED]
  *                 example: "ON_TIME"
  *                 description: แก้ไขสถานะ
  *               note:
@@ -1152,17 +1154,36 @@
  *           description: ระยะห่างจาก location center ตอนออก (เมตร)
  *         status:
  *           type: string
- *           enum: [ON_TIME, LATE, ABSENT, LEAVE_APPROVED]
+ *           enum: [ON_TIME, LATE, LATE_APPROVED, ABSENT, LEAVE_APPROVED]
  *           example: "ON_TIME"
  *           description: |
  *             - ON_TIME: เข้าตรงเวลาหรือก่อนเวลาภายใน grace period
  *             - LATE: มาสายแต่ไม่เกิน lateThreshold
  *             - ABSENT: สายเกิน lateThreshold (ถือว่าขาดงาน)
+ *             - LATE_APPROVED: มาสายและได้รับอนุมัติคำขอมาสายแล้ว
  *             - LEAVE_APPROVED: มีใบลาอนุมัติวันนี้
  *         lateMinutes:
  *           type: integer
  *           example: 0
  *           description: จำนวนนาทีที่สาย (0 ถ้า ON_TIME)
+ *         workedMinutes:
+ *           type: integer
+ *           nullable: true
+ *           example: 510
+ *           description: เวลาทำงานรวมจริง (นาที) จาก checkIn ถึง checkOut; ถ้ายังไม่ checkOut จะเป็น null
+ *         breakDeductedMinutes:
+ *           type: integer
+ *           example: 60
+ *           description: นาทีพักที่หักตามกฎหมายแรงงาน (กะเกิน 5 ชั่วโมง หัก 60 นาที)
+ *         leaveDeductedMinutes:
+ *           type: integer
+ *           example: 30
+ *           description: นาทีลารายชั่วโมงที่ได้รับอนุมัติและต้องหักออกจากเวลาทำงาน
+ *         netWorkedMinutes:
+ *           type: integer
+ *           nullable: true
+ *           example: 420
+ *           description: เวลาทำงานสุทธิ (workedMinutes - breakDeductedMinutes - leaveDeductedMinutes)
  *         note:
  *           type: string
  *           nullable: true

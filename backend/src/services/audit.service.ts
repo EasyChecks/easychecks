@@ -176,6 +176,7 @@ export const AuditAction = {
   // เป็นข้อมูลหลักของระบบ ต้องมี audit ทุก state change
   CHECK_IN: 'CHECK_IN',
   CHECK_OUT: 'CHECK_OUT',
+  AUTO_CHECK_OUT: 'AUTO_CHECK_OUT',
   UPDATE_ATTENDANCE: 'UPDATE_ATTENDANCE', // Admin แก้ record ที่ผิดพลาด
   DELETE_ATTENDANCE: 'DELETE_ATTENDANCE', // Soft delete — ยังคงข้อมูลไว้
 

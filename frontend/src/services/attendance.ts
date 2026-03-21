@@ -42,6 +42,10 @@ function mapAttendance(raw: any): Attendance {
     checkOutAddress: raw.checkOutAddress ?? undefined,
     checkInDistance: raw.checkInDistance ?? undefined,
     checkOutDistance: raw.checkOutDistance ?? undefined,
+    workedMinutes: raw.workedMinutes ?? undefined,
+    breakDeductedMinutes: raw.breakDeductedMinutes ?? undefined,
+    leaveDeductedMinutes: raw.leaveDeductedMinutes ?? undefined,
+    netWorkedMinutes: raw.netWorkedMinutes ?? undefined,
     shift: raw.shift ? {
       ...raw.shift,
       id: raw.shift.shiftId ?? raw.shift.id,
@@ -123,8 +127,8 @@ export const attendanceService = {
   },
 
   /** ลบ attendance record (Admin เท่านั้น, Soft Delete) — DELETE /api/attendance/:id */
-  async delete(id: number): Promise<void> {
-    await api.delete(`/attendance/${id}`);
+  async delete(id: number, deleteReason: string): Promise<void> {
+    await api.delete(`/attendance/${id}`, { data: { deleteReason } });
   },
 
   /**

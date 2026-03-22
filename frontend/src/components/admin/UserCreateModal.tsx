@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types/user';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -11,14 +12,20 @@ interface UserCreateModalProps {
   onSubmit: (user: User) => void;
   generateEmployeeId: (provinceCode: string, branchCode: string) => string;
   users: User[];
+  currentUser?: User | null;
 }
 
 export default function UserCreateModal({
   isOpen,
   onClose,
   onSubmit,
-  generateEmployeeId
+  generateEmployeeId,
+  currentUser: currentUserProp
 }: UserCreateModalProps) {
+  // Use auth context as fallback if currentUser prop is not provided
+  const { user: authUser } = useAuth();
+  const currentUser = currentUserProp || authUser;
+  
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -139,7 +146,9 @@ export default function UserCreateModal({
                 <option value="user">User</option>
                 <option value="manager">Manager</option>
                 <option value="admin">Admin</option>
-                <option value="superadmin">Super Admin</option>
+                {(currentUser && currentUser.role && currentUser.role.toLowerCase() === 'superadmin') && (
+                  <option value="superadmin">Super Admin</option>
+                )}
               </select>
             </div>
             <div>

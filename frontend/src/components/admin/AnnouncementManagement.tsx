@@ -77,6 +77,9 @@ const parseBranchIds = (raw: string): number[] =>
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => !isNaN(n) && n > 0);
 
+// ─── Constants ───────────────────────────────────────────────────
+const PAGE_SIZE = 4;
+
 // ─── Component ───────────────────────────────────────────────────
 export default function AnnouncementManagement() {
   // ── Data state ──
@@ -84,8 +87,14 @@ export default function AnnouncementManagement() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'ALL' | AnnouncementStatus>('ALL');
 
+  // ── Multi-select state ──
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
+
+  // ── Pagination state ──
+  const [currentPage, setCurrentPage] = useState(1);
+
   // ── Modal state ──
-  // editTarget === 'new' = create modal, editTarget is Announcement = edit modal, null = ปิด
   const [editTarget, setEditTarget] = useState<Announcement | 'new' | null>(null);
   const [viewTarget, setViewTarget] = useState<Announcement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Announcement | null>(null);
@@ -94,7 +103,6 @@ export default function AnnouncementManagement() {
   // ── Form state ──
   const emptyForm = { title: '', content: '', targetRoles: [] as AnnouncementRole[], branchIds: '' };
   const [form, setForm] = useState(emptyForm);
-  const [deleteReason, setDeleteReason] = useState('');
 
   // ── User picker state ──
   const [allUsers, setAllUsers] = useState<SimpleUser[]>([]);
@@ -174,11 +182,16 @@ export default function AnnouncementManagement() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // ── Filtered list ──
+  // ── Filtered list + pagination ──
   const filtered = announcements.filter((a) => {
     if (activeTab === 'ALL') return true;
     return a.status === activeTab;
   });
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedList = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageIds = new Set(paginatedList.map((a) => a.announcementId));
+  const allPageSelected = paginatedList.length > 0 && paginatedList.every((a) => selectedIds.has(a.announcementId));
 
   const stats = {
     total: announcements.length,
@@ -302,18 +315,14 @@ export default function AnnouncementManagement() {
     }
   };
 
-  // ── Delete ──
+  // ── Delete single ──
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    if (!deleteReason.trim()) {
-      showAlert('warning', 'ต้องระบุเหตุผล', 'กรุณากรอกเหตุผลในการลบ');
-      return;
-    }
     setLoadingAction('deleting');
     try {
-      await announcementService.delete(deleteTarget.announcementId, deleteReason.trim());
+      await announcementService.delete(deleteTarget.announcementId);
       setDeleteTarget(null);
-      setDeleteReason('');
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(deleteTarget.announcementId); return next; });
       showAlert('success', 'ลบสำเร็จ', 'ลบประกาศเรียบร้อยแล้ว');
       fetchAnnouncements();
     } catch (err: unknown) {
@@ -324,13 +333,83 @@ export default function AnnouncementManagement() {
     }
   };
 
+  // ── Bulk delete ──
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setLoadingAction('deleting');
+    let ok = 0;
+    let fail = 0;
+    for (const id of selectedIds) {
+      try {
+        await announcementService.delete(id);
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    setSelectedIds(new Set());
+    setShowBulkDelete(false);
+    setLoadingAction(null);
+    if (fail === 0) {
+      showAlert('success', 'ลบสำเร็จ', `ลบประกาศ ${ok} รายการเรียบร้อยแล้ว`);
+    } else {
+      showAlert('warning', 'ลบบางส่วนไม่สำเร็จ', `สำเร็จ ${ok}, ล้มเหลว ${fail}`);
+    }
+    fetchAnnouncements();
+  };
+
+  // ── Selection helpers ──
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allPageSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        pageIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        pageIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedIds(new Set(filtered.map((a) => a.announcementId)));
+  };
+
   // ───────────────────────────────────────────────────────────────
   // Sub-renders
   // ───────────────────────────────────────────────────────────────
 
   const AnnouncementCard = ({ a }: { a: Announcement }) => (
-    <Card className="p-5 transition-shadow hover:shadow-md">
+    <Card className={`p-5 transition-shadow hover:shadow-md ${selectedIds.has(a.announcementId) ? 'ring-2 ring-orange-400 bg-orange-50/30' : ''}`}>
       <div className="flex items-start justify-between gap-3">
+        {/* Checkbox */}
+        <button
+          type="button"
+          onClick={() => toggleSelect(a.announcementId)}
+          className="mt-1 shrink-0"
+        >
+          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+            selectedIds.has(a.announcementId)
+              ? 'bg-orange-500 border-orange-500'
+              : 'border-gray-300 hover:border-orange-400'
+          }`}>
+            {selectedIds.has(a.announcementId) && (
+              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+            )}
+          </div>
+        </button>
         <div className="flex-1 min-w-0">
           {/* Header */}
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -442,7 +521,7 @@ export default function AnnouncementManagement() {
             size="sm"
             variant="outline"
             className="text-xs text-red-600 border-red-200 hover:bg-red-50"
-            onClick={() => { setDeleteTarget(a); setDeleteReason(''); }}
+            onClick={() => { setDeleteTarget(a); }}
           >
             <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -846,7 +925,7 @@ export default function AnnouncementManagement() {
         {(['ALL', 'DRAFT', 'SENT'] as const).map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => { setActiveTab(tab); setCurrentPage(1); setSelectedIds(new Set()); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab
                 ? 'border-orange-500 text-orange-600'
@@ -860,6 +939,54 @@ export default function AnnouncementManagement() {
           </button>
         ))}
       </div>
+
+      {/* ── Bulk actions toolbar ── */}
+      {filtered.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleSelectAll}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm border rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+              allPageSelected ? 'bg-orange-500 border-orange-500' : 'border-gray-300'
+            }`}>
+              {allPageSelected && (
+                <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
+              )}
+            </div>
+            {allPageSelected ? 'ยกเลิกเลือกหน้านี้' : 'เลือกทั้งหน้า'}
+          </button>
+          {filtered.length > PAGE_SIZE && (
+            <button
+              type="button"
+              onClick={selectAllFiltered}
+              className="px-3 py-1.5 text-sm text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
+            >
+              เลือกทั้งหมด ({filtered.length})
+            </button>
+          )}
+          {selectedIds.size > 0 && (
+            <>
+              <span className="text-sm text-gray-500">เลือกแล้ว {selectedIds.size} รายการ</span>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="px-3 py-1.5 text-sm text-gray-600 border rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                ล้างการเลือก
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBulkDelete(true)}
+                className="px-3 py-1.5 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                🗑️ ลบที่เลือก ({selectedIds.size})
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── List ── */}
       {isLoading ? (
@@ -880,11 +1007,46 @@ export default function AnnouncementManagement() {
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((a) => (
-            <AnnouncementCard key={a.announcementId} a={a} />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {paginatedList.map((a) => (
+              <AnnouncementCard key={a.announcementId} a={a} />
+            ))}
+          </div>
+
+          {/* ── Pagination ── */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-4">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+              >
+                ← ก่อนหน้า
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setCurrentPage(p)}
+                  className={`w-9 h-9 text-sm rounded-lg transition-colors ${
+                    p === safePage
+                      ? 'bg-orange-500 text-white font-bold'
+                      : 'border hover:bg-gray-50 text-gray-600'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+                className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+              >
+                ถัดไป →
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* ── Modals ── */}
@@ -1004,15 +1166,6 @@ export default function AnnouncementManagement() {
               <p className="mb-4 text-sm text-center text-gray-500">
                 &ldquo;{deleteTarget.title}&rdquo;
               </p>
-              <label className="block mb-1 text-sm font-medium text-gray-700">
-                เหตุผลในการลบ <span className="text-red-500">*</span>
-              </label>
-              <input
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400"
-                placeholder="ระบุเหตุผล..."
-                value={deleteReason}
-                onChange={(e) => setDeleteReason(e.target.value)}
-              />
             </div>
             <div className="flex gap-3 px-6 pb-6">
               <Button className="flex-1" variant="outline" onClick={() => setDeleteTarget(null)}>
@@ -1029,6 +1182,42 @@ export default function AnnouncementManagement() {
                     กำลังลบ...
                   </span>
                 ) : 'ลบประกาศ'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirm Modal */}
+      {showBulkDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-sm mx-4 bg-white shadow-2xl rounded-2xl">
+            <div className="p-6">
+              <div className="flex items-center justify-center mx-auto mb-4 bg-red-100 rounded-full w-14 h-14">
+                <svg className="text-red-600 w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="mb-1 text-lg font-bold text-center text-gray-800">ยืนยันการลบหลายรายการ</h3>
+              <p className="mb-4 text-sm text-center text-gray-500">
+                ต้องการลบประกาศ <span className="font-semibold text-red-600">{selectedIds.size}</span> รายการ?
+              </p>
+            </div>
+            <div className="flex gap-3 px-6 pb-6">
+              <Button className="flex-1" variant="outline" onClick={() => setShowBulkDelete(false)}>
+                ยกเลิก
+              </Button>
+              <Button
+                className="flex-1 text-white bg-red-600 hover:bg-red-700"
+                onClick={handleBulkDelete}
+                disabled={loadingAction === 'deleting'}
+              >
+                {loadingAction === 'deleting' ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin" />
+                    กำลังลบ...
+                  </span>
+                ) : `ลบ ${selectedIds.size} รายการ`}
               </Button>
             </div>
           </div>

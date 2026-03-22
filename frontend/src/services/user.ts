@@ -213,4 +213,12 @@ export const userService = {
     const backendUser = response.data.data ?? response.data;
     return mapBackendUserToFrontend(backendUser);
   },
+
+  /**
+   * Bulk import users from CSV data
+   */
+  async bulkCreateUsers(csvData: string): Promise<{ success: number; failed: number; errors: string[] }> {
+    const response = await api.post('/users/bulk', { csvData });
+    return response.data.data ?? response.data;
+  },
 };

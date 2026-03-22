@@ -388,7 +388,6 @@ model Announcement {
   status                AnnouncementStatus     @default(DRAFT) @map("status")
   createdByUserId       Int                    @map("created_by_user_id")
   sentByUserId          Int?                   @map("sent_by_user_id")
-  deleteReason          String?                @map("delete_reason")
 
   creator               User                   @relation("AnnouncementCreator", fields: [createdByUserId], references: [userId], onDelete: Cascade)
   sentBy                User?                  @relation("AnnouncementSender", fields: [sentByUserId], references: [userId])

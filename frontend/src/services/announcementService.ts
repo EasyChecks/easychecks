@@ -52,8 +52,8 @@ const announcementService = {
   },
 
   /** DELETE /announcements/:id */
-  delete: async (id: number, deleteReason: string): Promise<void> => {
-    await api.delete(`/announcements/${id}`, { data: { deleteReason } });
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/announcements/${id}`);
   },
 
   /** DELETE /announcements/:announcementId/recipients/:recipientId */

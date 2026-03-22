@@ -4087,13 +4087,9 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *   delete:
- *     summary: ลบประกาศ (Soft Delete) — Admin/SuperAdmin only
+ *     summary: ลบประกาศ — Admin/SuperAdmin only
  *     description: |
- *       Soft Delete ประกาศ — ตั้งค่า `deletedAt` และ `deleteReason`
- *       ประกาศไม่ปรากฏใน list แต่ยังอยู่ใน DB เพื่อ audit trail
- *
- *       **ทำไมต้อง deleteReason?**
- *       เพื่อให้ audit log มีบริบท — รู้ว่าลบเพราะอะไร
+ *       ลบประกาศออกจากระบบ
  *     tags:
  *       - Announcements
  *     security:
@@ -4105,21 +4101,9 @@
  *         schema:
  *           type: integer
  *         description: announcementId ที่ต้องการลบ
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - deleteReason
- *             properties:
- *               deleteReason:
- *                 type: string
- *                 example: "ข้อมูลผิดพลาด ต้องการสร้างใหม่"
  *     responses:
  *       200:
- *         description: ลบประกาศสำเร็จ (Soft Delete)
+ *         description: ลบประกาศสำเร็จ
  *         content:
  *           application/json:
  *             schema:
@@ -4130,13 +4114,7 @@
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: ลบประกาศเรียบร้อยแล้ว (Soft Delete)
- *       400:
- *         description: ไม่ได้ส่ง deleteReason
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *                   example: ลบประกาศเรียบร้อยแล้ว
  *       403:
  *         content:
  *           application/json:

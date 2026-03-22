@@ -105,21 +105,15 @@ export const createAnnouncement = async (data: CreateAnnouncementDTO) => {
 /**
  * 📋 ดึงรายการประกาศทั้งหมด (รองรับ filter)
  *
- * ทำไมต้องกรอง deletedAt = null ?
- * → ระบบใช้ Soft Delete คือไม่ลบแถวออกจาก DB
- *   แต่ set deletedAt มีค่า → ต้องกรองออกทุกครั้งที่ query
- *   มิฉะนั้น user จะเห็นประกาศที่ "ลบแล้ว" ใน list
- *
  * SQL เทียบเท่า:
  *   SELECT
  *     a.*,
  *     u.user_id, u.first_name, u.last_name  -- JOIN creator
  *   FROM announcements a
  *   LEFT JOIN users u ON a.created_by_user_id = u.user_id
- *   WHERE a.deleted_at IS NULL
- *     [AND a.status = $1]              -- optional filter
- *     [AND a.created_by_user_id = $2]  -- optional filter
- *   ORDER BY a.created_at DESC
+ *     [WHERE a.status = $1]              -- optional filter
+ *     [AND a.created_by_user_id = $2]    -- optional filter
+ *   ORDER BY a.announcement_id DESC
  */
 export const getAnnouncements = async (
   filters?: {
@@ -135,10 +129,6 @@ export const getAnnouncements = async (
   if (filters?.createdByUserId) {
     whereClause.createdByUserId = filters.createdByUserId;
   }
-
-  // Soft Delete guard — ต้องใส่ทุกครั้งที่ query announcement
-  // ไม่ filter ตรงนี้ = ประกาศที่ถูกลบโผล่ขึ้น UI
-  whereClause.deleteReason = null;
 
   const announcements = await prisma.announcement.findMany({
     where: whereClause,
@@ -167,10 +157,6 @@ export const getAnnouncements = async (
  * → หน้า detail ต้องแสดงว่าส่งให้ใครบ้างแล้ว
  *   ถ้าไม่ JOIN ตรงนี้ จะต้อง query แยกอีก 1 ครั้ง
  *
- * ทำไมต้องกรอง deletedAt = null ?
- * → ถ้า findUnique ไม่กรอง จะดึงประกาศที่ถูก soft-delete มาก็ได้
- *   แล้วยัง return ให้ client ซึ่งไม่ควรเห็น
- *
  * SQL เทียบเท่า:
  *   SELECT
  *     a.*,
@@ -182,13 +168,11 @@ export const getAnnouncements = async (
  *   LEFT JOIN announcement_recipients ar ON a.announcement_id = ar.announcement_id
  *   LEFT JOIN users u_recip ON ar.user_id = u_recip.user_id
  *   WHERE a.announcement_id = $1
- *     AND a.deleted_at IS NULL
  */
 export const getAnnouncementById = async (announcementId: number) => {
   const announcement = await prisma.announcement.findFirst({
     where: {
       announcementId,
-      deleteReason: null,
     },
     include: {
       creator: {
@@ -358,41 +342,48 @@ export const sendAnnouncement = async (
       throw new Error('ประกาศต้องอยู่ในสถานะ DRAFT เพื่อส่งได้');
     }
 
-    // ─── ถ้าระบุ targetUserIds = ส่งเฉพาะคนที่เลือก ─────────────
-    // ข้าม role/branch filter ทั้งหมด แต่ยังตรวจ ACTIVE status
+    // ─── Permission check ───────────────────────────────────────
+    // ADMIN  → ส่งได้เฉพาะคนในสาขาตัวเอง ยกเว้น SUPERADMIN
+    // SUPERADMIN → ส่งได้ทุกคน ทุกสาขา
+    if (sentByUserRole === 'ADMIN' && !sentByUserBranchId) {
+      throw new Error('Admin ต้องมี branchId เพื่อส่งประกาศ');
+    }
+    if (sentByUserRole !== 'ADMIN' && sentByUserRole !== 'SUPERADMIN') {
+      throw new Error('เฉพาะ Admin และ Super Admin เท่านั้นที่สามารถส่งประกาศได้');
+    }
+
     let users;
     if (announcement.targetUserIds && announcement.targetUserIds.length > 0) {
+      // ─── ระบุ targetUserIds เฉพาะ ─────────────────────────────
+      const userQuery: any = {
+        userId: { in: announcement.targetUserIds },
+        status: 'ACTIVE',
+      };
+      // ADMIN → บังคับเฉพาะสาขาตัวเอง + ห้ามส่งให้ SUPERADMIN
+      if (sentByUserRole === 'ADMIN') {
+        userQuery.branchId = sentByUserBranchId;
+        userQuery.role = { not: 'SUPERADMIN' };
+      }
       users = await tx.user.findMany({
-        where: {
-          userId: { in: announcement.targetUserIds },
-          status: 'ACTIVE',
-        },
+        where: userQuery,
         select: { userId: true, email: true, firstName: true, lastName: true },
       });
     } else {
-      // ─── ไม่ได้ระบุ userId เฉพาะ → ใช้ role/branch filter ตามเดิม ──
-      // สร้าง query object แบบ dynamic เพราะเงื่อนไขผู้รับมีหลาย combination
-      // BASE: ดึงเฉพาะ user ที่ active — inactive/resigned ไม่ควรได้รับประกาศ
+      // ─── ใช้ role/branch filter ─────────────────────────────────
       let recipientQuery: any = { status: 'ACTIVE' };
 
-      // ถ้าประกาศนี้ระบุ targetRoles ไว้ = ส่งเฉพาะ role นั้นๆ
-      // ถ้าไม่ระบุ (array ว่าง) = ส่งหาทุก role (ไม่ใส่ WHERE role)
       if (announcement.targetRoles && announcement.targetRoles.length > 0) {
         recipientQuery.role = { in: (announcement.targetRoles || []) as any };
       }
 
-      // ถ้าประกาศนี้ระบุ targetBranchIds ไว้ = ส่งเฉพาะสาขานั้นๆ
       if (announcement.targetBranchIds && announcement.targetBranchIds.length > 0) {
         recipientQuery.branchId = { in: announcement.targetBranchIds };
       }
 
-      // ─── Permission Rules ───────────────────────────────────────
       if (sentByUserRole === 'ADMIN') {
-        if (!sentByUserBranchId) {
-          throw new Error('Admin ต้องมี branchId เพื่อส่งประกาศ');
-        }
+        // บังคับเฉพาะสาขาตัวเอง
         recipientQuery.branchId = sentByUserBranchId;
-
+        // กรอง SUPERADMIN ออก
         if (recipientQuery.role?.in) {
           recipientQuery.role = {
             in: (recipientQuery.role.in as string[]).filter((r: string) => r !== 'SUPERADMIN'),
@@ -400,11 +391,8 @@ export const sendAnnouncement = async (
         } else {
           recipientQuery.role = { not: 'SUPERADMIN' };
         }
-      } else if (sentByUserRole === 'SUPERADMIN') {
-        // SUPERADMIN ไม่มีข้อจำกัด
-      } else {
-        throw new Error('เฉพาะ Admin และ Super Admin เท่านั้นที่สามารถส่งประกาศได้');
       }
+      // SUPERADMIN → ไม่มีข้อจำกัด ใช้ filter ตามที่ตั้งไว้ได้เลย
 
       users = await tx.user.findMany({
         where: recipientQuery,
@@ -412,15 +400,6 @@ export const sendAnnouncement = async (
       });
     }
     const recipientIds = users.map((u) => u.userId);
-
-    if (recipientIds.length > 0) {
-      await tx.announcementRecipient.createMany({
-        data: recipientIds.map((userId) => ({
-          announcementId,
-          userId,
-        })),
-      });
-    }
 
     // อัปเดต status ให้เป็น SENT ภายใน transaction เดียวกัน
     // ถ้า request อื่นเข้ามาพร้อมกัน จะเจอ status ≠ DRAFT แล้ว throw ออกไป
@@ -472,22 +451,13 @@ export const sendAnnouncement = async (
 };
 
 /**
- * 🗑️ ลบประกาศแบบ Soft Delete
- *
- * ทำไมใช้ Soft Delete แทน DELETE จริงๆ?
- * → เพื่อรักษา audit trail — ถ้า hard delete แล้วจะไม่มีหลักฐานว่าเคยมีประกาศนั้น
- *   นอกจากนี้ยังป้องกัน orphan records ใน announcement_recipients
+ * 🗑️ ลบประกาศ (Hard Delete)
  *
  * SQL เทียบเท่า:
- *   -- ไม่ใช่ DELETE FROM announcements WHERE ...
- *   -- แต่เป็น UPDATE:
- *   UPDATE announcements
- *   SET deleted_at = NOW(), delete_reason = $1
- *   WHERE announcement_id = $2
+ *   DELETE FROM announcements WHERE announcement_id = $1
  */
 export const deleteAnnouncement = async (
   announcementId: number,
-  deleteReason: string,
   deletedByUserId: number
 ) => {
   // ดึงข้อมูลเดิมก่อน เพื่อเก็บ oldValues ใน audit log
@@ -503,14 +473,12 @@ export const deleteAnnouncement = async (
     where: { announcementId },
   });
 
-  // บันทึก deleteReason ใน audit เพื่อให้ทราบว่าลบเพราะอะไร
   await createAuditLog({
     userId: deletedByUserId,
     action: AuditAction.DELETE_ANNOUNCEMENT,
     targetTable: 'announcements',
     targetId: announcementId,
     oldValues: existing,
-    newValues: { deleted: true, deleteReason },
   });
 
   return deleted;

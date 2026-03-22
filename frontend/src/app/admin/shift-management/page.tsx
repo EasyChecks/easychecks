@@ -6,7 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { shiftService } from '@/services/shift';
 import { userService, type UserServiceUser } from '@/services/user';
-import { Shift, CreateShiftRequest, UpdateShiftRequest } from '@/types/attendance';
+import {
+  Shift,
+  CreateShiftRequest,
+  BulkShiftErrorDetail,
+  UpdateShiftRequest,
+} from '@/types/attendance';
 
 const weekDays = [
   { th: 'จันทร์', en: 'MONDAY' },
@@ -34,14 +39,14 @@ export default function ShiftManagementPage() {
   const [searchText, setSearchText] = useState('');
   const [filterShiftType, setFilterShiftType] = useState<'ALL' | 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM'>('ALL');
   const [filterActive, setFilterActive] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
-  const [filterUserId, setFilterUserId] = useState<number | 'ALL'>('ALL');
-  const [filterLocationId, setFilterLocationId] = useState<number | 'ALL'>('ALL');
   const [filterBranchName, setFilterBranchName] = useState<string>('ALL');
   const [page, setPage] = useState(1);
   const pageSize = 9;
   const [toggleTargetShift, setToggleTargetShift] = useState<Shift | null>(null);
   const [deleteTargetShift, setDeleteTargetShift] = useState<Shift | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
+  const [employeeSearchText, setEmployeeSearchText] = useState('');
+  const [employeeBranchFilter, setEmployeeBranchFilter] = useState<string>('ALL');
   const [reassignModal, setReassignModal] = useState<
     | {
       mode: 'edit';
@@ -51,9 +56,17 @@ export default function ShiftManagementPage() {
     }
     | {
       mode: 'create';
-      baseCreateData: Omit<CreateShiftRequest, 'userId'>;
+      bulkCreateData: CreateShiftRequest;
       conflictUserIds: number[];
       conflictUsersText: string;
+      conflictDetails: BulkShiftErrorDetail[];
+    }
+    | null
+  >(null);
+  const [feedbackModal, setFeedbackModal] = useState<
+    | {
+      type: 'success' | 'error' | 'info';
+      message: string;
     }
     | null
   >(null);
@@ -95,7 +108,7 @@ export default function ShiftManagementPage() {
       setUsers(usersData.filter(u => u.isActive));
     } catch (error) {
       console.error('Error loading data:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+      setFeedbackModal({ type: 'error', message: 'เกิดข้อผิดพลาดในการโหลดข้อมูล' });
     } finally {
       setLoading(false);
     }
@@ -103,6 +116,8 @@ export default function ShiftManagementPage() {
 
   const handleCreateShift = () => {
     setEditingShift(null);
+    setEmployeeSearchText('');
+    setEmployeeBranchFilter('ALL');
     setFormData({
       name: '',
       shiftType: 'REGULAR',
@@ -119,6 +134,8 @@ export default function ShiftManagementPage() {
 
   const handleEditShift = (shift: Shift) => {
     setEditingShift(shift);
+    setEmployeeSearchText('');
+    setEmployeeBranchFilter('ALL');
     setFormData({
       name: shift.name,
       shiftType: shift.shiftType,
@@ -138,10 +155,24 @@ export default function ShiftManagementPage() {
     return lower.includes('active shift') || message.includes('ยืนยันการย้ายกะ') || message.includes('อยู่แล้ว');
   };
 
+  const getUserBranchName = (user: UserServiceUser): string => {
+    if (typeof user.branch === 'string' && user.branch.trim().length > 0) {
+      return user.branch;
+    }
+
+    const raw = user as unknown as {
+      branch?: { name?: string; code?: string };
+      branchName?: string;
+      branchCode?: string;
+    };
+
+    return raw.branch?.name || raw.branchName || raw.branch?.code || raw.branchCode || 'ไม่ระบุสาขา';
+  };
+
   const finalizeSaveSuccess = async (message: string) => {
     await loadData();
     setShowCreateModal(false);
-    alert(message);
+    setFeedbackModal({ type: 'success', message });
   };
 
   const handleToggleWorkDay = (day: string) => {
@@ -157,27 +188,27 @@ export default function ShiftManagementPage() {
     e.preventDefault();
     
     if (!formData.name || !formData.startTime || !formData.endTime) {
-      alert('กรุณากรอกข้อมูลให้ครบถ้วน');
+      setFeedbackModal({ type: 'error', message: 'กรุณากรอกข้อมูลให้ครบถ้วน' });
       return;
     }
 
     if (formData.shiftType === 'SPECIFIC_DAY' && formData.specificDays.length === 0) {
-      alert('กรุณาเลือกวันที่ทำงาน');
+      setFeedbackModal({ type: 'error', message: 'กรุณาเลือกวันที่ทำงาน' });
       return;
     }
 
     if (formData.shiftType === 'CUSTOM' && !formData.customDate) {
-      alert('กรุณาระบุวันที่ทำงาน');
+      setFeedbackModal({ type: 'error', message: 'กรุณาระบุวันที่ทำงาน' });
       return;
     }
 
     if (formData.userIds.length === 0) {
-      alert('กรุณาเลือกพนักงานอย่างน้อย 1 คน');
+      setFeedbackModal({ type: 'error', message: 'กรุณาเลือกพนักงานอย่างน้อย 1 คน' });
       return;
     }
 
     if (editingShift && formData.userIds.length > 1) {
-      alert('การแก้ไขกะรองรับพนักงานได้ครั้งละ 1 คน');
+      setFeedbackModal({ type: 'error', message: 'การแก้ไขกะรองรับพนักงานได้ครั้งละ 1 คน' });
       return;
     }
 
@@ -217,57 +248,65 @@ export default function ShiftManagementPage() {
           return;
         }
       } else {
-        // Create new shift (one shift pattern for many employees)
-        const baseCreateData: Omit<CreateShiftRequest, 'userId'> = {
+        // Create new shifts in one bulk request (all-or-nothing)
+        const bulkCreateData: CreateShiftRequest = {
           name: formData.name,
           shiftType: formData.shiftType,
           startTime: formData.startTime,
           endTime: formData.endTime,
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
+          userIds: formData.userIds,
         };
 
         if (formData.shiftType === 'SPECIFIC_DAY') {
-          baseCreateData.specificDays = formData.specificDays;
+          bulkCreateData.specificDays = formData.specificDays;
         } else if (formData.shiftType === 'CUSTOM') {
-          baseCreateData.customDate = formData.customDate;
+          bulkCreateData.customDate = formData.customDate;
         }
 
-        const conflictUserIds: number[] = [];
+        try {
+          await shiftService.create(bulkCreateData);
+        } catch (error: any) {
+          const code = error?.response?.data?.code;
+          const details = Array.isArray(error?.response?.data?.details)
+            ? (error.response.data.details as BulkShiftErrorDetail[])
+            : [];
 
-        for (const userId of formData.userIds) {
-          try {
-            await shiftService.create({ ...baseCreateData, userId });
-          } catch (error: any) {
-            const message = error?.response?.data?.message || error?.message || '';
-            if (isActiveShiftConflictError(message)) {
-              conflictUserIds.push(userId);
-              continue;
-            }
-            throw error;
+          if (code === 'SHIFT_CONFLICT' && details.length > 0) {
+            const conflictUserIds = details
+              .map((d) => d.userId)
+              .filter((id): id is number => typeof id === 'number');
+
+            const conflictUsers = details
+              .map((d) => {
+                if (d.userName && d.employeeId) return `${d.userName} (${d.employeeId})`;
+                const found = users.find((u) => u.id === d.userId);
+                return found ? `${found.name} (${found.employeeId})` : `userId ${d.userId ?? '-'}`;
+              })
+              .join('\n- ');
+
+            setReassignModal({
+              mode: 'create',
+              bulkCreateData,
+              conflictUserIds,
+              conflictUsersText: conflictUsers,
+              conflictDetails: details,
+            });
+            return;
           }
-        }
 
-        if (conflictUserIds.length > 0) {
-          const conflictUsers = users
-            .filter((u) => conflictUserIds.includes(u.id))
-            .map((u) => `${u.name} (${u.employeeId})`)
-            .join('\n- ');
-
-          setReassignModal({
-            mode: 'create',
-            baseCreateData,
-            conflictUserIds,
-            conflictUsersText: conflictUsers,
-          });
-          return;
+          throw error;
         }
       }
 
       await finalizeSaveSuccess(editingShift ? 'แก้ไขกะงานสำเร็จ' : 'สร้างกะงานสำเร็จ');
     } catch (error: any) {
       console.error('Error saving shift:', error);
-      alert(error.response?.data?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      setFeedbackModal({
+        type: 'error',
+        message: error.response?.data?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล',
+      });
     } finally {
       setLoading(false);
     }
@@ -287,12 +326,25 @@ export default function ShiftManagementPage() {
 
     setLoading(true);
     try {
-      await shiftService.update(toggleTargetShift.id, { isActive: !toggleTargetShift.isActive });
+      const nextIsActive = !toggleTargetShift.isActive;
+      await shiftService.update(toggleTargetShift.id, { isActive: nextIsActive });
       setToggleTargetShift(null);
       await loadData();
     } catch (error: any) {
       console.error('Error toggling shift:', error);
-      alert(error.response?.data?.message || 'เกิดข้อผิดพลาด');
+      const message = error?.response?.data?.message || error?.message || '';
+      if (!toggleTargetShift.isActive && isActiveShiftConflictError(message)) {
+        setReassignModal({
+          mode: 'edit',
+          message,
+          shiftId: toggleTargetShift.id,
+          updateData: { isActive: true },
+        });
+        setToggleTargetShift(null);
+        return;
+      }
+
+      setFeedbackModal({ type: 'error', message: message || 'เกิดข้อผิดพลาด' });
     } finally {
       setLoading(false);
     }
@@ -301,7 +353,7 @@ export default function ShiftManagementPage() {
   const handleConfirmDeleteShift = async () => {
     if (!deleteTargetShift) return;
     if (!deleteReason.trim()) {
-      alert('การลบกะต้องระบุเหตุผล');
+      setFeedbackModal({ type: 'error', message: 'การลบกะต้องระบุเหตุผล' });
       return;
     }
 
@@ -311,10 +363,13 @@ export default function ShiftManagementPage() {
       setDeleteTargetShift(null);
       setDeleteReason('');
       await loadData();
-      alert('ลบกะงานสำเร็จ');
+      setFeedbackModal({ type: 'success', message: 'ลบกะงานสำเร็จ' });
     } catch (error: any) {
       console.error('Error deleting shift:', error);
-      alert(error.response?.data?.message || 'เกิดข้อผิดพลาด');
+      setFeedbackModal({
+        type: 'error',
+        message: error.response?.data?.message || 'เกิดข้อผิดพลาด',
+      });
     } finally {
       setLoading(false);
     }
@@ -332,31 +387,25 @@ export default function ShiftManagementPage() {
         );
         await finalizeSaveSuccess('แก้ไขกะงานสำเร็จ');
       } else {
-        for (const userId of reassignModal.conflictUserIds) {
-          await shiftService.create({ ...reassignModal.baseCreateData, userId, replaceExisting: true });
-        }
+        await shiftService.create({
+          ...reassignModal.bulkCreateData,
+          replaceExisting: true,
+        });
         await finalizeSaveSuccess('สร้างกะงานสำเร็จ');
       }
       setReassignModal(null);
     } catch (error: any) {
       console.error('Error replacing existing shifts:', error);
-      alert(error?.response?.data?.message || 'เกิดข้อผิดพลาดในการย้ายกะ');
+      setFeedbackModal({
+        type: 'error',
+        message: error?.response?.data?.message || 'เกิดข้อผิดพลาดในการย้ายกะ',
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleCancelReassign = async () => {
-    if (reassignModal?.mode === 'create') {
-      setLoading(true);
-      try {
-        await loadData();
-        setShowCreateModal(false);
-        alert('สร้างกะงานบางส่วนสำเร็จ (ข้ามพนักงานที่มีกะเดิม)');
-      } finally {
-        setLoading(false);
-      }
-    }
     setReassignModal(null);
   };
 
@@ -375,17 +424,33 @@ export default function ShiftManagementPage() {
     return Array.from(new Set(names)).sort();
   }, [shifts]);
 
-  const locationOptions = useMemo(() => {
-    const values = shifts
-      .filter((s): s is Shift & { location: NonNullable<Shift['location']> } => Boolean(s.location?.id))
-      .map((s) => ({ id: s.location!.id, name: s.location!.name }));
+  const employeeBranchOptions = useMemo(() => {
+    const branches = users
+      .map((u) => getUserBranchName(u))
+      .filter((v) => Boolean(v));
+    return Array.from(new Set(branches)).sort((a, b) => a.localeCompare(b));
+  }, [users]);
 
-    const seen = new Map<number, string>();
-    values.forEach((v) => {
-      if (!seen.has(v.id)) seen.set(v.id, v.name);
+  const assignableUsers = useMemo(() => {
+    const q = employeeSearchText.trim().toLowerCase();
+    return users.filter((user) => {
+      const branchName = getUserBranchName(user);
+      if (employeeBranchFilter !== 'ALL' && branchName !== employeeBranchFilter) return false;
+      if (!q) return true;
+
+      const haystack = [
+        user.name,
+        user.employeeId,
+        user.email,
+        branchName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(q);
     });
-    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
-  }, [shifts]);
+  }, [users, employeeSearchText, employeeBranchFilter]);
 
   const filteredShifts = useMemo(() => {
     const q = searchText.trim().toLowerCase();
@@ -394,8 +459,6 @@ export default function ShiftManagementPage() {
       if (filterShiftType !== 'ALL' && shift.shiftType !== filterShiftType) return false;
       if (filterActive === 'ACTIVE' && !shift.isActive) return false;
       if (filterActive === 'INACTIVE' && shift.isActive) return false;
-      if (filterUserId !== 'ALL' && shift.userId !== filterUserId) return false;
-      if (filterLocationId !== 'ALL' && shift.location?.id !== filterLocationId) return false;
       if (filterBranchName !== 'ALL' && shift.user?.branch?.name !== filterBranchName) return false;
 
       if (!q) return true;
@@ -415,8 +478,6 @@ export default function ShiftManagementPage() {
     searchText,
     filterShiftType,
     filterActive,
-    filterUserId,
-    filterLocationId,
     filterBranchName,
   ]);
 
@@ -425,11 +486,9 @@ export default function ShiftManagementPage() {
       searchText.trim()
       || filterShiftType !== 'ALL'
       || filterActive !== 'ALL'
-      || filterUserId !== 'ALL'
-      || filterLocationId !== 'ALL'
       || filterBranchName !== 'ALL',
     );
-  }, [searchText, filterShiftType, filterActive, filterUserId, filterLocationId, filterBranchName]);
+  }, [searchText, filterShiftType, filterActive, filterBranchName]);
 
   const shiftStats = useMemo(() => {
     const total = shifts.length;
@@ -455,7 +514,7 @@ export default function ShiftManagementPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchText, filterShiftType, filterActive, filterUserId, filterLocationId, filterBranchName]);
+  }, [searchText, filterShiftType, filterActive, filterBranchName]);
 
   if (loading && shifts.length === 0) {
     return (
@@ -515,7 +574,7 @@ export default function ShiftManagementPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <input
               type="text"
               value={searchText}
@@ -546,28 +605,6 @@ export default function ShiftManagementPage() {
             </select>
 
             <select
-              value={String(filterUserId)}
-              onChange={(e) => setFilterUserId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
-            >
-              <option value="ALL">ทุกพนักงาน</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>{user.name} ({user.employeeId})</option>
-              ))}
-            </select>
-
-            <select
-              value={String(filterLocationId)}
-              onChange={(e) => setFilterLocationId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-              className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
-            >
-              <option value="ALL">ทุกสถานที่</option>
-              {locationOptions.map((location) => (
-                <option key={location.id} value={location.id}>{location.name}</option>
-              ))}
-            </select>
-
-            <select
               value={filterBranchName}
               onChange={(e) => setFilterBranchName(e.target.value)}
               className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
@@ -588,8 +625,6 @@ export default function ShiftManagementPage() {
                   setSearchText('');
                   setFilterShiftType('ALL');
                   setFilterActive('ALL');
-                  setFilterUserId('ALL');
-                  setFilterLocationId('ALL');
                   setFilterBranchName('ALL');
                 }}
               >
@@ -927,6 +962,26 @@ export default function ShiftManagementPage() {
                   <label className="block mb-2 text-sm font-medium text-gray-700">
                     มอบหมายพนักงาน <span className="text-red-500">*</span>
                   </label>
+                  <div className="grid grid-cols-1 gap-2 mb-3 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      value={employeeSearchText}
+                      onChange={(e) => setEmployeeSearchText(e.target.value)}
+                      placeholder="ค้นหาพนักงาน (ชื่อ/รหัส/อีเมล)"
+                      className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                    />
+                    <select
+                      value={employeeBranchFilter}
+                      onChange={(e) => setEmployeeBranchFilter(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                    >
+                      <option value="ALL">ทุกสาขา</option>
+                      {employeeBranchOptions.map((branch) => (
+                        <option key={branch} value={branch}>{branch}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   {editingShift ? (
                     <select
                       value={formData.userIds[0] || ''}
@@ -937,19 +992,19 @@ export default function ShiftManagementPage() {
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
                     >
                       <option value="">-- เลือกพนักงาน --</option>
-                      {users.map((user) => (
+                      {assignableUsers.map((user) => (
                         <option key={user.id} value={user.id}>
-                          {user.name} ({user.employeeId})
+                          {user.name} ({user.employeeId}) - {getUserBranchName(user)}
                         </option>
                       ))}
                     </select>
                   ) : (
                     <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
-                      {users.map((user) => {
+                      {assignableUsers.map((user) => {
                         const checked = formData.userIds.includes(user.id);
                         return (
                           <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                            <span className="text-sm text-gray-800">{user.name} ({user.employeeId})</span>
+                            <span className="text-sm text-gray-800">{user.name} ({user.employeeId}) - {getUserBranchName(user)}</span>
                             <input
                               type="checkbox"
                               checked={checked}
@@ -966,6 +1021,9 @@ export default function ShiftManagementPage() {
                           </label>
                         );
                       })}
+                      {assignableUsers.length === 0 && (
+                        <p className="text-sm text-center text-gray-500">ไม่พบพนักงานตามเงื่อนไขที่กรอง</p>
+                      )}
                     </div>
                   )}
                   <p className="mt-2 text-xs text-gray-500">
@@ -1214,6 +1272,35 @@ export default function ShiftManagementPage() {
                 disabled={loading}
               >
                 ยืนยันการย้ายกะ
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Feedback Modal */}
+      {feedbackModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="w-full max-w-md p-6 bg-white">
+            <h3
+              className={`text-lg font-bold ${
+                feedbackModal.type === 'success'
+                  ? 'text-green-700'
+                  : feedbackModal.type === 'info'
+                    ? 'text-blue-700'
+                    : 'text-red-600'
+              }`}
+            >
+              {feedbackModal.type === 'success'
+                ? 'สำเร็จ'
+                : feedbackModal.type === 'info'
+                  ? 'แจ้งเตือน'
+                  : 'เกิดข้อผิดพลาด'}
+            </h3>
+            <p className="mt-3 text-sm text-gray-700 whitespace-pre-line">{feedbackModal.message}</p>
+            <div className="mt-6">
+              <Button className="w-full" onClick={() => setFeedbackModal(null)}>
+                ตกลง
               </Button>
             </div>
           </Card>

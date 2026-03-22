@@ -67,7 +67,7 @@ const options: swaggerJsdoc.Options = {
           properties: {
             shiftId: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             name: {
               type: 'string',
@@ -90,12 +90,12 @@ const options: swaggerJsdoc.Options = {
             },
             userId: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             locationId: {
               type: 'integer',
               nullable: true,
-              example: 1,
+              example: 151,
             },
             gracePeriodMinutes: {
               type: 'integer',
@@ -135,7 +135,11 @@ const options: swaggerJsdoc.Options = {
         },
         CreateShiftRequest: {
           type: 'object',
-          required: ['name', 'shiftType', 'startTime', 'endTime', 'userId'],
+          required: ['name', 'shiftType', 'startTime', 'endTime'],
+          anyOf: [
+            { required: ['userId'] },
+            { required: ['userIds'] },
+          ],
           properties: {
             name: {
               type: 'string',
@@ -162,14 +166,23 @@ const options: swaggerJsdoc.Options = {
             },
             userId: {
               type: 'integer',
-              example: 1,
-              description: 'รหัสพนักงานที่รับกะนี้',
+              example: 151,
+              description: 'รหัสพนักงานที่รับกะนี้ (single-user create)',
+            },
+            userIds: {
+              type: 'array',
+              items: {
+                type: 'integer',
+              },
+              example: [151, 152, 153],
+              description: 'รายชื่อ userId ที่จะสร้างกะพร้อมกันแบบ all-or-nothing',
             },
             locationId: {
               type: 'integer',
               nullable: true,
-              example: 1,
-              description: 'รหัสสถานที่ทำงาน (optional)',
+              default: 151,
+              example: 151,
+              description: 'รหัสสถานที่ทำงาน (optional, แนะนำใส่ค่า default 151 สำหรับเดโม)',
             },
             gracePeriodMinutes: {
               type: 'integer',
@@ -204,6 +217,124 @@ const options: swaggerJsdoc.Options = {
             },
           },
         },
+        CreateBulkShiftRequest: {
+          type: 'object',
+          required: ['name', 'shiftType', 'startTime', 'endTime', 'userIds'],
+          properties: {
+            name: {
+              type: 'string',
+              example: 'กะเช้า',
+              description: 'ชื่อของกะงาน',
+            },
+            shiftType: {
+              type: 'string',
+              enum: ['REGULAR', 'SPECIFIC_DAY', 'CUSTOM'],
+              example: 'REGULAR',
+              description: 'ประเภทของกะ',
+            },
+            startTime: {
+              type: 'string',
+              format: 'time',
+              example: '08:00',
+              description: 'เวลาเริ่มงาน (HH:MM)',
+            },
+            endTime: {
+              type: 'string',
+              format: 'time',
+              example: '17:00',
+              description: 'เวลาเลิกงาน (HH:MM)',
+            },
+            userIds: {
+              type: 'array',
+              items: {
+                type: 'integer',
+              },
+              example: [151, 152, 153],
+              description: 'รายชื่อ userId ที่จะสร้างกะ (all-or-nothing)',
+            },
+            locationId: {
+              type: 'integer',
+              nullable: true,
+              example: 201,
+              description: 'รหัสสถานที่ทำงาน (optional)',
+            },
+            gracePeriodMinutes: {
+              type: 'integer',
+              example: 15,
+              description: 'ระยะเวลาที่เข้าก่อนได้ (นาที)',
+            },
+            lateThresholdMinutes: {
+              type: 'integer',
+              example: 30,
+              description: 'ระยะเวลาที่นับว่าสาย (นาที)',
+            },
+            specificDays: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
+              },
+              example: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+              description: 'วันที่ใช้กะนี้ (สำหรับ SPECIFIC_DAY)',
+            },
+            customDate: {
+              type: 'string',
+              format: 'date',
+              nullable: true,
+              example: '2026-03-15',
+              description: 'วันที่เฉพาะ (สำหรับ CUSTOM)',
+            },
+            replaceExisting: {
+              type: 'boolean',
+              example: false,
+              description: 'ถ้าพบ active shift เดิม ให้แทนที่กะเดิมเมื่อกำหนดเป็น true',
+            },
+          },
+        },
+        BulkShiftErrorDetail: {
+          type: 'object',
+          properties: {
+            userId: {
+              type: 'integer',
+              nullable: true,
+              example: 151,
+            },
+            code: {
+              type: 'string',
+              enum: ['INVALID_PAYLOAD', 'SHIFT_CONFLICT', 'INVALID_LOCATION', 'FORBIDDEN_BRANCH', 'USER_NOT_FOUND'],
+              example: 'SHIFT_CONFLICT',
+            },
+            message: {
+              type: 'string',
+              example: 'พนักงานมี active shift อยู่แล้ว',
+            },
+            userName: {
+              type: 'string',
+              nullable: true,
+              example: 'สมชาย ใจดี',
+            },
+            employeeId: {
+              type: 'string',
+              nullable: true,
+              example: 'BKK0151',
+            },
+          },
+        },
+        BulkCreateShiftResponse: {
+          type: 'object',
+          properties: {
+            createdCount: {
+              type: 'integer',
+              example: 3,
+            },
+            shifts: {
+              type: 'array',
+              items: {
+                $ref: '#/components/schemas/Shift',
+              },
+            },
+          },
+        },
         
         // Attendance Schemas
         Attendance: {
@@ -211,21 +342,21 @@ const options: swaggerJsdoc.Options = {
           properties: {
             id: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             userId: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             shiftId: {
               type: 'integer',
               nullable: true,
-              example: 1,
+              example: 151,
             },
             locationId: {
               type: 'integer',
               nullable: true,
-              example: 1,
+              example: 151,
             },
             checkInTime: {
               type: 'string',
@@ -300,12 +431,12 @@ const options: swaggerJsdoc.Options = {
           properties: {
             shiftId: {
               type: 'integer',
-              example: 1,
+              example: 151,
               description: 'รหัสกะงาน (required)',
             },
             locationId: {
               type: 'integer',
-              example: 1,
+              example: 151,
               description: 'รหัสสถานที่ (optional)',
             },
             photo: {
@@ -334,21 +465,15 @@ const options: swaggerJsdoc.Options = {
         },
         CheckOutRequest: {
           type: 'object',
-          required: ['userId'],
           properties: {
-            userId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัสผู้ใช้',
-            },
             attendanceId: {
               type: 'integer',
-              example: 1,
+              example: 151,
               description: 'รหัส attendance ที่จะออก (optional)',
             },
             shiftId: {
               type: 'integer',
-              example: 1,
+              example: 151,
               description: 'รหัสกะงาน (optional)',
             },
             photo: {

@@ -30,23 +30,34 @@ function mapShift(raw: any): Shift {
 
 export const shiftService = {
   /**
-   * Create a new shift (Admin only)
+   * Create shift(s) using a single endpoint.
+   * - userId   => create one shift
+   * - userIds  => create many shifts (all-or-nothing)
    */
-  async create(data: CreateShiftRequest): Promise<Shift> {
+  async create(data: CreateShiftRequest): Promise<Shift | { createdCount: number; shifts: Shift[] }> {
     const response = await api.post('/shifts', data);
-    return mapShift(response.data.data);
+    const payload = response.data.data;
+    if (payload && Array.isArray(payload.shifts)) {
+      return {
+        createdCount: Number(payload.createdCount ?? payload.shifts.length ?? 0),
+        shifts: (payload.shifts ?? []).map(mapShift),
+      };
+    }
+    return mapShift(payload);
   },
 
   /**
-   * Create one shift pattern for many users (creates one record per user)
+   * Backward-compatible helper; now uses POST /shifts internally
    */
   async createMany(baseData: Omit<CreateShiftRequest, 'userId'>, userIds: number[]): Promise<Shift[]> {
-    const created: Shift[] = [];
-    for (const userId of userIds) {
-      const shift = await this.create({ ...baseData, userId });
-      created.push(shift);
+    const result = await this.create({
+      ...(baseData as Omit<CreateShiftRequest, 'userIds'>),
+      userIds,
+    });
+    if (Array.isArray((result as { shifts?: Shift[] }).shifts)) {
+      return ((result as { shifts: Shift[] }).shifts ?? []).map(mapShift);
     }
-    return created;
+    return [mapShift(result as Shift)];
   },
 
   /**

@@ -114,6 +114,39 @@ export interface CreateShiftRequest {
   replaceExisting?: boolean;
 }
 
+export interface BulkShiftErrorDetail {
+  userId?: number;
+  code: 'INVALID_PAYLOAD' | 'SHIFT_CONFLICT' | 'INVALID_LOCATION' | 'FORBIDDEN_BRANCH' | 'USER_NOT_FOUND';
+  message: string;
+  userName?: string;
+  employeeId?: string;
+  existingShift?: {
+    shiftId: number;
+    name: string;
+    startTime: string;
+    endTime: string;
+  };
+}
+
+export interface CreateBulkShiftRequest {
+  name: string;
+  shiftType: 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM';
+  startTime: string;
+  endTime: string;
+  gracePeriodMinutes?: number;
+  lateThresholdMinutes?: number;
+  specificDays?: ('MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY')[];
+  customDate?: string;
+  locationId?: number;
+  userIds: number[];
+  replaceExisting?: boolean;
+}
+
+export interface CreateBulkShiftResponse {
+  createdCount: number;
+  shifts: Shift[];
+}
+
 export interface UpdateShiftRequest {
   name?: string;
   shiftType?: 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM';

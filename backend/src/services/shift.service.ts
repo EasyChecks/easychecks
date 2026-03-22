@@ -12,7 +12,7 @@ export interface CreateShiftDTO {
   lateThresholdMinutes?: number;
   specificDays?: DayOfWeek[];
   customDate?: Date | string;
-  locationId?: number;
+  locationId?: number | null;
   userId: number;
   replaceExisting?: boolean;
   createdByUserId: number;
@@ -28,10 +28,62 @@ export interface UpdateShiftDTO {
   lateThresholdMinutes?: number;
   specificDays?: DayOfWeek[];
   customDate?: Date | string;
-  locationId?: number;
+  locationId?: number | null;
   userId?: number;
   isActive?: boolean;
   replaceExisting?: boolean;
+}
+
+export type BulkShiftErrorCode =
+  | 'INVALID_PAYLOAD'
+  | 'SHIFT_CONFLICT'
+  | 'INVALID_LOCATION'
+  | 'FORBIDDEN_BRANCH'
+  | 'USER_NOT_FOUND';
+
+export interface BulkShiftErrorDetail {
+  userId?: number;
+  code: BulkShiftErrorCode;
+  message: string;
+  userName?: string;
+  employeeId?: string;
+  existingShift?: {
+    shiftId: number;
+    name: string;
+    startTime: string;
+    endTime: string;
+  };
+}
+
+export class BulkShiftCreateError extends Error {
+  statusCode: number;
+  code: BulkShiftErrorCode;
+  details: BulkShiftErrorDetail[];
+
+  constructor(message: string, statusCode: number, code: BulkShiftErrorCode, details: BulkShiftErrorDetail[]) {
+    super(message);
+    this.name = 'BulkShiftCreateError';
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export interface CreateBulkShiftDTO {
+  name: string;
+  shiftType: ShiftType;
+  startTime: string;
+  endTime: string;
+  gracePeriodMinutes?: number;
+  lateThresholdMinutes?: number;
+  specificDays?: DayOfWeek[];
+  customDate?: Date | string;
+  locationId?: number | null;
+  userIds: number[];
+  replaceExisting?: boolean;
+  createdByUserId: number;
+  creatorRole: string;
+  creatorBranchId?: number;
 }
 
 function isValidTimeFormat(time: string): boolean {
@@ -58,7 +110,7 @@ export const createShift = async (data: CreateShiftDTO) => {
     throw new Error('รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM เช่น 08:30)');
   }
 
-  if (data.locationId) {
+  if (data.locationId !== undefined && data.locationId !== null) {
     const location = await prisma.location.findUnique({ where: { locationId: data.locationId } });
     if (!location) throw new Error('ไม่พบสถานที่ที่ระบุ');
   }
@@ -139,6 +191,230 @@ export const createShift = async (data: CreateShiftDTO) => {
   });
 
   return shift;
+};
+
+export const createBulkShift = async (data: CreateBulkShiftDTO) => {
+  if (!isValidTimeFormat(data.startTime) || !isValidTimeFormat(data.endTime)) {
+    throw new BulkShiftCreateError(
+      'รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM เช่น 08:30)',
+      400,
+      'INVALID_PAYLOAD',
+      [{ code: 'INVALID_PAYLOAD', message: 'รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM เช่น 08:30)' }],
+    );
+  }
+
+  if (data.locationId !== undefined && data.locationId !== null) {
+    const location = await prisma.location.findUnique({ where: { locationId: data.locationId } });
+    if (!location) {
+      throw new BulkShiftCreateError(
+        'ไม่พบสถานที่ที่ระบุ',
+        404,
+        'INVALID_LOCATION',
+        [{ code: 'INVALID_LOCATION', message: 'ไม่พบสถานที่ที่ระบุ' }],
+      );
+    }
+  }
+
+  if (data.shiftType === 'SPECIFIC_DAY' && (!data.specificDays || data.specificDays.length === 0)) {
+    throw new BulkShiftCreateError(
+      'กะแบบ SPECIFIC_DAY ต้องระบุวันที่ต้องการ (specificDays)',
+      400,
+      'INVALID_PAYLOAD',
+      [{ code: 'INVALID_PAYLOAD', message: 'กะแบบ SPECIFIC_DAY ต้องระบุวันที่ต้องการ (specificDays)' }],
+    );
+  }
+
+  if (data.shiftType === 'CUSTOM' && !data.customDate) {
+    throw new BulkShiftCreateError(
+      'กะแบบ CUSTOM ต้องระบุวันที่ (customDate)',
+      400,
+      'INVALID_PAYLOAD',
+      [{ code: 'INVALID_PAYLOAD', message: 'กะแบบ CUSTOM ต้องระบุวันที่ (customDate)' }],
+    );
+  }
+
+  const normalizedUserIds = Array.from(
+    new Set(
+      (data.userIds ?? [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  );
+
+  if (normalizedUserIds.length === 0) {
+    throw new BulkShiftCreateError(
+      'กรุณาระบุ userIds อย่างน้อย 1 คน',
+      400,
+      'INVALID_PAYLOAD',
+      [{ code: 'INVALID_PAYLOAD', message: 'กรุณาระบุ userIds อย่างน้อย 1 คน' }],
+    );
+  }
+
+  const users = await prisma.user.findMany({
+    where: { userId: { in: normalizedUserIds } },
+    select: {
+      userId: true,
+      branchId: true,
+      firstName: true,
+      lastName: true,
+      employeeId: true,
+    },
+  });
+
+  const userById = new Map<number, (typeof users)[number]>();
+  users.forEach((u) => {
+    userById.set(u.userId, u);
+  });
+  const details: BulkShiftErrorDetail[] = [];
+
+  for (const userId of normalizedUserIds) {
+    const user = userById.get(userId);
+    if (!user) {
+      details.push({ userId, code: 'USER_NOT_FOUND', message: 'ไม่พบพนักงานที่ระบุ' });
+      continue;
+    }
+
+    if (!canAccessBranch(data.creatorRole, data.creatorBranchId, user.branchId || undefined)) {
+      details.push({
+        userId,
+        code: 'FORBIDDEN_BRANCH',
+        message: 'คุณไม่มีสิทธิ์สร้างกะให้พนักงานสาขาอื่น',
+        userName: `${user.firstName} ${user.lastName}`.trim(),
+        employeeId: user.employeeId,
+      });
+    }
+  }
+
+  if (details.length > 0) {
+    const hasForbidden = details.some((d) => d.code === 'FORBIDDEN_BRANCH');
+    const hasNotFound = details.some((d) => d.code === 'USER_NOT_FOUND');
+    throw new BulkShiftCreateError(
+      'ไม่สามารถสร้างกะแบบกลุ่มได้ เนื่องจากข้อมูลพนักงานบางรายการไม่ถูกต้อง',
+      hasForbidden ? 403 : (hasNotFound ? 404 : 400),
+      hasForbidden ? 'FORBIDDEN_BRANCH' : (hasNotFound ? 'USER_NOT_FOUND' : 'INVALID_PAYLOAD'),
+      details,
+    );
+  }
+
+  const existingActiveShifts = await prisma.shift.findMany({
+    where: {
+      userId: { in: normalizedUserIds },
+      isActive: true,
+      isDeleted: false,
+    },
+    select: {
+      shiftId: true,
+      userId: true,
+      name: true,
+      startTime: true,
+      endTime: true,
+    },
+  });
+
+  if (existingActiveShifts.length > 0 && !data.replaceExisting) {
+    const conflictDetails: BulkShiftErrorDetail[] = existingActiveShifts.map((shift) => {
+      const user = userById.get(shift.userId);
+      return {
+        userId: shift.userId,
+        code: 'SHIFT_CONFLICT',
+        message: `พนักงานมี active shift อยู่แล้ว (${shift.name} ${shift.startTime}-${shift.endTime})`,
+        userName: user ? `${user.firstName} ${user.lastName}`.trim() : undefined,
+        employeeId: user?.employeeId,
+        existingShift: {
+          shiftId: shift.shiftId,
+          name: shift.name,
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+        },
+      };
+    });
+
+    throw new BulkShiftCreateError(
+      'พนักงานบางคนมี active shift อยู่แล้ว กรุณายืนยันการย้ายกะด้วย replaceExisting=true',
+      409,
+      'SHIFT_CONFLICT',
+      conflictDetails,
+    );
+  }
+
+  const parsedCustomDate = data.customDate
+    ? (typeof data.customDate === 'string' ? new Date(data.customDate) : data.customDate)
+    : undefined;
+
+  const createdShifts = await prisma.$transaction(async (tx) => {
+    if (existingActiveShifts.length > 0 && data.replaceExisting) {
+      await tx.shift.updateMany({
+        where: {
+          userId: { in: normalizedUserIds },
+          isActive: true,
+          isDeleted: false,
+        },
+        data: {
+          isActive: false,
+          isDeleted: true,
+          deleteReason: 'แทนที่ด้วยกะใหม่ (bulk)',
+        },
+      });
+    }
+
+    const records = [];
+    for (const userId of normalizedUserIds) {
+      const created = await tx.shift.create({
+        data: {
+          name: data.name,
+          shiftType: data.shiftType,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          gracePeriodMinutes: data.gracePeriodMinutes ?? 15,
+          lateThresholdMinutes: data.lateThresholdMinutes ?? 30,
+          specificDays: data.specificDays ?? [],
+          customDate: parsedCustomDate ?? null,
+          locationId: data.locationId ?? null,
+          userId,
+          isDeleted: false,
+        },
+        include: {
+          location: true,
+          user: {
+            select: {
+              userId: true,
+              firstName: true,
+              lastName: true,
+              employeeId: true,
+              branchId: true,
+              branch: {
+                select: {
+                  name: true,
+                  code: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      records.push(created);
+    }
+
+    return records;
+  });
+
+  await Promise.all(
+    createdShifts.map((shift) =>
+      createAuditLog({
+        userId: data.createdByUserId,
+        action: AuditAction.CREATE_SHIFT,
+        targetTable: 'shifts',
+        targetId: shift.shiftId,
+        newValues: shift as unknown as Record<string, unknown>,
+      }),
+    ),
+  );
+
+  return {
+    createdCount: createdShifts.length,
+    shifts: createdShifts,
+  };
 };
 
 export const getShifts = async (
@@ -260,6 +536,11 @@ export const updateShift = async (
   }
   if (data.endTime && !isValidTimeFormat(data.endTime)) {
     throw new Error('รูปแบบเวลาสิ้นสุดไม่ถูกต้อง (ต้องเป็น HH:MM)');
+  }
+
+  if (data.locationId !== undefined && data.locationId !== null) {
+    const location = await prisma.location.findUnique({ where: { locationId: data.locationId } });
+    if (!location) throw new Error('ไม่พบสถานที่ที่ระบุ');
   }
 
   const { replaceExisting, ...rawUpdateData } = data;
@@ -424,6 +705,7 @@ export const getActiveShiftsForToday = async (userId: number) => {
 
 export const shiftService = {
   createShift,
+  createBulkShift,
   getShifts,
   getShiftById,
   updateShift,

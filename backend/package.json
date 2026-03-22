@@ -4,7 +4,7 @@
   "description": "",
   "main": "./src/index.ts",
   "scripts": {
-    "dev": "tsx watch ./src/index.ts",
+    "dev": "tsx watch --include ./src/docs/**/*.ts --include ./src/config/**/*.ts ./src/index.ts",
     "build": "tsc",
     "prisma:generate": "prisma generate",
     "migrate:deploy": "prisma migrate deploy",

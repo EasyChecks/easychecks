@@ -1,0 +1,64 @@
+EasyCheck Demo Note (Unified Shift Create + Swagger Runtime Alignment)
+Date: 2026-03-22
+
+Summary
+- Shift creation is now unified at POST /api/shifts.
+- Single user create: send userId.
+- Multi user create: send userIds (all-or-nothing transaction).
+- /api/shifts/bulk is removed from frontend usage and Swagger path docs.
+- Swagger payload examples were aligned with runtime auth and validation rules.
+
+What Changed
+1) Shift API contract
+- POST /api/shifts now supports both:
+  - userId: 151
+  - userIds: [151, 152, 153]
+- Multi-user create still returns conflict details on 409 when active shifts already exist.
+- Retry with replaceExisting=true to confirm replacement.
+
+2) Frontend contract
+- Frontend no longer calls /shifts/bulk.
+- Admin and Superadmin shift pages now use shiftService.create(...) for both single and multi-user create.
+
+3) Swagger alignment fixes
+- Removed /api/shifts/bulk path documentation.
+- POST /api/shifts examples now include both single-user and multi-user payloads.
+- DELETE /api/shifts/{id}: removed deletedByUserId from request body (actor comes from token).
+- POST /api/attendance/check-in examples removed userId from payload (user identity comes from token).
+- POST /api/attendance/check-out examples removed userId from payload.
+- PUT /api/attendance/{id}: removed updatedByUserId from payload and documented editReason for time edits.
+
+Fixed IDs used for demo examples
+- userId main: 151
+- userIds sample: 151, 152, 153
+- shiftId main: 151
+- locationId main: 151
+- attendanceId main: 151
+
+Try-it-out payload checklist
+A) Create shift for one user
+- POST /api/shifts
+- Body: name, shiftType, startTime, endTime, userId
+
+B) Create shift for many users (transactional)
+- POST /api/shifts
+- Body: name, shiftType, startTime, endTime, userIds
+- If 409 conflict: inspect details, then retry with replaceExisting=true
+
+C) Check-in
+- POST /api/attendance/check-in
+- Body: shiftId, latitude, longitude (and optional locationId/photo/address)
+- Do not send userId in body
+
+D) Update attendance time
+- PUT /api/attendance/{id}
+- If editing checkIn/checkOut, include editReason
+
+E) Delete shift
+- DELETE /api/shifts/{id}
+- Body requires only deleteReason
+- Authorization depends on role/branch from token
+
+Notes
+- Forbidden on shift delete is expected when caller role/branch does not have permission.
+- If Swagger UI still shows stale values, restart backend dev server and hard-refresh browser.

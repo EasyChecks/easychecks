@@ -169,6 +169,7 @@
  *     summary: สร้างกะงานใหม่ (Admin/SuperAdmin only)
  *     description: |
  *       สร้างตารางงานใหม่ให้พนักงาน พร้อมกำหนด grace period และ late threshold
+ *       รองรับทั้งการสร้างให้พนักงาน 1 คน (`userId`) หรือหลายคน (`userIds`) ใน endpoint เดียว
  *
  *       **ทำไม grace period และ late threshold ถึงเก็บต่อกะ?**
  *       แต่ละกะอาจมีนโยบายเวลาต่างกัน เช่น กะดึกอาจยืดหยุ่นกว่ากะเช้า
@@ -182,6 +183,14 @@
  *       **replaceExisting (optional):**
  *       ถ้าพนักงานมี active shift อยู่แล้ว ระบบจะตอบ 409 ก่อน
  *       และต้องส่ง `replaceExisting=true` เพื่อยืนยันให้แทนที่กะเดิม
+ *
+ *       **userId vs userIds:**
+ *       - ส่ง `userId` = สร้างกะเดียว
+ *       - ส่ง `userIds` = สร้างหลายคนแบบ all-or-nothing
+ *         (ถ้าคนใดคนหนึ่งไม่ผ่าน validation จะ rollback ทั้งคำขอ)
+ *
+ *       **แนะนำสำหรับ Try it out:**
+ *       ใส่ `locationId` ทุกครั้ง (ค่าเดโมเริ่มต้น: 151)
  *     tags:
  *       - Shifts
  *     security:
@@ -200,9 +209,10 @@
  *                 shiftType: "REGULAR"
  *                 startTime: "08:00"
  *                 endTime: "17:00"
+ *                 locationId: 151
  *                 gracePeriodMinutes: 15
  *                 lateThresholdMinutes: 30
- *                 userId: 5
+ *                 userId: 151
  *                 replaceExisting: true
  *             กะเฉพาะวัน:
  *               summary: กะจันทร์-ศุกร์ SPECIFIC_DAY
@@ -211,8 +221,9 @@
  *                 shiftType: "SPECIFIC_DAY"
  *                 startTime: "09:00"
  *                 endTime: "18:00"
+ *                 locationId: 151
  *                 specificDays: ["MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY"]
- *                 userId: 5
+ *                 userId: 151
  *             กะวันพิเศษ:
  *               summary: กะวันเดียว CUSTOM
  *               value:
@@ -220,11 +231,67 @@
  *                 shiftType: "CUSTOM"
  *                 startTime: "10:00"
  *                 endTime: "15:00"
+ *                 locationId: 151
  *                 customDate: "2026-03-15"
- *                 userId: 5
+ *                 userId: 151
+ *             กะเดียวให้หลายคน:
+ *               summary: สร้างกะเดียวกันให้หลาย user (all-or-nothing)
+ *               value:
+ *                 name: "กะเช้าสาขาหลัก"
+ *                 shiftType: "REGULAR"
+ *                 startTime: "08:00"
+ *                 endTime: "17:00"
+ *                 locationId: 151
+ *                 gracePeriodMinutes: 15
+ *                 lateThresholdMinutes: 30
+ *                 userIds: [151, 152, 153]
+ *                 replaceExisting: false
  *     responses:
  *       201:
- *         description: สร้างกะสำเร็จ — คืน shift record พร้อม user และ location
+ *         description: |
+ *           สร้างกะสำเร็จ
+ *           - single user: คืน Shift 1 รายการ
+ *           - multi user: คืน createdCount และ shifts[]
+ *         content:
+ *           application/json:
+ *             examples:
+ *               single-user:
+ *                 value:
+ *                   success: true
+ *                   message: "สร้างกะเรียบร้อยแล้ว"
+ *                   data:
+ *                     shiftId: 151
+ *                     userId: 151
+ *                     name: "กะเช้า"
+ *                     shiftType: "REGULAR"
+ *                     startTime: "08:00"
+ *                     endTime: "17:00"
+ *               multi-user:
+ *                 value:
+ *                   success: true
+ *                   message: "สร้างกะเรียบร้อยแล้ว 3 รายการ"
+ *                   data:
+ *                     createdCount: 3
+ *                     shifts:
+ *                       - shiftId: 151
+ *                         userId: 151
+ *                         name: "กะเช้า"
+ *                       - shiftId: 152
+ *                         userId: 152
+ *                         name: "กะเช้า"
+ *       400:
+ *         description: |
+ *           Bad Request — สาเหตุที่เป็นไปได้:
+ *           - รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM)
+ *           - SPECIFIC_DAY ไม่ระบุ specificDays
+ *           - CUSTOM ไม่ระบุ customDate
+ *           - ไม่พบ userId/userIds หรือ locationId
+ *       401:
+ *         description: ไม่ได้ login หรือ Token หมดอายุ
+ *       403:
+ *         description: ไม่มีสิทธิ์ — หรือ Admin พยายามสร้างกะให้พนักงานสาขาอื่น
+ *       409:
+ *         description: พนักงานมี active shift อยู่แล้ว (ต้องส่ง replaceExisting=true เพื่อยืนยันแทนที่)
  *         content:
  *           application/json:
  *             schema:
@@ -232,25 +299,17 @@
  *               properties:
  *                 success:
  *                   type: boolean
- *                   example: true
- *                 message:
+ *                   example: false
+ *                 error:
  *                   type: string
- *                   example: "สร้างกะงานเรียบร้อยแล้ว"
- *                 data:
- *                   $ref: '#/components/schemas/Shift'
- *       400:
- *         description: |
- *           Bad Request — สาเหตุที่เป็นไปได้:
- *           - รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM)
- *           - SPECIFIC_DAY ไม่ระบุ specificDays
- *           - CUSTOM ไม่ระบุ customDate
- *           - ไม่พบ userId หรือ locationId
- *       401:
- *         description: ไม่ได้ login หรือ Token หมดอายุ
- *       403:
- *         description: ไม่มีสิทธิ์ — หรือ Admin พยายามสร้างกะให้พนักงานสาขาอื่น
- *       409:
- *         description: พนักงานมี active shift อยู่แล้ว (ต้องส่ง replaceExisting=true เพื่อยืนยันแทนที่)
+ *                   example: "พนักงานบางคนมี active shift อยู่แล้ว กรุณายืนยันการย้ายกะด้วย replaceExisting=true"
+ *                 code:
+ *                   type: string
+ *                   example: "SHIFT_CONFLICT"
+ *                 details:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/BulkShiftErrorDetail'
  *
  *   get:
  *     summary: ดึงรายการกะทั้งหมด (กรองตาม role อัตโนมัติ)
@@ -329,7 +388,7 @@
  *         schema:
  *           type: integer
  *         description: รหัสพนักงานที่ต้องการดูกะวันนี้
- *         example: 5
+ *         example: 151
  *     responses:
  *       200:
  *         description: รายการกะที่ active วันนี้ (อาจเป็น array ว่างถ้าไม่มีกะวันนี้)
@@ -369,7 +428,7 @@
  *         schema:
  *           type: integer
  *         description: รหัสกะที่ต้องการ
- *         example: 1
+ *         example: 151
  *     responses:
  *       200:
  *         description: ดึงข้อมูลสำเร็จ
@@ -407,7 +466,7 @@
  *         schema:
  *           type: integer
  *         description: รหัสกะที่ต้องการแก้ไข
- *         example: 1
+ *         example: 151
  *     requestBody:
  *       required: true
  *       content:
@@ -454,7 +513,7 @@
  *                 example: "2026-04-01"
  *               userId:
  *                 type: integer
- *                 example: 8
+ *                 example: 151
  *                 description: มอบหมายกะให้พนักงานคนใหม่
  *               replaceExisting:
  *                 type: boolean
@@ -508,7 +567,7 @@
  *         schema:
  *           type: integer
  *         description: รหัสกะที่ต้องการลบ
- *         example: 1
+ *         example: 151
  *     requestBody:
  *       required: true
  *       content:
@@ -516,13 +575,8 @@
  *           schema:
  *             type: object
  *             required:
- *               - deletedByUserId
  *               - deleteReason
  *             properties:
- *               deletedByUserId:
- *                 type: integer
- *                 example: 1
- *                 description: รหัส Admin ที่ทำการลบ (ใช้สำหรับ audit trail)
  *               deleteReason:
  *                 type: string
  *                 example: "ยกเลิกกะเนื่องจากปรับตารางงานใหม่"
@@ -589,11 +643,11 @@
  *                 example: 100.5018
  *               locationId:
  *                 type: integer
- *                 example: 1
+ *                 example: 151
  *                 description: ระบุ location ตรง ๆ (optional ถ้ามี shiftId)
  *               shiftId:
  *                 type: integer
- *                 example: 5
+ *                 example: 151
  *                 description: ดึง location จาก shift (optional ถ้ามี locationId)
  *     responses:
  *       200:
@@ -679,16 +733,17 @@
  *             พร้อม GPS และกะ:
  *               summary: Check-in พร้อม GPS และระบุกะ
  *               value:
- *                 userId: 5
- *                 shiftId: 1
- *                 locationId: 2
+ *                 shiftId: 151
+ *                 locationId: 151
  *                 latitude: 13.7563
  *                 longitude: 100.5018
  *                 address: "อาคาร A ชั้น 3, กรุงเทพฯ"
- *             Check-in อย่างง่าย:
- *               summary: Check-in ไม่มี GPS ไม่มีกะ (walk-in)
+ *             Check-in กะดึก:
+ *               summary: ตัวอย่าง check-in อีกกะของผู้ใช้ที่ล็อกอินอยู่
  *               value:
- *                 userId: 5
+ *                 shiftId: 152
+ *                 latitude: 13.7565
+ *                 longitude: 100.5020
  *     responses:
  *       201:
  *         description: เข้างานสำเร็จ — คืน attendance record พร้อม user, shift, location
@@ -745,15 +800,13 @@
  *             ออกงานปกติ:
  *               summary: Check-out พร้อม GPS
  *               value:
- *                 userId: 5
  *                 latitude: 13.7563
  *                 longitude: 100.5018
  *                 address: "อาคาร A ชั้น 3, กรุงเทพฯ"
  *             ระบุ record:
  *               summary: ระบุ attendanceId ตรง (กรณีมีหลายกะ)
  *               value:
- *                 userId: 5
- *                 attendanceId: 42
+ *                 attendanceId: 151
  *     responses:
  *       200:
  *         description: ออกงานสำเร็จ — คืน attendance record ที่มี checkOut แล้ว
@@ -800,7 +853,7 @@
  *         schema:
  *           type: integer
  *         description: รหัสพนักงาน
- *         example: 5
+ *         example: 151
  *       - in: query
  *         name: startDate
  *         schema:
@@ -862,7 +915,7 @@
  *         schema:
  *           type: integer
  *         description: รหัสพนักงาน
- *         example: 5
+ *         example: 151
  *     responses:
  *       200:
  *         description: ข้อมูลการเข้างานวันนี้ (array ว่าง = ยังไม่ได้ check-in)
@@ -962,20 +1015,14 @@
  *         schema:
  *           type: integer
  *         description: รหัส attendance record ที่ต้องการแก้ไข
- *         example: 42
+ *         example: 151
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - updatedByUserId
  *             properties:
- *               updatedByUserId:
- *                 type: integer
- *                 example: 1
- *                 description: รหัส Admin ที่ทำการแก้ไข (สำหรับ audit trail)
  *               status:
  *                 type: string
  *                 enum: [ON_TIME, LATE, LATE_APPROVED, ABSENT, LEAVE_APPROVED]
@@ -995,6 +1042,10 @@
  *                 format: date-time
  *                 example: "2026-02-22T17:00:00.000Z"
  *                 description: แก้ไขเวลาออกงาน (เช่น พนักงานลืม check-out)
+ *               editReason:
+ *                 type: string
+ *                 example: "แก้เวลาตามหลักฐานจากกล้องวงจรปิด"
+ *                 description: จำเป็นเมื่อมีการแก้ checkIn/checkOut
  *     responses:
  *       200:
  *         description: แก้ไขสำเร็จ พร้อมบันทึก audit log (oldValues/newValues)
@@ -1038,7 +1089,7 @@
  *         schema:
  *           type: integer
  *         description: รหัส attendance record ที่ต้องการลบ
- *         example: 42
+ *         example: 151
  *     requestBody:
  *       required: true
  *       content:
@@ -1050,7 +1101,7 @@
  *             properties:
  *               deletedByUserId:
  *                 type: integer
- *                 example: 1
+ *                 example: 151
  *                 description: รหัส Admin ที่ทำการลบ (สำหรับ audit trail)
  *               deleteReason:
  *                 type: string
@@ -1090,14 +1141,14 @@
  *       properties:
  *         attendanceId:
  *           type: integer
- *           example: 42
+ *           example: 151
  *         userId:
  *           type: integer
- *           example: 5
+ *           example: 151
  *         shiftId:
  *           type: integer
  *           nullable: true
- *           example: 1
+ *           example: 151
  *           description: null = walk-in (ไม่มีกะ)
  *         locationId:
  *           type: integer
@@ -4810,7 +4861,7 @@
  *         userId:
  *           type: integer
  *           nullable: true
- *           example: 5
+ *           example: 151
  *           description: ผู้กระทำ — null ถ้า system action
  *         action:
  *           type: string
@@ -4821,7 +4872,7 @@
  *           example: "attendance"
  *         targetId:
  *           type: integer
- *           example: 42
+ *           example: 151
  *           description: primary key ของ record ที่ถูกกระทำ
  *         oldValues:
  *           type: object

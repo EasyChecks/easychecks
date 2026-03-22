@@ -89,6 +89,7 @@ export const createShift = async (req: Request, res: Response) => {
     //     locationId?       → ผูก GPS radius กับกะนี้
     const {
       userId,
+      userIds,
       replaceExisting,
       name,
       shiftType,
@@ -101,6 +102,7 @@ export const createShift = async (req: Request, res: Response) => {
       locationId,
     } = req.body as {
       userId?: number;
+      userIds?: number[];
       replaceExisting?: boolean;
       name?: string;
       shiftType?: string;
@@ -114,11 +116,52 @@ export const createShift = async (req: Request, res: Response) => {
     };
 
     // [4] Validate required fields — ส่ง 400 ทันทีพร้อมข้อความบอก field ที่ขาด
-    if (userId === undefined) return sendError(res, 'กรุณาระบุ userId (พนักงานที่รับกะ)', 400);
     if (!name) return sendError(res, 'กรุณาระบุชื่อกะ (name)', 400);
     if (!shiftType) return sendError(res, 'กรุณาระบุ shiftType (REGULAR, SPECIFIC_DAY, CUSTOM)', 400);
     if (!startTime) return sendError(res, 'กรุณาระบุเวลาเริ่มงาน (startTime HH:MM)', 400);
     if (!endTime) return sendError(res, 'กรุณาระบุเวลาเลิกงาน (endTime HH:MM)', 400);
+
+    const normalizedUserIds = Array.from(
+      new Set(
+        (Array.isArray(userIds) ? userIds : [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    );
+    const hasSingleUserId = userId !== undefined && Number.isInteger(Number(userId)) && Number(userId) > 0;
+
+    if (!hasSingleUserId && normalizedUserIds.length === 0) {
+      return sendError(res, 'กรุณาระบุ userId หรือ userIds อย่างน้อย 1 คน', 400);
+    }
+
+    const targetUserIds = normalizedUserIds.length > 0
+      ? normalizedUserIds
+      : [Number(userId)];
+
+    if (targetUserIds.length > 1) {
+      const result = await shiftService.createBulkShift({
+        name,
+        shiftType: shiftType as Parameters<typeof shiftService.createBulkShift>[0]['shiftType'],
+        startTime,
+        endTime,
+        gracePeriodMinutes: gracePeriodMinutes !== undefined ? Number(gracePeriodMinutes) : undefined,
+        lateThresholdMinutes: lateThresholdMinutes !== undefined ? Number(lateThresholdMinutes) : undefined,
+        specificDays: specificDays as Parameters<typeof shiftService.createBulkShift>[0]['specificDays'],
+        customDate,
+        locationId: locationId === null ? null : (locationId !== undefined ? Number(locationId) : undefined),
+        userIds: targetUserIds,
+        replaceExisting: replaceExisting === true,
+        createdByUserId,
+        creatorRole,
+        creatorBranchId,
+      });
+
+      result.shifts.forEach((shift) => {
+        broadcastShiftUpdate('CREATE', shift);
+      });
+
+      return sendSuccess(res, result, `สร้างกะเรียบร้อยแล้ว ${result.createdCount} รายการ`, 201);
+    }
 
     // [5] สร้างกะผ่าน service — service จะตรวจสิทธิ์ (Admin ข้ามสาขาไม่ได้)
     //     แปลง Number() ตรงนี้เพราะ body JSON อาจส่งตัวเลขมาเป็น string
@@ -131,8 +174,8 @@ export const createShift = async (req: Request, res: Response) => {
       lateThresholdMinutes: lateThresholdMinutes !== undefined ? Number(lateThresholdMinutes) : undefined,
       specificDays: specificDays as Parameters<typeof shiftService.createShift>[0]['specificDays'],
       customDate,
-      locationId: locationId !== undefined ? Number(locationId) : undefined,
-      userId: Number(userId),
+      locationId: locationId === null ? null : (locationId !== undefined ? Number(locationId) : undefined),
+      userId: targetUserIds[0] as number,
       replaceExisting: replaceExisting === true,
       createdByUserId,   // ผู้สร้าง (จาก token)
       creatorRole,       // บทบาท (จาก token) — service ใช้ตรวจสิทธิ์ครอสสาขา
@@ -145,7 +188,100 @@ export const createShift = async (req: Request, res: Response) => {
     // [7] Response 201 Created พร้อม shift record ที่เพิ่ง INSERT
     sendSuccess(res, shift, 'สร้างกะเรียบร้อยแล้ว', 201);
   } catch (error: unknown) {
+    if (error instanceof shiftService.BulkShiftCreateError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code,
+        details: error.details,
+      });
+    }
+
     const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้างกะ';
+    sendError(res, msg, deriveHttpStatus(msg));
+  }
+};
+
+/**
+ * ➕➕ ตัวช่วยสร้างกะแบบกลุ่ม (เรียกภายใน)
+ */
+export const createBulkShift = async (req: Request, res: Response) => {
+  try {
+    const createdByUserId = req.user?.userId;
+    const creatorRole = req.user?.role;
+    const creatorBranchId = req.user?.branchId;
+
+    if (createdByUserId === undefined || creatorRole === undefined) {
+      return sendError(res, 'ไม่พบข้อมูลผู้ใช้ กรุณา login ใหม่', 401);
+    }
+
+    const {
+      userIds,
+      replaceExisting,
+      name,
+      shiftType,
+      startTime,
+      endTime,
+      gracePeriodMinutes,
+      lateThresholdMinutes,
+      specificDays,
+      customDate,
+      locationId,
+    } = req.body as {
+      userIds?: number[];
+      replaceExisting?: boolean;
+      name?: string;
+      shiftType?: string;
+      startTime?: string;
+      endTime?: string;
+      gracePeriodMinutes?: number;
+      lateThresholdMinutes?: number;
+      specificDays?: string[];
+      customDate?: string;
+      locationId?: number | null;
+    };
+
+    if (!name) return sendError(res, 'กรุณาระบุชื่อกะ (name)', 400);
+    if (!shiftType) return sendError(res, 'กรุณาระบุ shiftType (REGULAR, SPECIFIC_DAY, CUSTOM)', 400);
+    if (!startTime) return sendError(res, 'กรุณาระบุเวลาเริ่มงาน (startTime HH:MM)', 400);
+    if (!endTime) return sendError(res, 'กรุณาระบุเวลาเลิกงาน (endTime HH:MM)', 400);
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return sendError(res, 'กรุณาระบุ userIds อย่างน้อย 1 คน', 400);
+    }
+
+    const result = await shiftService.createBulkShift({
+      name,
+      shiftType: shiftType as Parameters<typeof shiftService.createBulkShift>[0]['shiftType'],
+      startTime,
+      endTime,
+      gracePeriodMinutes: gracePeriodMinutes !== undefined ? Number(gracePeriodMinutes) : undefined,
+      lateThresholdMinutes: lateThresholdMinutes !== undefined ? Number(lateThresholdMinutes) : undefined,
+      specificDays: specificDays as Parameters<typeof shiftService.createBulkShift>[0]['specificDays'],
+      customDate,
+      locationId: locationId === null ? null : (locationId !== undefined ? Number(locationId) : undefined),
+      userIds: userIds.map((id) => Number(id)),
+      replaceExisting: replaceExisting === true,
+      createdByUserId,
+      creatorRole,
+      creatorBranchId,
+    });
+
+    result.shifts.forEach((shift) => {
+      broadcastShiftUpdate('CREATE', shift);
+    });
+
+    sendSuccess(res, result, `สร้างกะแบบกลุ่มสำเร็จ ${result.createdCount} รายการ`, 201);
+  } catch (error: unknown) {
+    if (error instanceof shiftService.BulkShiftCreateError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: error.message,
+        code: error.code,
+        details: error.details,
+      });
+    }
+
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้างกะแบบกลุ่ม';
     sendError(res, msg, deriveHttpStatus(msg));
   }
 };
@@ -259,7 +395,19 @@ export const updateShift = async (req: Request, res: Response) => {
       updatedByUserId,
       updaterRole,
       updaterBranchId,
-      { name, startTime, endTime, gracePeriodMinutes, lateThresholdMinutes, specificDays, customDate, locationId, userId, isActive, replaceExisting },
+      {
+        name,
+        startTime,
+        endTime,
+        gracePeriodMinutes,
+        lateThresholdMinutes,
+        specificDays,
+        customDate,
+        locationId: locationId === null ? null : locationId,
+        userId,
+        isActive,
+        replaceExisting,
+      },
     );
 
     broadcastShiftUpdate('UPDATE', updatedShift);
@@ -306,6 +454,7 @@ export const deleteShift = async (req: Request, res: Response) => {
 
 export default {
   createShift,
+  createBulkShift,
   getShifts,
   getActiveShiftsToday,
   getShiftById,

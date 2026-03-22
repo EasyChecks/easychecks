@@ -261,8 +261,6 @@ export async function getBranchesMap(user: User) {
   return branches.map((branch) => ({
     branchId: branch.branchId,
     name: branch.name,
-    latitude: branch.latitude,
-    longitude: branch.longitude,
     totalEmployees: branch._count.users,
     address: branch.address || '',
   }));
@@ -330,7 +328,7 @@ export async function getLocationEvents(user: User, branchId?: number, date?: st
         minute: '2-digit',
         hour12: false,
       }),
-      expectedLocation: att.location?.name || 'Unknown',
+      expectedLocation: att.location?.locationName || 'Unknown',
       actualDistance: Math.round(att.checkInDistance || 0),
       allowedRadius: att.location?.radius || 0,
       timestamp: att.checkIn,

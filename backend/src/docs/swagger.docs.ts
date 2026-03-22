@@ -93,7 +93,7 @@
  *       |----------|----------|
  *       | attendance-summary | Donut Chart สรุปสถานะวันนี้ |
  *       | employees-today | ตารางพนักงาน + สถานะ check-in |
- *       | branches-map | Map pins ของแต่ละสาขา |
+ *       | branches-map | ข้อมูลสาขา + จำนวนพนักงาน |
  *       | location-events | Alert พนักงาน check-in นอกพื้นที่ |
  *   - name: Events
  *     description: |
@@ -2558,14 +2558,13 @@
  * @swagger
  * /api/dashboard/branches-map:
  *   get:
- *     summary: ข้อมูลสาขาสำหรับ Map Pins
+ *     summary: ข้อมูลสาขาสำหรับ Dashboard
  *     description: |
- *       ดึงข้อมูลสาขาพร้อม lat/lng สำหรับแสดง pin บนแผนที่
- *       แต่ละ pin แสดงชื่อสาขา, จำนวนพนักงาน, ที่อยู่
+ *       ดึงข้อมูลสาขาพร้อมจำนวนพนักงานและที่อยู่
  *
  *       **Role-based:**
- *       - ADMIN → เห็นเฉพาะสาขาตัวเอง (1 pin)
- *       - SUPERADMIN → เห็นทุกสาขา (หลาย pins)
+ *       - ADMIN → เห็นเฉพาะสาขาตัวเอง (1 record)
+ *       - SUPERADMIN → เห็นทุกสาขา
  *     tags:
  *       - Dashboard
  *     security:
@@ -2592,12 +2591,6 @@
  *                       name:
  *                         type: string
  *                         example: "สำนักงานใหญ่"
- *                       latitude:
- *                         type: number
- *                         example: 13.7563
- *                       longitude:
- *                         type: number
- *                         example: 100.5018
  *                       totalEmployees:
  *                         type: integer
  *                         example: 25
@@ -3059,7 +3052,7 @@
  *       - `upcomingEvents` — startDateTime > now
  *       - `ongoingEvents` — startDateTime <= now <= endDateTime
  *       - `pastEvents` — endDateTime < now
- *       - `deletedEvents` — deletedAt != null
+ *       - `deletedEvents` — deleteReason != null
  *       - `byParticipantType` — groupBy participantType (เฉพาะไม่ถูกลบ)
  *
  *       ใช้แสดง Stats Cards + Pie Chart บนหน้า Event Management
@@ -3140,7 +3133,6 @@
  *       ดึงข้อมูลกิจกรรมแบบละเอียด รวมถึง:
  *       - สถานที่จัดกิจกรรม (location) — full object
  *       - ผู้สร้าง (creator) พร้อม email, role
- *       - ผู้แก้ไข (updatedBy), ผู้ลบ (deletedBy)
  *       - รายชื่อผู้เข้าร่วม (event_participants) พร้อม user/branch detail
  *       - จำนวน attendance (_count.attendance)
  *     tags:
@@ -3300,7 +3292,7 @@
  *   delete:
  *     summary: ลบกิจกรรม — Soft Delete (Admin/SuperAdmin only)
  *     description: |
- *       Soft delete กิจกรรม (set deletedAt + isActive=false)
+ *       Soft delete กิจกรรม (set deleteReason + isActive=false)
  *
  *       **ข้อจำกัด:**
  *       - ไม่สามารถลบกิจกรรมที่กำลังดำเนินการอยู่ (startDateTime <= now <= endDateTime)
@@ -3370,9 +3362,9 @@
  *     summary: กู้คืนกิจกรรมที่ถูกลบ (Admin/SuperAdmin only)
  *     description: |
  *       กู้คืนกิจกรรมที่ถูก soft delete กลับมา
- *       (set deletedAt=null, deletedByUserId=null, deleteReason=null)
+ *       (set deleteReason=null, isActive=true)
  *
- *       **หมายเหตุ:** isActive จะยังเป็น false — ต้อง PUT แยกถ้าต้องการเปิดใช้งาน
+ *       **หมายเหตุ:** isActive จะถูก set เป็น true อัตโนมัติ
  *     tags:
  *       - Events
  *     security:
@@ -3781,79 +3773,6 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- *       401:
- *         description: ไม่ได้ login
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-
-/**
- * @swagger
- * /api/download/history:
- *   get:
- *     summary: ดูประวัติการดาวน์โหลด (Audit Trail)
- *     description: |
- *       ดึงประวัติการดาวน์โหลดรายงาน — ใครดาวน์โหลดอะไร เมื่อไร
- *
- *       **Role-based:**
- *       - ADMIN → เห็นเฉพาะ history ของตัวเอง
- *       - SUPERADMIN → เห็นทั้งองค์กร
- *
- *       **Pagination:**
- *       - `limit` — จำนวน record ต่อหน้า (default: 10)
- *       - `offset` — ข้าม records (page 2 ใช้ offset = limit)
- *     tags:
- *       - Download Report
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
- *         description: จำนวน record ต่อหน้า
- *       - in: query
- *         name: offset
- *         schema:
- *           type: integer
- *           default: 0
- *         description: จำนวน record ที่ข้าม (pagination)
- *     responses:
- *       200:
- *         description: ดึงประวัติดาวน์โหลดสำเร็จ
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/DownloadLog'
- *                 pagination:
- *                   type: object
- *                   properties:
- *                     limit:
- *                       type: integer
- *                       example: 10
- *                     offset:
- *                       type: integer
- *                       example: 0
- *                     total:
- *                       type: integer
- *                       example: 5
  *       401:
  *         description: ไม่ได้ login
  *         content:
@@ -4364,22 +4283,6 @@
  *         createdByUserId:
  *           type: integer
  *           example: 1
- *         createdAt:
- *           type: string
- *           format: date-time
- *         updatedByUserId:
- *           type: integer
- *           nullable: true
- *         updatedAt:
- *           type: string
- *           format: date-time
- *         deletedAt:
- *           type: string
- *           format: date-time
- *           nullable: true
- *         deletedByUserId:
- *           type: integer
- *           nullable: true
  *         deleteReason:
  *           type: string
  *           nullable: true
@@ -4403,16 +4306,6 @@
  *               description: รัศมีที่อนุญาต (เมตร)
  *         creator:
  *           type: object
- *           properties:
- *             userId:
- *               type: integer
- *             firstName:
- *               type: string
- *             lastName:
- *               type: string
- *         updatedBy:
- *           type: object
- *           nullable: true
  *           properties:
  *             userId:
  *               type: integer
@@ -4455,7 +4348,7 @@
  *       type: object
  *       description: |
  *         กิจกรรมแบบละเอียด (GET /api/events/:id)
- *         เพิ่ม event_participants แบบเต็ม, creator พร้อม email/role, deletedBy
+ *         เพิ่ม event_participants แบบเต็ม, creator พร้อม email/role
  *       allOf:
  *         - $ref: '#/components/schemas/Event'
  *         - type: object
@@ -4474,16 +4367,6 @@
  *                 role:
  *                   type: string
  *                   enum: [USER, MANAGER, ADMIN, SUPERADMIN]
- *             deletedBy:
- *               type: object
- *               nullable: true
- *               properties:
- *                 userId:
- *                   type: integer
- *                 firstName:
- *                   type: string
- *                 lastName:
- *                   type: string
  *             event_participants:
  *               type: array
  *               items:

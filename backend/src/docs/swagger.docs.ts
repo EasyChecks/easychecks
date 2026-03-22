@@ -1740,26 +1740,12 @@
  *           schema:
  *             type: object
  *             required:
- *               - createdByUserId
- *               - creatorRole
  *               - csvData
  *             properties:
- *               createdByUserId:
- *                 type: integer
- *                 example: 1
- *                 description: รหัส Admin ที่ทำการ import
- *               creatorRole:
- *                 type: string
- *                 enum: [ADMIN, SUPERADMIN]
- *                 example: "ADMIN"
- *               creatorBranchId:
- *                 type: integer
- *                 example: 1
- *                 description: สาขาของ Admin (จำเป็นถ้า creatorRole=ADMIN)
  *               csvData:
  *                 type: string
- *                 description: ข้อมูล CSV เป็น string (รวม header row)
- *                 example: "title,firstName,...\nMR,สมชาย,..."
+ *                 description: ข้อมูล CSV เป็น string (รวม header row) — ผู้ใช้และ role ขึ้นอยู่กับ JWT token ที่ส่งมา
+ *                 example: "title,firstName,lastName,nickname,gender,nationalId,emergent_tel,emergent_first_name,emergent_last_name,emergent_relation,phone,email,password,birthDate,branchId,role\nMR,สมชาย,ใจดี,ชาย,MALE,1234567890123,0812345678,สมหญิง,ใจดี,ภรรยา,0898765432,somchai@example.com,pass123,1990-01-15,1,USER"
  *     responses:
  *       201:
  *         description: นำเข้าเสร็จสิ้น — แสดงจำนวน success/failed

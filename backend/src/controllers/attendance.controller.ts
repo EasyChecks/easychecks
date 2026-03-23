@@ -3,6 +3,8 @@ import type { AttendanceStatus } from '@prisma/client';
 import * as attendanceService from '../services/attendance.service.js';
 import { broadcastAttendanceUpdate } from '../websocket/attendance.websocket.js';
 import { sendSuccess, sendError } from '../utils/response.js';
+import { prisma } from '../lib/prisma.js';
+import { getDistance } from 'geolib';
 
 /** req.query の値は string | string[] になりうるので string に正規化する */
 function qs(v: unknown): string | undefined {
@@ -10,6 +12,110 @@ function qs(v: unknown): string | undefined {
   if (Array.isArray(v) && typeof v[0] === 'string') return v[0] as string;
   return undefined;
 }
+
+/**
+ * แปลง error message จาก service → HTTP status code ที่เหมาะสม
+ *
+ * ทำไมต้องมีฟังก์ชันนี้?
+ * Service layer โยน Error เป็นภาษาไทยพร้อม message อธิบายปัญหา
+ * แต่ไม่ได้ระบุ HTTP status → Controller ต้อง map เอง
+ * ถ้าไม่ map จะกลายเป็น 500 ทุกกรณี ซึ่งทำให้ frontend แยกไม่ออก
+ * ว่าเป็น "ข้อมูลไม่ถูกต้อง" หรือ "server พัง"
+ */
+function deriveHttpStatus(message: string): number {
+  // 409 Conflict — ข้อมูลซ้ำ เช่น check-in ซ้ำ, กะซ้ำ
+  if (message.includes('ไปแล้ว')) return 409;
+  // 404 Not Found — ไม่พบ record ที่ต้องการ
+  if (message.includes('ไม่พบ')) return 404;
+  // 403 Forbidden — ไม่มีสิทธิ์ เช่น กะไม่ใช่ของตัวเอง, ถูกปิด
+  if (message.includes('ไม่ใช่ของคุณ') || message.includes('ปิดใช้งาน') || message.includes('ใบลาอนุมัติ') || message.includes('เฉพาะ admin')) return 403;
+  // 422 Unprocessable — GPS นอกพื้นที่, ข้อมูลไม่ตรงเงื่อนไข
+  if (message.includes('นอกพื้นที่') || message.includes('GPS') || message.includes('พิกัด')) return 422;
+  // 400 Bad Request — ข้อมูลขาด/ไม่ถูกต้อง (default สำหรับ known error)
+  if (message.includes('กรุณา') || message.includes('ต้อง')) return 400;
+  // 500 Internal Server Error — ไม่รู้จัก error → น่าจะ bug จริง
+  return 500;
+}
+
+/**
+ * POST /api/attendance/check-gps
+ * ตรวจสอบว่าพิกัด GPS ของพนักงานอยู่ในรัศมีกะงานหรือไม่
+ *
+ * ทำไมอยู่ใน attendance ไม่ใช่ location?
+ * — เป้าหมายคือตรวจสอบก่อนเช็คอิน ซึ่งเป็น flow ของ attendance โดยตรง
+ *
+ * Body: { latitude, longitude, locationId?, shiftId? }
+ */
+export const checkGps = async (req: Request, res: Response) => {
+  try {
+    const { latitude, longitude, locationId, shiftId } = req.body as {
+      latitude?: number;
+      longitude?: number;
+      locationId?: number;
+      shiftId?: number;
+    };
+
+    // ต้องมีพิกัดจริง ไม่ใช่ (0,0)
+    if (latitude === undefined || longitude === undefined) {
+      return sendError(res, 'กรุณาระบุ latitude และ longitude', 400);
+    }
+    if (latitude === 0 && longitude === 0) {
+      return sendError(res, 'พิกัด GPS ไม่ถูกต้อง (0,0)', 422);
+    }
+
+    // หา location จาก locationId ตรง หรือจาก shift.locationId
+    // SQL: SELECT * FROM "Location" WHERE "locationId" = $1
+    //      SELECT l.* FROM "Shift" s JOIN "Location" l ON ... WHERE s."shiftId" = $2
+    let location: { locationId: number; locationName: string; latitude: number; longitude: number; radius: number; address: string | null } | null = null;
+
+    if (locationId !== undefined) {
+      location = await prisma.location.findUnique({ where: { locationId: Number(locationId) } });
+    } else if (shiftId !== undefined) {
+      const shift = await prisma.shift.findUnique({
+        where: { shiftId: Number(shiftId) },
+        include: { location: true },
+      });
+      if (shift?.location) location = shift.location;
+    }
+
+    // ไม่มี location → ไม่มีข้อจำกัดพื้นที่
+    if (!location) {
+      return sendSuccess(res, {
+        withinRadius: true,
+        distance: null,
+        location: null,
+        radius: null,
+        message: 'ไม่มีสถานที่ที่กำหนด — อนุญาตให้เช็คอินได้ทุกที่',
+      }, 'ตรวจสอบพิกัดสำเร็จ');
+    }
+
+    // คำนวณระยะทาง (geolib, เมตร)
+    const distance = getDistance(
+      { latitude, longitude },
+      { latitude: location.latitude, longitude: location.longitude },
+    );
+    const withinRadius = distance <= location.radius;
+
+    sendSuccess(res, {
+      withinRadius,
+      distance,
+      radius: location.radius,
+      location: {
+        locationId: location.locationId,
+        locationName: location.locationName,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        address: location.address,
+      },
+      message: withinRadius
+        ? `คุณอยู่ในพื้นที่อนุญาต (ห่าง ${distance} ม.)`
+        : `คุณอยู่นอกพื้นที่ (ห่าง ${distance} ม., อนุญาตสูงสุด ${location.radius} ม.)`,
+    }, 'ตรวจสอบพิกัดสำเร็จ');
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการตรวจสอบพิกัด';
+    sendError(res, msg, deriveHttpStatus(msg));
+  }
+};
 
 /**
  * 📋 Attendance Controller — API การเข้า-ออกงาน
@@ -101,8 +207,10 @@ export const checkIn = async (req: Request, res: Response) => {
     sendSuccess(res, attendance, 'เข้างานเรียบร้อยแล้ว', 201);
   } catch (error: unknown) {
     // [7] Service โยน Error พร้อม message ภาษาไทย (double check-in, นอก GPS ฯลฯ)
-    //     catch ตรงนี้แปลงให้เป็น HTTP 500 พร้อม message
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการเข้างาน');
+    //     ใช้ deriveHttpStatus แปลง message → status code ที่เหมาะสม
+    //     เพื่อให้ frontend แยกได้ว่าเป็น user error (4xx) หรือ server error (5xx)
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการเข้างาน';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -150,7 +258,9 @@ export const checkOut = async (req: Request, res: Response) => {
     sendSuccess(res, attendance, 'ออกงานเรียบร้อยแล้ว');
   } catch (error: unknown) {
     // [6] service โยน Error ถ้า: ไม่มี check-in ที่ค้างอยู่, GPS นอก radius
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการออกงาน');
+    //     ใช้ deriveHttpStatus เพื่อ map status code จาก error message อัตโนมัติ
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการออกงาน';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -180,7 +290,8 @@ export const getHistory = async (req: Request, res: Response) => {
     const attendances = await attendanceService.getAttendanceHistory(userId, filters);
     sendSuccess(res, attendances);
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงประวัติการเข้างาน');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงประวัติการเข้างาน';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -205,7 +316,8 @@ export const getAllAttendances = async (req: Request, res: Response) => {
     const attendances = await attendanceService.getAllAttendances(filters);
     sendSuccess(res, attendances);
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลการเข้างาน');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลการเข้างาน';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -221,7 +333,8 @@ export const getTodayAttendance = async (req: Request, res: Response) => {
     const attendance = await attendanceService.getTodayAttendance(userId);
     sendSuccess(res, attendance);
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลการเข้างานวันนี้');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลการเข้างานวันนี้';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -238,13 +351,25 @@ export const updateAttendance = async (req: Request, res: Response) => {
 
     // updatedByUserId ดึงจาก req.user แทนการรับจาก body เพื่อความปลอดภัย
     const updatedByUserId = req.user?.userId;
+    const updaterRole = req.user?.role;
 
     const { status, note, checkIn, checkOut } = req.body as {
       status?: string;
       note?: string;
       checkIn?: string;
       checkOut?: string;
+      editReason?: string;
     };
+
+    const editReason = (req.body as { editReason?: string }).editReason;
+
+    if (note !== undefined && updaterRole !== 'ADMIN' && updaterRole !== 'SUPERADMIN') {
+      return sendError(res, 'สามารถแก้ note ได้เฉพาะ admin/superadmin เท่านั้น', 403);
+    }
+
+    if ((checkIn !== undefined || checkOut !== undefined) && (!editReason || editReason.trim().length === 0)) {
+      return sendError(res, 'การแก้เวลาเข้างาน/ออกงานต้องระบุเหตุผล (editReason)', 400);
+    }
 
     type UpdateData = Parameters<typeof attendanceService.updateAttendance>[1];
     const data: UpdateData = {};
@@ -252,13 +377,15 @@ export const updateAttendance = async (req: Request, res: Response) => {
     if (note !== undefined) data.note = note;
     if (checkIn !== undefined) data.checkIn = new Date(checkIn);
     if (checkOut !== undefined) data.checkOut = new Date(checkOut);
+    if (editReason !== undefined) data.editReason = editReason;
 
     const updatedAtt = await attendanceService.updateAttendance(attendanceId, data, updatedByUserId);
 
     broadcastAttendanceUpdate('UPDATE', updatedAtt);
     sendSuccess(res, updatedAtt, 'อัปเดตการเข้างานเรียบร้อยแล้ว');
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอัปเดตการเข้างาน');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอัปเดตการเข้างาน';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 
@@ -285,7 +412,8 @@ export const deleteAttendance = async (req: Request, res: Response) => {
     broadcastAttendanceUpdate('DELETE', { attendanceId });
     sendSuccess(res, null, 'ลบการเข้างานเรียบร้อยแล้ว (Soft Delete)');
   } catch (error: unknown) {
-    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบการเข้างาน');
+    const msg = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบการเข้างาน';
+    sendError(res, msg, deriveHttpStatus(msg));
   }
 };
 

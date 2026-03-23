@@ -176,6 +176,7 @@ export const AuditAction = {
   // เป็นข้อมูลหลักของระบบ ต้องมี audit ทุก state change
   CHECK_IN: 'CHECK_IN',
   CHECK_OUT: 'CHECK_OUT',
+  AUTO_CHECK_OUT: 'AUTO_CHECK_OUT',
   UPDATE_ATTENDANCE: 'UPDATE_ATTENDANCE', // Admin แก้ record ที่ผิดพลาด
   DELETE_ATTENDANCE: 'DELETE_ATTENDANCE', // Soft delete — ยังคงข้อมูลไว้
 
@@ -207,6 +208,8 @@ export const AuditAction = {
   UPDATE_EVENT: 'UPDATE_EVENT',
   DELETE_EVENT: 'DELETE_EVENT',
   RESTORE_EVENT: 'RESTORE_EVENT', // กู้คืน soft-deleted event
+  EVENT_CHECK_IN: 'EVENT_CHECK_IN',   // พนักงาน check-in เข้าร่วมกิจกรรม
+  EVENT_CHECK_OUT: 'EVENT_CHECK_OUT', // พนักงาน check-out ออกจากกิจกรรม
 
   // ─── Late Request (คำขอมาสาย) ──────────────────────────────────────
   CREATE_LATE_REQUEST: 'CREATE_LATE_REQUEST',

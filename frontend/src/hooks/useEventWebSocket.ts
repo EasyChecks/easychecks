@@ -64,6 +64,9 @@ export function useEventWebSocket(): UseEventWebSocketReturn {
         .replace(/^http/, 'ws')
         .replace('/api', '');
 
+    // ข้าม WS connection ถ้า backend เป็น remote (Render ฯลฯ ไม่รองรับ WS)
+    if (wsBase.includes('onrender.com') || wsBase.includes('vercel.app')) return;
+
     const url = `${wsBase}/ws/events?userId=${user.id}&employeeId=${encodeURIComponent(
       user.employeeId
     )}&role=${user.role.toUpperCase()}`;

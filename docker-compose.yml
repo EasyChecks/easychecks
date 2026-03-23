@@ -19,6 +19,9 @@ services:
       - /app/node_modules
     networks:
       - easycheck-network
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     command: npm run dev
 
   # Frontend with Hot Reload  
@@ -38,17 +41,24 @@ services:
       NODE_ENV: development
       # when running via docker-compose use internal network name
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      # Required on Windows: Docker Desktop does not forward inotify events
+      # into the Linux container — polling is needed for HMR to detect changes.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "500"
     volumes:
       # Mount source code for hot reload
       - ./frontend:/app
-      # Use anonymous volume to prevent node_modules from showing red in VS Code
+      # Use anonymous volume to prevent node_modules from being overwritten by host
       - /app/node_modules
-      - /app/.next
     depends_on:
       - backend
     networks:
       - easycheck-network
-    command: npm run dev
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    command: npx next dev -H 0.0.0.0 --webpack
 
 networks:
   easycheck-network:

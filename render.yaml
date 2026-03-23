@@ -6,11 +6,13 @@ services:
     region: singapore
     plan: free
     buildCommand: cd backend && npm install && npm run build
-    startCommand: cd backend && npm start
+    startCommand: export DIRECT_URL="${DIRECT_URL:-$(printf '%s' "$DATABASE_URL" | sed -e 's/:6543\//:5432\//g' -e 's/[?&]pgbouncer=true//g')}" && cd backend && npm run migrate:render && npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
+        sync: false  # ตั้งค่าใน Render Dashboard
+      - key: DIRECT_URL
         sync: false  # ตั้งค่าใน Render Dashboard
       - key: PORT
         value: 3000

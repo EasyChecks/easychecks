@@ -1,35 +1,69 @@
 "use client";
 
+import { useState, useEffect } from 'react';
 import { User } from '@/types/user';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
+type FormState = Record<string, string | number | boolean | null>;
+
 interface UserEditModalProps {
   show: boolean;
   editingUser: User;
-  editForm: Record<string, string | number | boolean | null>;
   currentUser: User | null;
   onClose: () => void;
-  onSave: () => void;
-  onChange: (form: Record<string, string | number | boolean | null>) => void;
+  onSave: (form: FormState) => Promise<void>;
 }
 
 export default function UserEditModal({
   show,
   editingUser,
-  editForm,
   currentUser,
   onClose,
   onSave,
-  onChange
 }: UserEditModalProps) {
+  const [form, setForm] = useState<FormState>({});
+  const [saving, setSaving] = useState(false);
+
+  // กำหนดค่าเริ่มต้นเมื่อ editingUser เปลี่ยน
+  useEffect(() => {
+    setForm({
+      name: editingUser.name || '',
+      email: editingUser.email || '',
+      phone: editingUser.phone || '',
+      department: editingUser.department || '',
+      role: editingUser.role || '',
+      birthDate: editingUser.birthDate || '',
+      status: editingUser.status || '',
+      address: editingUser.address || '',
+      position: editingUser.position || '',
+      nationalId: editingUser.nationalId || '',
+      bloodType: editingUser.bloodType || '',
+      password: '',
+      employeeId: editingUser.employeeId || '',
+      emergencyContactName: editingUser.emergencyContact?.name || '',
+      emergencyContactPhone: editingUser.emergencyContact?.phone || '',
+      emergencyContactRelation: editingUser.emergencyContact?.relation || '',
+    });
+  }, [editingUser]);
+
   if (!show) return null;
 
-  const canEditRole = currentUser?.role === 'superadmin' || 
-    (currentUser?.role === 'admin' && editingUser.role !== 'superadmin');
+  const canEditRole = (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'superadmin') ||
+    (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'admin' && 
+     editingUser.role && editingUser.role.toLowerCase() !== 'superadmin');
 
   const handleFieldChange = (field: string, value: string | number | boolean | null) => {
-    onChange({ ...editForm, [field]: value });
+    setForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(form);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -58,40 +92,40 @@ export default function UserEditModal({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <FormField
                 label="ชื่อ-นามสกุล"
-                value={editForm.name || ''}
+                value={form.name || ''}
                 onChange={(value) => handleFieldChange('name', value)}
               />
               <FormField
                 label="อีเมล"
                 type="email"
-                value={editForm.email || ''}
+                value={form.email || ''}
                 onChange={(value) => handleFieldChange('email', value)}
               />
               <FormField
                 label="เบอร์โทร"
-                value={editForm.phone || ''}
+                value={form.phone || ''}
                 onChange={(value) => handleFieldChange('phone', value)}
               />
               <FormField
                 label="รหัสพนักงาน"
-                value={editForm.employeeId || ''}
+                value={form.employeeId || ''}
                 onChange={(value) => handleFieldChange('employeeId', value)}
                 disabled
               />
               <FormField
                 label="แผนก"
-                value={editForm.department || ''}
+                value={form.department || ''}
                 onChange={(value) => handleFieldChange('department', value)}
               />
               <FormField
                 label="ตำแหน่ง"
-                value={editForm.position || ''}
+                value={form.position || ''}
                 onChange={(value) => handleFieldChange('position', value)}
               />
               <div>
                 <label className="block mb-2 text-sm font-semibold text-gray-700">บทบาท</label>
                 <select
-                  value={editForm.role || ''}
+                  value={form.role || ''}
                   onChange={(e) => handleFieldChange('role', e.target.value)}
                   disabled={!canEditRole}
                   className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none disabled:bg-gray-100"
@@ -99,13 +133,15 @@ export default function UserEditModal({
                   <option value="user">User</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
-                  <option value="superadmin">Super Admin</option>
+                  {(currentUser && currentUser.role && currentUser.role.toLowerCase() === 'superadmin') && (
+                    <option value="superadmin">Super Admin</option>
+                  )}
                 </select>
               </div>
               <div>
                 <label className="block mb-2 text-sm font-semibold text-gray-700">สถานะ</label>
                 <select
-                  value={editForm.status || ''}
+                  value={form.status || ''}
                   onChange={(e) => handleFieldChange('status', e.target.value)}
                   className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none"
                 >
@@ -125,30 +161,30 @@ export default function UserEditModal({
               <FormField
                 label="วันเกิด"
                 type="date"
-                value={editForm.birthDate || ''}
+                value={form.birthDate || ''}
                 onChange={(value) => handleFieldChange('birthDate', value)}
               />
               <FormField
                 label="หมู่เลือด"
-                value={editForm.bloodType || ''}
+                value={form.bloodType || ''}
                 onChange={(value) => handleFieldChange('bloodType', value)}
               />
               <FormField
                 label="เลขบัตรประชาชน"
-                value={editForm.nationalId || ''}
+                value={form.nationalId || ''}
                 onChange={(value) => handleFieldChange('nationalId', value)}
               />
               <FormField
                 label="รหัสผ่าน"
                 type="password"
-                value={editForm.password || ''}
+                value={form.password || ''}
                 onChange={(value) => handleFieldChange('password', value)}
               />
             </div>
             <div className="mt-4">
               <FormField
                 label="ที่อยู่"
-                value={editForm.address || ''}
+                value={form.address || ''}
                 onChange={(value) => handleFieldChange('address', value)}
                 textarea
               />
@@ -161,17 +197,17 @@ export default function UserEditModal({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <FormField
                 label="ชื่อ"
-                value={editForm.emergencyContactName || ''}
+                value={form.emergencyContactName || ''}
                 onChange={(value) => handleFieldChange('emergencyContactName', value)}
               />
               <FormField
                 label="เบอร์โทร"
-                value={editForm.emergencyContactPhone || ''}
+                value={form.emergencyContactPhone || ''}
                 onChange={(value) => handleFieldChange('emergencyContactPhone', value)}
               />
               <FormField
                 label="ความสัมพันธ์"
-                value={editForm.emergencyContactRelation || ''}
+                value={form.emergencyContactRelation || ''}
                 onChange={(value) => handleFieldChange('emergencyContactRelation', value)}
               />
             </div>
@@ -179,11 +215,11 @@ export default function UserEditModal({
 
           {/* Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
               ยกเลิก
             </Button>
-            <Button type="button" onClick={onSave} className="bg-orange-600 hover:bg-orange-700">
-              บันทึกการแก้ไข
+            <Button type="button" onClick={handleSave} disabled={saving} className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50">
+              {saving ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}
             </Button>
           </div>
         </div>

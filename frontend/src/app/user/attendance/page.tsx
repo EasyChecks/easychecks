@@ -17,9 +17,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { attendanceService } from '@/services/attendance';
 import { shiftService } from '@/services/shift';
@@ -29,24 +27,43 @@ export default function AttendancePage() {
   // ดึง user ที่ login อยู่ เพื่อเอา id ส่งไปยัง API (backend ต้องการ userId ใน URL)
   const { user } = useAuth();
   const userId = user ? parseInt(user.id) : null;
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // ถ้าเข้ามาโดยไม่มี ?mode= → redirect ไปที่ dashboard ไม่ต้องแสดงหน้านี้เลย
+  useEffect(() => {
+    const m = searchParams.get('mode');
+    if (!m || (m !== 'checkIn' && m !== 'checkOut')) {
+      router.replace('/user/dashboard');
+    }
+  }, [searchParams, router]);
 
   // ── State หลักของ UI ──
-  const [mode, setMode] = useState<'checkIn' | 'checkOut' | null>(null); // โหมดปัจจุบัน
+  const [mode, setMode] = useState<'checkIn' | 'checkOut' | null>(() => {
+    const m = searchParams.get('mode');
+    if (m === 'checkIn' || m === 'checkOut') return m;
+    return null;
+  });
   const [photo, setPhoto] = useState<{ taken: boolean; data: string | null }>({ taken: false, data: null });
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null); // GPS ที่ได้จากเบราว์เซอร์
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [ui, setUi] = useState({ loading: false, showSuccess: false, isCameraActive: false, permissionGranted: false });
-  const [shifts, setShifts] = useState<Shift[]>([]);              // กะที่ใช้ได้วันนี้ (จาก /shifts/today)
-  const [selectedShift, setSelectedShift] = useState<number | null>(null); // กะที่เลือก
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [selectedShift, setSelectedShift] = useState<number | null>(null);
+  const [successResult, setSuccessResult] = useState<{ time: string; status: string } | null>(null);
+  const [countdown, setCountdown] = useState(0); // นับถอยหลังก่อน redirect กลับ dashboard
+  const [messageModal, setMessageModal] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: '',
+  });
   const [todayStatus, setTodayStatus] = useState<{
     hasCheckedIn: boolean;
     hasCheckedOut: boolean;
     attendance?: Attendance;
   }>({ hasCheckedIn: false, hasCheckedOut: false });               // สถานะเข้า-ออกงานวันนี้
-  const [monthlyStats, setMonthlyStats] = useState({
-    total: 0,
-    onTime: 0,
-    late: 0,
-  });                                                               // สถิติรายเดือนสำหรับแสดงด้านล่าง
+
+  const openMessageModal = useCallback((message: string) => {
+    setMessageModal({ open: true, message });
+  }, []);
 
   // ── Refs สำหรับกล้อง ──
   const videoRef = useRef<HTMLVideoElement>(null);  // แสดง live preview จากกล้อง
@@ -56,17 +73,6 @@ export default function AttendancePage() {
   /**
    * โหลดข้อมูลเริ่มต้นเมื่อ userId พร้อม
    * รอ userId ก่อน (ไม่ใช่ [] เดิม) เพราะถ้า userId = null → API จะเรียกไม่ได้
-   */
-  useEffect(() => {
-    if (!userId) return;
-    loadTodayStatus();
-    loadMonthlyStats();
-    loadShifts();
-  }, [userId]);
-
-  /**
-   * loadTodayStatus() — ดึงสถานะเข้า-ออกงานวันนี้
-   * ใช้กำหนดว่าปุ่ม "เข้างาน"/"ออกงาน" ควร active หรือ disabled
    */
   const loadTodayStatus = async () => {
     if (!userId) return;
@@ -78,49 +84,51 @@ export default function AttendancePage() {
     }
   };
 
-  /**
-   * loadMonthlyStats() — คำนวณสถิติเดือนนี้ (วันทำงาน / ตรงเวลา / มาสาย)
-   * ดึงประวัติตั้งแต่ต้นเดือนถึงสิ้นเดือน แล้วนับตาม status
-   */
-  const loadMonthlyStats = async () => {
+  const loadShifts = async () => {
     if (!userId) return;
     try {
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-      
-      const history = await attendanceService.getMyHistory(userId, {
-        startDate: startOfMonth,
-        endDate: endOfMonth,
-      });
-
-      const stats = {
-        total: history.length,
-        onTime: history.filter((a) => a.status === 'ON_TIME').length,
-        late: history.filter((a) => a.status === 'LATE').length,
-      };
-      setMonthlyStats(stats);
-    } catch (error) {
-      console.error('Error loading monthly stats:', error);
-    }
-  };
-
-  /**
-   * loadShifts() — ดึงกะที่ใช้ได้วันนี้จาก /shifts/today
-   * ถ้ามีกะเดียว → เลือกอัตโนมัติ (ไม่แสดง UI เลือกกะ)
-   * ถ้ามีหลายกะ → แสดงปุ่มให้เลือก
-   */
-  const loadShifts = async () => {
-    try {
-      const todayShifts = await shiftService.getToday();
+      const todayShifts = await shiftService.getTodayByUserId(userId);
       setShifts(todayShifts);
-      if (todayShifts.length === 1) {
-        setSelectedShift(todayShifts[0].id); // เลือกอัตโนมัติถ้ามีแค่กะเดียว
+      // auto-select กะแรก (ให้ auto-select เสมอ ไม่ต้องให้ user เลือก ถ้ามีแค่ตัวเดียว)
+      if (todayShifts.length > 0) {
+        const firstShiftId = typeof todayShifts[0].id === 'string' 
+          ? parseInt(todayShifts[0].id, 10) 
+          : todayShifts[0].id;
+        setSelectedShift(firstShiftId);
       }
     } catch (error) {
       console.error('Error loading shifts:', error);
     }
   };
+
+  useEffect(() => {
+    if (!userId) return;
+    loadTodayStatus();
+    loadShifts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  // ตรวจสอบสถานะ: ถ้า mode=checkOut แต่ยังไม่ได้ checkIn → แก้เป็น checkIn อัตโนมัติ
+  // ถ้า mode=checkIn แต่ checkIn แล้ว → แก้เป็น checkOut อัตโนมัติ
+  useEffect(() => {
+    if (!mode) return;
+    if (mode === 'checkOut' && !todayStatus.hasCheckedIn) {
+      setMode('checkIn');
+    } else if (mode === 'checkIn' && todayStatus.hasCheckedIn && !todayStatus.hasCheckedOut) {
+      setMode('checkOut');
+    }
+  }, [mode, todayStatus]);
+
+  // เมื่อมาจาก dashboard พร้อม ?mode= ให้เริ่ม GPS ทันที
+  useEffect(() => {
+    if (mode) {
+      navigator.geolocation?.getCurrentPosition(
+        (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {/* GPS ไม่บังคับ */}
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * requestCameraPermission() — ตรวจสอบว่าผู้ใช้อนุญาตกล้องไหม
@@ -132,7 +140,7 @@ export default function AttendancePage() {
       const result = await navigator.permissions.query({ name: 'camera' as PermissionName });
       
       if (result.state === 'denied') {
-        alert('คุณได้ปฏิเสธการเข้าถึงกล้องแล้ว กรุณาเปิดการอนุญาตในการตั้งค่าเบราว์เซอร์');
+        openMessageModal('คุณได้ปฏิเสธการเข้าถึงกล้องแล้ว กรุณาเปิดการอนุญาตในการตั้งค่าเบราว์เซอร์');
         return false;
       }
       
@@ -140,7 +148,7 @@ export default function AttendancePage() {
     } catch {
       return true; // ไม่รองรับ Permissions API → ลองเปิดกล้องตรงๆ
     }
-  }, []);
+  }, [openMessageModal]);
 
   /**
    * startCamera() — เปิดกล้องหน้า (facingMode: 'user') แสดงใน <video>
@@ -164,13 +172,13 @@ export default function AttendancePage() {
       console.error('Camera error:', error);
       const err = error as { name?: string };
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        alert('กรุณาอนุญาตการเข้าถึงกล้องเพื่อบันทึกเวลาเข้างาน');
+        openMessageModal('กรุณาอนุญาตการเข้าถึงกล้องเพื่อบันทึกเวลาเข้างาน');
       } else {
-        alert('ไม่สามารถเปิดกล้องได้ กรุณาลองอีกครั้ง');
+        openMessageModal('ไม่สามารถเปิดกล้องได้ กรุณาลองอีกครั้ง');
       }
       setUi(prev => ({ ...prev, isCameraActive: false, loading: false }));
     }
-  }, [requestCameraPermission]);
+  }, [openMessageModal, requestCameraPermission]);
 
   /** stopCamera() — หยุด stream กล้องทั้งหมด (ป้องกัน indicator กล้องค้างบน browser) */
   const stopCamera = useCallback(() => {
@@ -189,10 +197,13 @@ export default function AttendancePage() {
     if (videoRef.current && canvasRef.current) {
       const context = canvasRef.current.getContext('2d');
       if (context) {
-        canvasRef.current.width = videoRef.current.videoWidth;
-        canvasRef.current.height = videoRef.current.videoHeight;
-        context.drawImage(videoRef.current, 0, 0);
-        const data = canvasRef.current.toDataURL('image/jpeg');
+        // ใช้ videoWidth/videoHeight ถ้ามี ไม่งั้น fallback เป็น clientWidth/clientHeight
+        const w = videoRef.current.videoWidth || videoRef.current.clientWidth || 640;
+        const h = videoRef.current.videoHeight || videoRef.current.clientHeight || 480;
+        canvasRef.current.width = w;
+        canvasRef.current.height = h;
+        context.drawImage(videoRef.current, 0, 0, w, h);
+        const data = canvasRef.current.toDataURL('image/jpeg', 0.8); // 0.8 quality เพื่อลดขนาด
         setPhoto({ taken: true, data });
         stopCamera(); // ปิดกล้องหลังถ่ายรูป
       }
@@ -206,59 +217,11 @@ export default function AttendancePage() {
   }, [startCamera]);
 
   /**
-   * getLocation() — ขอพิกัด GPS จากเบราว์เซอร์
-   * พิกัดที่ได้จะแสดงบนหน้าจอ และส่งไปใน checkIn/checkOut request
-   * backend ใช้พิกัดนี้ตรวจสอบว่าอยู่ใน radius ของ location ไหม
-   */
-  const getLocation = useCallback(() => {
-    setUi(prev => ({ ...prev, loading: true }));
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-          setUi(prev => ({ ...prev, loading: false }));
-        },
-        (error) => {
-          console.error('Location error:', error);
-          alert('ไม่สามารถระบุตำแหน่งได้ กรุณาเปิด GPS');
-          setUi(prev => ({ ...prev, loading: false }));
-        }
-      );
-    } else {
-      alert('เบราว์เซอร์ไม่รองรับ GPS');
-      setUi(prev => ({ ...prev, loading: false }));
-    }
-  }, []);
-
-  /**
-   * handleStartCheckIn() — กดปุ่ม "เข้างาน"
-   * เปลี่ยน mode → 'checkIn', เปิดกล้อง + ดึง GPS พร้อมกัน
-   */
-  const handleStartCheckIn = useCallback(() => {
-    setMode('checkIn');
-    getLocation();
-    startCamera();
-  }, [getLocation, startCamera]);
-
-  /**
-   * handleStartCheckOut() — กดปุ่ม "ออกงาน"
-   * เปลี่ยน mode → 'checkOut', เปิดกล้อง + ดึง GPS พร้อมกัน
-   */
-  const handleStartCheckOut = useCallback(() => {
-    setMode('checkOut');
-    getLocation();
-    startCamera();
-  }, [getLocation, startCamera]);
-
-  /**
    * handleSubmit() — กดปุ่ม "ยืนยัน" หลังถ่ายรูปและได้ GPS แล้ว
    *
    * Validation ก่อนส่ง:
    *  - ต้องมีรูป (photo.data)
-   *  - ต้องมีพิกัด GPS (location)
+   *  - ต้องมีพิกัด GPS จริง ไม่ใช่ (0,0) หรือ null
    *  - ต้องเลือกกะ (selectedShift)
    *
    * ส่ง:
@@ -266,403 +229,326 @@ export default function AttendancePage() {
    *  - checkOut → attendanceService.checkOut({ shiftId, photo, latitude, longitude })
    *
    * หลังสำเร็จ:
-   *  - แสดง popup "บันทึกสำเร็จ" 2 วินาที
-   *  - reload สถานะวันนี้ + สถิติเดือนนี้
-   *  - reset mode กลับหน้าหลัก
+   *  - แสดง popup "บันทึกสำเร็จ" พร้อมนับถอยหลัง 5 วินาที → redirect กลับ dashboard
+   *  - ป้องกัน double-punch โดยให้ user กลับ dashboard ทันที
    */
   const handleSubmit = useCallback(async () => {
-    if (!photo.data || !location) {
-      alert('กรุณาถ่ายรูปและระบุตำแหน่ง');
+    if (!photo.data) {
+      openMessageModal('กรุณาถ่ายรูปก่อนยืนยัน');
       return;
     }
-
-    if (!selectedShift) {
-      alert('กรุณาเลือกกะทำงาน');
+    // ─ GPS validation: ต้องมีพิกัดจริง ไม่ใช่ (0,0) ─
+    if (!location || (location.lat === 0 && location.lng === 0)) {
+      openMessageModal('ไม่สามารถรับพิกัด GPS ได้ กรุณาเปิด GPS แล้วลองใหม่');
+      return;
+    }
+    if (shifts.length > 1 && !selectedShift) {
+      openMessageModal('กรุณาเลือกกะทำงาน');
       return;
     }
 
     setUi(prev => ({ ...prev, loading: true }));
-    
     try {
+      let result;
       if (mode === 'checkIn') {
-        await attendanceService.checkIn({
-          shiftId: selectedShift,
+        result = await attendanceService.checkIn({
+          shiftId: selectedShift ?? undefined,
           photo: photo.data,
           latitude: location.lat,
           longitude: location.lng,
         });
-      } else if (mode === 'checkOut') {
-        await attendanceService.checkOut({
-          shiftId: selectedShift,
+      } else {
+        result = await attendanceService.checkOut({
+          shiftId: selectedShift ?? undefined,
           photo: photo.data,
           latitude: location.lat,
           longitude: location.lng,
         });
       }
 
-      // แสดง success popup
-      setUi({ loading: false, showSuccess: true, isCameraActive: false, permissionGranted: false });
-      
-      // reload ข้อมูลเพื่ออัปเดต UI
-      await loadTodayStatus();
-      await loadMonthlyStats();
+      const timeStr = mode === 'checkIn'
+        ? (result?.checkIn ? new Date(result.checkIn).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '')
+        : (result?.checkOut ? new Date(result.checkOut).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '');
+      const statusMap: Record<string, string> = {
+        ON_TIME: 'ตรงเวลา',
+        LATE: 'มาสาย',
+        EARLY_LEAVE: 'ออกก่อนเวลา',
+        ABSENT: 'ขาดงาน',
+      };
+      setSuccessResult({
+        time: timeStr,
+        status: result?.status ? (statusMap[result.status] ?? result.status) : '',
+      });
 
-      // ซ่อน popup แล้ว reset state กลับหน้าหลักหลัง 2 วินาที
-      setTimeout(() => {
-        setUi({ loading: false, showSuccess: false, isCameraActive: false, permissionGranted: false });
-        setMode(null);
-        setPhoto({ taken: false, data: null });
-        setLocation(null);
-        setSelectedShift(null);
-      }, 2000);
+      setUi({ loading: false, showSuccess: true, isCameraActive: false, permissionGranted: false });
+      await loadTodayStatus();
+
+      // นับถอยหลัง 5 วินาที แล้ว redirect กลับ dashboard อัตโนมัติ
+      // ป้องกัน double-punch: user ไม่สามารถกดซ้ำได้เพราะอยู่หน้า success modal
+      setCountdown(5);
+      const timer = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            router.push('/user/dashboard');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
     } catch (error: unknown) {
       console.error('Error submitting attendance:', error);
-      const err = error as { response?: { data?: { message?: string } } };
-      alert(err.response?.data?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+      const err = error as { response?: { data?: { error?: string; message?: string } } };
+      const errorMsg = err.response?.data?.error || err.response?.data?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
+      openMessageModal(errorMsg);
       setUi(prev => ({ ...prev, loading: false }));
     }
-  }, [photo.data, location, selectedShift, mode]);
+  }, [photo.data, location, selectedShift, mode, shifts.length, openMessageModal, router]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
-   * handleCancel() — กดปุ่ม "ยกเลิก"
-   * ปิดกล้อง reset state ทั้งหมด กลับหน้าหลัก
+   * handleCancel() — กดปุ่ม "ยกเลิก" หรือ "กลับ"
+   * ปิดกล้อง reset state ทั้งหมด ไปกลับ dashboard
    */
   const handleCancel = useCallback(() => {
     stopCamera();
-    setMode(null);
-    setPhoto({ taken: false, data: null });
-    setLocation(null);
-  }, [stopCamera]);
+    router.push('/user/dashboard');
+  }, [stopCamera, router]);
+
 
   // ─────────────────────────────────────────────────────────────
-  // UI โหมดกล้อง: แสดงเมื่อกดปุ่ม "เข้างาน" หรือ "ออกงาน"
-  // ประกอบด้วย: header, กล้อง, เลือกกะ (ถ้ามีหลายกะ), GPS status, ปุ่มยืนยัน/ยกเลิก
+  // UI โหมดกล้อง — fullscreen overlay matching Figma design
   // ─────────────────────────────────────────────────────────────
   if (mode) {
     return (
-      <div className="min-h-screen bg-slate-50 pb-20">
-        <div className="p-4 space-y-4">
-          {/* ── Header: แสดงโหมด (เข้างาน/ออกงาน) + เวลา-วันที่ปัจจุบัน ── */}
-          <Card className="p-4 bg-linear-to-r from-orange-500 to-orange-600">
-            <div className="flex items-center justify-between">
-              <div className="text-white">
-                <h2 className="text-xl font-bold">
-                  {mode === 'checkIn' ? 'เข้างาน' : 'ออกงาน'}
-                </h2>
-                <p className="text-sm text-white/90">
-                  {new Date().toLocaleDateString('th-TH', { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
-                </p>
-              </div>
-              <div className="text-white text-3xl font-bold">
-                {new Date().toLocaleTimeString('th-TH', { 
-                  hour: '2-digit', 
-                  minute: '2-digit' 
-                })}
-              </div>
-            </div>
-          </Card>
+      <div className="fixed inset-0 z-9999 flex flex-col bg-[#f5f6f7]">
 
-          {/* ── ส่วนกล้อง: live preview หรือรูปที่ถ่ายแล้ว ── */}
-          <Card className="p-4">
-            <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+        {/* ── Orange gradient header ── */}
+        <div className="bg-linear-to-r from-[#f26623] to-[#ea580c] px-4 pt-12 pb-5">
+          <div className="flex items-center gap-3 mb-1">
+            <button onClick={handleCancel} className="text-white p-1 -ml-1 rounded-full hover:bg-white/20 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
-              ถ่ายรูปยืนยันตัวตน
-            </h3>
-
-            <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-video">
-              {!photo.taken ? (
-                <>
-                  {/* กล้อง live preview */}
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                  />
-                  {/* ปุ่มถ่ายรูป (แสดงเมื่อกล้องพร้อม) */}
-                  {ui.isCameraActive && (
-                    <Button
-                      onClick={takePhoto}
-                      className="absolute bottom-4 left-1/2 -translate-x-1/2 w-16 h-16 rounded-full bg-white hover:bg-gray-100"
-                    >
-                      <div className="w-14 h-14 rounded-full border-4 border-orange-500"></div>
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <>
-                  {/* แสดงรูปที่ถ่ายแล้ว */}
-                  <img src={photo.data!} alt="Captured" className="w-full h-full object-cover" />
-                  {/* ปุ่มถ่ายใหม่ */}
-                  <Button
-                    onClick={retakePhoto}
-                    variant="outline"
-                    className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white"
-                  >
-                    ถ่ายใหม่
-                  </Button>
-                </>
-              )}
-            </div>
-            {/* canvas ซ่อนไว้ใช้ capture ภาพจาก video เท่านั้น (ไม่แสดงต่อผู้ใช้) */}
-            <canvas ref={canvasRef} className="hidden" />
-          </Card>
-
-          {/* ── เลือกกะทำงาน (แสดงเฉพาะเมื่อมีมากกว่า 1 กะวันนี้) ── */}
-          {shifts.length > 1 && (
-            <Card className="p-4">
-              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                เลือกกะทำงาน
-              </h3>
-              <div className="space-y-2">
-                {shifts.map((shift) => (
-                  <button
-                    key={shift.id}
-                    onClick={() => setSelectedShift(shift.id)}
-                    className={`w-full p-3 rounded-lg border-2 transition-colors ${
-                      selectedShift === shift.id
-                        ? 'border-orange-500 bg-orange-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <div className="text-left">
-                        <div className="font-semibold text-gray-900">{shift.name}</div>
-                        <div className="text-sm text-gray-500">
-                          {shift.startTime} - {shift.endTime}
-                        </div>
-                      </div>
-                      {selectedShift === shift.id && (
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {/* ── แสดงสถานะ GPS: กำลังระบุ / ระบุสำเร็จ ── */}
-          <Card className="p-4">
-            <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              ตำแหน่งที่เช็คอิน
-            </h3>
-            {location ? (
-              // แสดงพิกัดสำเร็จ (สีเขียว)
-              <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 p-3 rounded-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>ระบุตำแหน่งสำเร็จ ({location.lat.toFixed(6)}, {location.lng.toFixed(6)})</span>
-              </div>
-            ) : (
-              // กำลังรอ GPS (แสดง spinner)
-              <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 p-3 rounded-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                <span>กำลังระบุตำแหน่ง...</span>
-              </div>
-            )}
-          </Card>
-
-          {/* ── ปุ่มยกเลิก / ยืนยัน ── */}
-          {/* ปุ่ม "ยืนยัน" จะ disabled จนกว่าจะมีรูป + GPS + กะครบ */}
-          <div className="flex gap-3">
-            <Button
-              onClick={handleCancel}
-              variant="outline"
-              className="flex-1"
-              disabled={ui.loading}
-            >
-              ยกเลิก
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              className="flex-1 bg-orange-500 hover:bg-orange-600"
-              disabled={!photo.data || !location || !selectedShift || ui.loading}
-            >
-              {ui.loading ? 'กำลังบันทึก...' : 'ยืนยัน'}
-            </Button>
+            </button>
+            <h1 className="text-xl font-bold text-white">ลงเวลา{mode === 'checkIn' ? 'เข้า' : 'ออก'}งาน</h1>
           </div>
+          <p className="text-white/80 text-sm ml-9">ถ่ายรูปเพื่อบันทึกเวลา</p>
         </div>
 
-        {/* ── Popup สำเร็จ: แสดง 2 วินาทีหลัง submit สำเร็จ ── */}
+        {/* ── Body ── */}
+        <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto">
+
+          {/* ── Camera area ── */}
+          <div
+            className="relative bg-[#1e293b] rounded-2xl overflow-hidden flex items-center justify-center border-2 border-[#f26623]"
+            style={{ minHeight: '340px' }}
+          >
+            {/* State 1: กล้องยังไม่เปิด */}
+            {!ui.isCameraActive && !photo.taken && (
+              <div className="flex flex-col items-center gap-4 text-white/40 select-none">
+                <div className="w-24 h-24 rounded-full border-2 border-white/15 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12 text-[#f26623]/60" viewBox="0 -960 960 960" fill="currentColor">
+                    <path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-400Zm112 168 56-56-128-128v-184h-80v216l152 152Z" />
+                  </svg>
+                </div>
+                <span className="text-sm text-white/50">กล้องยังไม่เปิด</span>
+              </div>
+            )}
+
+            {/* State 2: กล้องเปิดแล้ว (live preview) */}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover absolute inset-0 ${
+                ui.isCameraActive && !photo.taken ? 'block' : 'hidden'
+              }`}
+              style={{ minHeight: '340px' }}
+            />
+
+            {/* Shutter button — orange circle with white ring */}
+            {ui.isCameraActive && !photo.taken && (
+              <button
+                onClick={takePhoto}
+                className="absolute bottom-5 left-1/2 -translate-x-1/2 w-18 h-18 rounded-full bg-[#f26623] hover:bg-[#e05a1a] active:scale-90 transition-all shadow-xl flex items-center justify-center"
+              >
+                <div className="w-15.5 h-15.5 rounded-full border-[3px] border-white" />
+              </button>
+            )}
+
+            {/* State 3: photo taken */}
+            {photo.taken && photo.data && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={photo.data}
+                alt="Captured"
+                className="w-full h-full object-cover absolute inset-0"
+                style={{ minHeight: '340px' }}
+              />
+            )}
+          </div>
+
+          {/* hidden canvas for capture */}
+          <canvas ref={canvasRef} className="hidden" />
+
+          {/* ── GPS status indicator ── */}
+          <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm ${
+            location && !(location.lat === 0 && location.lng === 0)
+              ? 'bg-green-100 text-green-800'
+              : 'bg-yellow-100 text-yellow-800'
+          }`}>
+            {location && !(location.lat === 0 && location.lng === 0) ? (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                </svg>
+                <span>ได้รับพิกัด GPS แล้ว</span>
+              </>
+            ) : (
+              <>
+                <div className="w-4 h-4 shrink-0 border-2 border-yellow-600 border-t-transparent rounded-full animate-spin" />
+                <span>กำลังรับพิกัด GPS...</span>
+              </>
+            )}
+          </div>
+
+          {/* ── Shift selector (when multiple shifts & photo taken) ── */}
+          {shifts.length > 1 && photo.taken && (
+            <div className="bg-white rounded-2xl p-4 space-y-2 shadow-sm">
+              <p className="text-gray-700 text-sm font-bold mb-2">เลือกกะทำงาน</p>
+              {shifts.map((shift, index) => {
+                const shiftId = typeof shift.id === 'string' ? parseInt(shift.id, 10) : shift.id;
+                return (
+                <button
+                  key={shift.id ?? index}
+                  onClick={() => setSelectedShift(shiftId)}
+                  className={`w-full p-3 rounded-xl border-2 transition-colors text-left ${
+                    selectedShift === shiftId
+                      ? 'border-[#f26623] bg-orange-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <div className="font-semibold text-gray-900">{shift.name}</div>
+                      <div className="text-sm text-gray-500">{shift.startTime} - {shift.endTime}</div>
+                    </div>
+                    {selectedShift === shiftId && (
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-[#f26623]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
+                </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ── Bottom buttons ── */}
+          {/* State 1: Camera not open → open camera button */}
+          {!ui.isCameraActive && !photo.taken && (
+            <button
+              onClick={startCamera}
+              className="w-full py-4 rounded-2xl bg-[#f26623] hover:bg-[#e05a1a] active:scale-[.98] transition-all text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              เปิดกล้อง
+            </button>
+          )}
+
+          {/* State 3: Photo taken → cancel + confirm */}
+          {photo.taken && (
+            <div className="flex gap-3">
+              <button
+                onClick={retakePhoto}
+                disabled={ui.loading}
+                className="flex-1 py-4 rounded-2xl border-2 border-gray-300 bg-white text-gray-700 font-bold text-base flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-[.98] transition-all disabled:opacity-40"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={ui.loading}
+                className="flex-1 py-4 rounded-2xl bg-[#f26623] hover:bg-[#e05a1a] active:scale-[.98] transition-all text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {ui.loading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+                {ui.loading ? 'กำลังบันทึก...' : 'ยืนยัน'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── Success Modal (พร้อมนับถอยหลัง redirect) ── */}
         {ui.showSuccess && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <Card className="p-6 text-center">
-              <div className="w-16 h-16 mx-auto mb-4 bg-green-100 rounded-full flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          <div className="fixed inset-0 z-99999 flex items-end justify-center bg-black/60">
+            <div className="w-full bg-white rounded-t-3xl p-6 text-center space-y-4 pb-10">
+              <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">บันทึกสำเร็จ!</h3>
-              <p className="text-gray-600">
-                {mode === 'checkIn' ? 'เข้างานเรียบร้อยแล้ว' : 'ออกงานเรียบร้อยแล้ว'}
-              </p>
-            </Card>
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900">บันทึกสำเร็จ!</h3>
+                {successResult && (
+                  <p className="text-gray-500 mt-1 text-sm">
+                    {mode === 'checkIn' ? 'เข้างาน' : 'ออกงาน'}
+                    {successResult.time ? ` เวลา ${successResult.time} น.` : ''}
+                    {successResult.status ? ` · ${successResult.status}` : ''}
+                  </p>
+                )}
+                {countdown > 0 && (
+                  <p className="text-gray-400 mt-2 text-xs">กลับหน้าหลักใน {countdown} วินาที...</p>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setUi({ loading: false, showSuccess: false, isCameraActive: false, permissionGranted: false });
+                  setMode(null);
+                  setPhoto({ taken: false, data: null });
+                  setLocation(null);
+                  setSelectedShift(null);
+                  setSuccessResult(null);
+                  setCountdown(0);
+                  loadTodayStatus();
+                  router.push('/user/dashboard');
+                }}
+                className="w-full py-4 rounded-2xl bg-[#f26623] hover:bg-[#e05a1a] text-white font-bold text-base transition-all"
+              >
+                กลับสู่หน้าหลัก
+              </button>
+            </div>
+          </div>
+        )}
+
+        {messageModal.open && (
+          <div className="fixed inset-0 z-100000 flex items-end justify-center bg-black/60">
+            <div className="w-full bg-white rounded-t-3xl p-6 text-center space-y-4 pb-10">
+              <h3 className="text-xl font-bold text-gray-900">แจ้งเตือน</h3>
+              <p className="text-sm text-gray-600 whitespace-pre-line">{messageModal.message}</p>
+              <button
+                onClick={() => setMessageModal({ open: false, message: '' })}
+                className="w-full py-4 rounded-2xl bg-[#f26623] hover:bg-[#e05a1a] text-white font-bold text-base transition-all"
+              >
+                ตกลง
+              </button>
+            </div>
           </div>
         )}
       </div>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // UI หน้าหลัก: แสดงเมื่อ mode = null (ยังไม่ได้กดปุ่มเข้า/ออกงาน)
-  // ประกอบด้วย: นาฬิกา, สถานะวันนี้, ปุ่มเข้า/ออกงาน, สรุปเดือนนี้
-  // ─────────────────────────────────────────────────────────────
-  return (
-    <div className="space-y-4">
-      {/* ── นาฬิกาและวันที่ปัจจุบัน ── */}
-      <Card className="p-6 bg-linear-to-r from-orange-500 to-orange-600 text-white">
-        <div className="text-center">
-          <div className="text-5xl font-bold mb-2">
-            {new Date().toLocaleTimeString('th-TH', { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            })}
-          </div>
-          <p className="text-white/90">
-            {new Date().toLocaleDateString('th-TH', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
-            })}
-          </p>
-        </div>
-      </Card>
-
-      {/* ── สถานะวันนี้: เวลาเข้า + สถานะ (ตรงเวลา/มาสาย) + เวลาออก ── */}
-      <Card className="p-4">
-        <h3 className="font-semibold text-gray-800 mb-3">สถานะวันนี้</h3>
-        <div className="grid grid-cols-2 gap-3">
-          <div className={`p-4 rounded-xl ${todayStatus.hasCheckedIn ? 'bg-green-50' : 'bg-gray-50'}`}>
-            <div className="text-sm text-gray-600 mb-1">เข้างาน</div>
-            <div className={`text-xl font-bold ${todayStatus.hasCheckedIn ? 'text-gray-900' : 'text-gray-400'}`}>
-              {todayStatus.attendance?.checkIn 
-                ? new Date(todayStatus.attendance.checkIn).toLocaleTimeString('th-TH', { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })
-                : '--:--'}
-            </div>
-            {todayStatus.attendance?.status && (
-              <Badge 
-                variant={todayStatus.attendance.status === 'ON_TIME' ? 'active' : 'late'}
-                className="mt-2"
-              >
-                {todayStatus.attendance.status === 'ON_TIME' ? 'ตรงเวลา' : 
-                 todayStatus.attendance.status === 'LATE' ? 'มาสาย' : 'ขาดงาน'}
-              </Badge>
-            )}
-          </div>
-          <div className={`p-4 rounded-xl ${todayStatus.hasCheckedOut ? 'bg-green-50' : 'bg-gray-50'}`}>
-            <div className="text-sm text-gray-600 mb-1">ออกงาน</div>
-            <div className={`text-xl font-bold ${todayStatus.hasCheckedOut ? 'text-gray-900' : 'text-gray-400'}`}>
-              {todayStatus.attendance?.checkOut 
-                ? new Date(todayStatus.attendance.checkOut).toLocaleTimeString('th-TH', { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })
-                : '--:--'}
-            </div>
-            <Badge variant={todayStatus.hasCheckedOut ? 'active' : 'default'} className="mt-2">
-              {todayStatus.hasCheckedOut ? 'ออกแล้ว' : 'ยังไม่ออก'}
-            </Badge>
-          </div>
-        </div>
-      </Card>
-
-      {/* ── ปุ่มเข้างาน / ออกงาน ──
-           เข้างาน: active เฉพาะเมื่อ hasCheckedIn = false
-           ออกงาน: active เฉพาะเมื่อ hasCheckedIn = true && hasCheckedOut = false
-           ถ้า condition ไม่ตรง → opacity-50 + cursor-not-allowed */}
-      <div className="grid grid-cols-2 gap-4">
-        <Card 
-          className={`p-6 transition-shadow ${
-            !todayStatus.hasCheckedIn 
-              ? 'cursor-pointer hover:shadow-lg' 
-              : 'opacity-50 cursor-not-allowed'
-          }`}
-          onClick={!todayStatus.hasCheckedIn ? handleStartCheckIn : undefined}
-        >
-          <div className="text-center">
-            <div className="w-16 h-16 mx-auto mb-3 bg-green-100 rounded-full flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
-              </svg>
-            </div>
-            <h3 className="font-bold text-gray-900">เข้างาน</h3>
-            <p className="text-xs text-gray-500 mt-1">Check In</p>
-            {todayStatus.hasCheckedIn && (
-              <p className="text-xs text-orange-500 mt-2">เช็คอินแล้ววันนี้</p>
-            )}
-          </div>
-        </Card>
-
-        <Card 
-          className={`p-6 transition-shadow ${
-            todayStatus.hasCheckedIn && !todayStatus.hasCheckedOut
-              ? 'cursor-pointer hover:shadow-lg' 
-              : 'opacity-50 cursor-not-allowed'
-          }`}
-          onClick={todayStatus.hasCheckedIn && !todayStatus.hasCheckedOut ? handleStartCheckOut : undefined}
-        >
-          <div className="text-center">
-            <div className="w-16 h-16 mx-auto mb-3 bg-orange-100 rounded-full flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </div>
-            <h3 className="font-bold text-gray-900">ออกงาน</h3>
-            <p className="text-xs text-gray-500 mt-1">Check Out</p>
-            {!todayStatus.hasCheckedIn && (
-              <p className="text-xs text-orange-500 mt-2">กรุณาเช็คอินก่อน</p>
-            )}
-            {todayStatus.hasCheckedOut && (
-              <p className="text-xs text-orange-500 mt-2">เช็คเอาต์แล้ววันนี้</p>
-            )}
-          </div>
-        </Card>
-      </div>
-
-      {/* ── สรุปสถิติเดือนนี้ (คำนวณจาก getMyHistory ตั้งแต่ต้นเดือน) ── */}
-      <Card className="p-4">
-        <h3 className="font-semibold text-gray-800 mb-3">สรุปเดือนนี้</h3>
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div>
-            <div className="text-2xl font-bold text-gray-900">{monthlyStats.total}</div>
-            <div className="text-xs text-gray-500">วันทำงาน</div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-green-600">{monthlyStats.onTime}</div>
-            <div className="text-xs text-gray-500">ตรงเวลา</div>
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-orange-600">{monthlyStats.late}</div>
-            <div className="text-xs text-gray-500">มาสาย</div>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
+  // ถ้า mode ไม่ถูกตั้ง → ไม่แสดงอะไร (ระบบจะ redirect ไปที่ dashboard อัตโนมัติผ่าน useEffect)
+  return null;
 }

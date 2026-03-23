@@ -5,7 +5,6 @@ import {
   handleEmployeesToday,
   handleBranchesMap,
   handleLocationEvents,
-  handleBranchStats,
 } from '../controllers/dashboard.controller.js';
 
 /**
@@ -14,15 +13,12 @@ import {
  * ทำไมต้อง Dashboard routes?
  * - Frontend ต้อง fetch ข้อมูล dashboard เพื่อ render charts/tables
  * - ต้อง authorize เฉพาะ ADMIN/SUPERADMIN (sensitive data)
- * - 5 endpoints รวม: attendance summary, employees today, branches map, location events, branch stats
+ * - 4 endpoints รวม: attendance summary, employees today, branches map, location events
  * 
  * Role-based access:
  * - ADMIN: เห็นเฉพาะ branch ของตัวเอง (check ใน controller/service)
  * - SUPERADMIN: เห็นทั้งหมด
- * 
- * Test endpoints:
- * - ทั้งหมด endpoint มี -test version สำหรับ unit test
- * - Test version ไม่มี role middleware (allow direct testing)
+
  */
 
 const router = Router();
@@ -49,19 +45,6 @@ router.get(
 );
 
 /**
- * GET /api/dashboard/attendance-summary-test - สรุป attendance (TEST)
- * 
- * ทำไมต้อง -test endpoint?
- * - Unit test ต้อง test route ไม่มี middleware
- * - ใช้ controller เดียวกัน เพื่อ test logic
- * - Disabled ใน production (ดู API_DOCS)
- */
-router.get(
-  '/attendance-summary-test',
-  handleAttendanceSummary
-);
-
-/**
  * GET /api/dashboard/employees-today - List employee พร้อม check-in status วนนี้
  * 
  * ทำไมต้อง endpoint นี้?
@@ -79,18 +62,6 @@ router.get(
 router.get(
   '/employees-today',
   requireRole(['ADMIN', 'SUPERADMIN']),
-  handleEmployeesToday
-);
-
-/**
- * GET /api/dashboard/employees-today-test - List employee วนนี้ (TEST)
- * 
- * ทำไมต้อง -test endpoint?
- * - วิธีเดียวกับ /attendance-summary-test
- * - Test API ไม่ต้อง role check
- */
-router.get(
-  '/employees-today-test',
   handleEmployeesToday
 );
 
@@ -118,17 +89,6 @@ router.get(
 );
 
 /**
- * GET /api/dashboard/branches-map-test - List branch สำหรับ map (TEST)
- * 
- * ทำไมต้อง -test endpoint?
- * - Test route ไม่มี middleware
- */
-router.get(
-  '/branches-map-test',
-  handleBranchesMap
-);
-
-/**
  * GET /api/dashboard/location-events - List check-in/out ที่นอก radius
  * 
  * ทำไมต้อง endpoint นี้?
@@ -147,49 +107,6 @@ router.get(
   '/location-events',
   requireRole(['ADMIN', 'SUPERADMIN']),
   handleLocationEvents
-);
-
-/**
- * GET /api/dashboard/location-events-test - Location events นอก radius (TEST)
- * 
- * ทำไม -test endpoint?
- * - Test route ไม่มี middleware
- */
-router.get(
-  '/location-events-test',
-  handleLocationEvents
-);
-
-/**
- * GET /api/dashboard/branch-stats - Statistics (KPI) ของแต่ละ branch
- * 
- * ทำไมต้อง endpoint นี้?
- * - Management dashboard ต้อง KPI metrics (% on-time, % present, productivity)
- * - Comparison: ทำให้ branch ไหนแขนงได้ดี การ identify ปัญหา
- * - Trend analysis: follow performance over time
- * 
- * Response: [{ branchId, name, presentCount, lateCount, absentCount, onTimePercentage, ... }]
- * 
- * Query Parameters:
- * - branchId (optional): filter เฉพาะ branch นี้ (SUPERADMIN only)
- * 
- * Security: requireRole(['ADMIN', 'SUPERADMIN'])
- */
-router.get(
-  '/branch-stats',
-  requireRole(['ADMIN', 'SUPERADMIN']),
-  handleBranchStats
-);
-
-/**
- * GET /api/dashboard/branch-stats-test - Branch statistics (TEST)
- * 
- * ทำไม -test endpoint?
- * - Test route ไม่มี middleware
- */
-router.get(
-  '/branch-stats-test',
-  handleBranchStats
 );
 
 export default router;

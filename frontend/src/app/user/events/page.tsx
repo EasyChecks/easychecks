@@ -1,13 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
-import eventService, { EventItem } from '@/services/eventService';
+import { Badge } from '@/components/ui/badge';
+import eventService, { EventItem, EventAttendanceStatus } from '@/services/eventService';
 
 export default function UserEventsPage() {
   const { } = useAuth();
+  const router = useRouter();
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [attendanceMap, setAttendanceMap] = useState<Record<number, EventAttendanceStatus>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,6 +23,24 @@ export default function UserEventsPage() {
       setLoading(true);
       const data = await eventService.getMy();
       setEvents(data);
+
+      // ดึงสถานะ attendance ของแต่ละกิจกรรม
+      const attendanceResults = await Promise.all(
+        data.map(async (event) => {
+          try {
+            const att = await eventService.getMyAttendance(event.eventId);
+            return { eventId: event.eventId, data: att };
+          } catch {
+            return { eventId: event.eventId, data: { checkedIn: false, checkedOut: false, attendance: null } };
+          }
+        })
+      );
+
+      const map: Record<number, EventAttendanceStatus> = {};
+      for (const result of attendanceResults) {
+        map[result.eventId] = result.data;
+      }
+      setAttendanceMap(map);
     } catch (error) {
       console.error('Failed to fetch events:', error);
     } finally {
@@ -34,11 +56,24 @@ export default function UserEventsPage() {
     });
   };
 
-  const isEventActive = (event: EventItem) => {
+  const getEventStatus = (event: EventItem) => {
     const now = new Date();
     const start = new Date(event.startDateTime);
     const end = new Date(event.endDateTime);
-    return now >= start && now <= end;
+    if (now < start) return 'upcoming';
+    if (now > end) return 'completed';
+    return 'ongoing';
+  };
+
+  const getAttendanceBadge = (eventId: number) => {
+    const att = attendanceMap[eventId];
+    if (!att || !att.checkedIn) {
+      return <Badge variant="pending">ยังไม่เข้าร่วม</Badge>;
+    }
+    if (att.checkedIn && !att.checkedOut) {
+      return <Badge variant="active">เข้าร่วมแล้ว</Badge>;
+    }
+    return <Badge variant="suspend">เสร็จสิ้น</Badge>;
   };
 
   return (
@@ -79,23 +114,27 @@ export default function UserEventsPage() {
       ) : (
         <div className="space-y-4">
           {events.map((event) => {
-            const isActive = isEventActive(event);
+            const status = getEventStatus(event);
+            const isActive = status === 'ongoing';
             return (
               <Card
                 key={event.eventId}
-                className={`p-4 ${isActive ? 'border-2 border-orange-500 bg-orange-50' : ''}`}
+                className={`p-4 cursor-pointer transition-shadow hover:shadow-md ${isActive ? 'border-2 border-orange-500 bg-orange-50' : ''}`}
+                onClick={() => router.push(`/user/events/${event.eventId}`)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-lg font-semibold text-gray-800">
                         {event.eventName}
                       </h3>
                       {isActive && (
-                        <span className="px-2 py-1 text-xs font-medium text-orange-700 bg-orange-200 rounded-full">
-                          กำลังดำเนินการ
-                        </span>
+                        <Badge variant="active">กำลังดำเนินการ</Badge>
                       )}
+                      {status === 'upcoming' && (
+                        <Badge variant="pending">กำลังจะมาถึง</Badge>
+                      )}
+                      {getAttendanceBadge(event.eventId)}
                     </div>
                     {event.description && (
                       <p className="text-sm text-gray-600 mt-2">
@@ -163,6 +202,9 @@ export default function UserEventsPage() {
                       )}
                     </div>
                   </div>
+                  <svg className="h-5 w-5 text-gray-400 mt-1 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
                 </div>
               </Card>
             );

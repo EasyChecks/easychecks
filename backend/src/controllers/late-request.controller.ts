@@ -122,7 +122,7 @@ export const getLateRequestById = asyncHandler(async (req: Request, res: Respons
 });
 
 /**
- * PATCH /api/late-requests/:id
+ * PUT /api/late-requests/:id
  * แก้ไขคำขอมาสาย
  */
 export const updateLateRequest = asyncHandler(async (req: Request, res: Response) => {

@@ -10,7 +10,7 @@ export interface EventData {
   startTime?: string;
   endTime?: string;
   teams?: string;
-  status: 'ongoing' | 'completed';
+  status: 'ongoing' | 'completed' | 'upcoming';
   createdAt?: string;
   updatedAt?: string;
 }

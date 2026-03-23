@@ -26,7 +26,18 @@ export const createLeaveRequest = asyncHandler(async (req: Request, res: Respons
     throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
   }
 
-  const { leaveType, startDate, endDate, reason, attachmentUrl, medicalCertificateUrl } = req.body;
+  const {
+    leaveType,
+    isHourly,
+    startDate,
+    endDate,
+    startTime,
+    endTime,
+    leaveHours,
+    reason,
+    attachmentUrl,
+    medicalCertificateUrl,
+  } = req.body;
 
   if (!leaveType || !startDate || !endDate) {
     throw new BadRequestError('กรุณาระบุ leaveType, startDate, endDate');
@@ -40,8 +51,12 @@ export const createLeaveRequest = asyncHandler(async (req: Request, res: Respons
   const leaveRequest = await LeaveRequestUserActions.createLeaveRequest({
     userId,
     leaveType,
+    isHourly,
     startDate: new Date(startDate),
     endDate: new Date(endDate),
+    startTime,
+    endTime,
+    leaveHours,
     reason,
     attachmentUrl,
     medicalCertificateUrl,
@@ -143,7 +158,7 @@ export const getLeaveRequestById = asyncHandler(async (req: Request, res: Respon
 });
 
 /**
- * PATCH /api/leave-requests/:id
+ * PUT /api/leave-requests/:id
  * แก้ไขใบลา
  */
 export const updateLeaveRequest = asyncHandler(async (req: Request, res: Response) => {
@@ -170,14 +185,30 @@ export const updateLeaveRequest = asyncHandler(async (req: Request, res: Respons
     throw new ForbiddenError('คุณไม่มีสิทธิ์แก้ไขใบลานี้');
   }
 
-  const { leaveType, startDate, endDate, reason, attachmentUrl } = req.body;
+  const {
+    leaveType,
+    isHourly,
+    startDate,
+    endDate,
+    startTime,
+    endTime,
+    leaveHours,
+    reason,
+    attachmentUrl,
+    medicalCertificateUrl,
+  } = req.body;
 
   const updatedLeaveRequest = await LeaveRequestUserActions.updateLeaveRequest(leaveId, {
     ...(leaveType && { leaveType }),
+    ...(isHourly !== undefined && { isHourly }),
     ...(startDate && { startDate: new Date(startDate) }),
     ...(endDate && { endDate: new Date(endDate) }),
+    ...(startTime !== undefined && { startTime }),
+    ...(endTime !== undefined && { endTime }),
+    ...(leaveHours !== undefined && { leaveHours }),
     ...(reason && { reason }),
     ...(attachmentUrl && { attachmentUrl }),
+    ...(medicalCertificateUrl && { medicalCertificateUrl }),
   });
 
   sendSuccess(res, updatedLeaveRequest, 'แก้ไขใบลาเรียบร้อยแล้ว');

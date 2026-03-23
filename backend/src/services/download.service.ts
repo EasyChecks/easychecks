@@ -21,7 +21,7 @@ export interface User {
 
 export interface DownloadQuery {
   type: 'attendance' | 'shift';
-  format: 'excel' | 'pdf';
+  format: 'excel';
   startDate?: Date;
   endDate?: Date;
   branchId?: number;
@@ -53,7 +53,7 @@ export async function downloadReport(
 
   // ป้องกันไม่ให้ Admin ลองเข้าถึง branch อื่น
   if (user.role === 'ADMIN' && query.branchId && query.branchId !== user.branchId) {
-    throw new Error('Unauthorized: Admin can only download their own branch data');
+    throw new Error('Unauthorized: You can only download your own branch data');
   }
 
   let fileName = '';
@@ -83,9 +83,6 @@ export async function downloadReport(
   default:
     throw new Error('Invalid report type');
   }
-
-  // บันทึก log
-  await logDownload(user.userId, fileName, type);
 
   return {
     buffer,
@@ -216,6 +213,8 @@ async function downloadShiftReport(
   branchId?: number
 ): Promise<{ buffer: Buffer; fileName: string }> {
   console.log('📋 Fetching shift data...');
+  void startDate;
+  void endDate;
   
   try {
     // Query data - simplified
@@ -226,11 +225,7 @@ async function downloadShiftReport(
           : user.role === 'ADMIN'
             ? { branchId: user.branchId }
             : {},
-        createdAt: {
-          gte: startDate || new Date(new Date().getFullYear(), 0, 1),
-          lte: endDate || new Date(),
-        },
-        deletedAt: null,
+        isDeleted: false,
       },
       include: {
         user: {
@@ -241,7 +236,7 @@ async function downloadShiftReport(
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { shiftId: 'desc' },
       take: 100, // Limit for faster query
     });
 
@@ -304,20 +299,3 @@ async function downloadShiftReport(
   }
 }
 
-/**
- * บันทึกการดาวน์โหลด
- */
-async function logDownload(
-  userId: number,
-  fileName: string,
-  reportType: string
-): Promise<void> {
-  await prisma.downloadLog.create({
-    data: {
-      userId,
-      fileName,
-      reportType,
-      downloadAt: new Date(),
-    },
-  });
-}

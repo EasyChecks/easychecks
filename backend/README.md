@@ -1,323 +1,109 @@
-# Backend - EasyCheck API
+# EasyCheck Backend
 
-Express.js REST API with TypeScript, Prisma ORM, and PostgreSQL
+Express.js + TypeScript API for attendance, shift, leave, event, and audit workflows.
 
----
-
-## 📋 Table of Contents
-
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Development](#development)
-- [Testing](#testing)
-- [API Documentation](#api-documentation)
-- [Database](#database)
-- [Environment Variables](#environment-variables)
-
----
-
-## Tech Stack
-
-- **Runtime**: Node.js 22.x
-- **Framework**: Express.js 5.x
-- **Language**: TypeScript
-- **Database**: PostgreSQL (Supabase)
-- **ORM**: Prisma
-- **Authentication**: JWT / Supabase Auth
-- **Testing**: Jest + Supertest
-- **Documentation**: Swagger/OpenAPI
-
----
-
-## Project Structure
-
-```
-backend/
-├── src/
-│   ├── controllers/      # Request handlers
-│   ├── routes/          # API route definitions
-│   ├── services/        # Business logic layer
-│   ├── middleware/      # Custom middleware (auth, rate limit, etc.)
-│   ├── utils/           # Helper functions
-│   ├── types/           # TypeScript types/interfaces
-│   ├── config/          # Configuration files
-│   ├── websocket/       # WebSocket handlers
-│   ├── docs/            # API documentation
-│   └── index.ts         # Application entry point
-│
-├── prisma/
-│   ├── schema.prisma    # Database schema
-│   ├── migrations/      # Database migrations
-│   └── seed.ts          # Database seeding
-│
-├── __tests__/           # Test files
-├── Dockerfile           # Development Docker image
-├── Dockerfile.prod      # Production Docker image
-└── package.json         # Dependencies & scripts
-```
-
----
-
-## Getting Started
-
-### Prerequisites
+## Stack
 
 - Node.js 22.x
-- PostgreSQL (or Supabase account)
-- Docker (optional)
+- Express 5.x
+- Prisma + PostgreSQL/Supabase
+- WebSocket (real-time updates)
+- Swagger/OpenAPI
+- Vitest (test runner)
 
-### Installation
+## Runbook
+
+1. Install dependencies.
 
 ```bash
-# Install dependencies
 npm install
+```
 
-# Setup environment variables
-cp .env.example .env
-# Edit .env with your DATABASE_URL and other configs
+2. Configure environment.
 
-# Generate Prisma Client
+Create `.env` in this folder with at least:
+
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY` (or `SUPABASE_ANON_KEY`)
+- `JWT_SECRET`
+
+3. Sync Prisma client and database.
+
+```bash
 npx prisma generate
-
-# Run database migrations
 npx prisma migrate dev
-
-# Seed database (optional)
-npm run seed
 ```
 
-### Run Development Server
+4. Start API.
 
 ```bash
-# Start server with hot reload
 npm run dev
-
-# Server runs on http://localhost:3000
-# API Docs: http://localhost:3000/api-docs
-# Health Check: http://localhost:3000/api/health
 ```
 
----
+Default endpoints:
 
-## Development
+- API base: `http://localhost:3001/api`
+- Health: `http://localhost:3001/api/health`
+- Swagger: `http://localhost:3001/api-docs`
 
-### Available Scripts
+## Scripts
 
 ```bash
-npm run dev              # Start development server with hot reload
-npm run build            # Build TypeScript to JavaScript
-npm start                # Run production build
-npm test                 # Run tests
-npm run test:watch       # Run tests in watch mode
-npm run test:coverage    # Generate coverage report
-npm run seed             # Seed database with sample data
+npm run dev               # tsx watch
+npm run build             # tsc
+npm start                 # run dist
+npm run lint              # tsc --noEmit
+npm test                  # vitest run --passWithNoTests
+npm run test:watch        # vitest watch
+npm run test:coverage     # vitest coverage
+npm run test:core-apis    # bash ../test-apis.sh
+npm run seed              # seed database
 ```
 
-### Hot Reload
-
-Development server uses `tsx watch` for automatic reloading when files change.
-
-**In Docker:**
-```bash
-# Source code is mounted as volume
-# Changes automatically reload inside container
-docker-compose logs -f backend
-```
-
-### Code Style
-
-- Use **TypeScript** for type safety
-- Follow **camelCase** naming convention
-- Run **Prettier** before committing: `npm run format`
-- Use **ESLint** for linting: `npm run lint`
-
----
-
-## Testing
-
-### Unit Tests
+## DB Operations
 
 ```bash
-# Run all tests
-npm test
-
-# Watch mode (recommended during development)
-npm run test:watch
-
-# Coverage report
-npm run test:coverage
-```
-
-### Test Structure
-
-```typescript
-// src/__tests__/auth.test.ts
-import request from 'supertest';
-import app from '../index';
-
-describe('Authentication API', () => {
-  describe('POST /api/auth/login', () => {
-    it('should return 200 with valid credentials', async () => {
-      const response = await request(app)
-        .post('/api/auth/login')
-        .send({ email: 'test@example.com', password: 'password' });
-      
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('token');
-    });
-  });
-});
-```
-
-### Writing Tests
-
-- Place tests in `src/__tests__/`
-- Name test files: `*.test.ts`
-- Use descriptive test names
-- Mock external dependencies
-- Aim for 80%+ coverage
-
----
-
-## API Documentation
-
-### Swagger UI
-
-Interactive API documentation available at:
-- **Development**: http://localhost:3000/api-docs
-- **Production**: https://your-domain.com/api-docs
-
-### Endpoints Overview
-
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| `GET` | `/api/health` | Health check | ❌ |
-| `POST` | `/api/auth/login` | User login | ❌ |
-| `POST` | `/api/auth/register` | User registration | ❌ |
-| `GET` | `/api/users` | Get all users | ✅ |
-| `GET` | `/api/users/:id` | Get user by ID | ✅ |
-| `POST` | `/api/attendance/check-in` | Check in | ✅ |
-| `POST` | `/api/attendance/check-out` | Check out | ✅ |
-
-**Note**: ✅ = Requires authentication token
-
-### Response Format
-
-**Success Response:**
-```json
-{
-  "success": true,
-  "data": { ... },
-  "message": "Operation successful"
-}
-```
-
-**Error Response:**
-```json
-{
-  "success": false,
-  "error": "Error message",
-  "details": { ... }
-}
-```
-
----
-
-## Database
-
-### Prisma Commands
-
-```bash
-# Generate Prisma Client
 npx prisma generate
-
-# Create migration
-npx prisma migrate dev --name migration_name
-
-# Apply migrations
+npx prisma migrate dev --name <name>
 npx prisma migrate deploy
-
-# Reset database (⚠️ deletes all data)
-npx prisma migrate reset
-
-# Open Prisma Studio (GUI)
+npx prisma migrate reset --force
 npx prisma studio
-
-# Seed database
-npm run seed
 ```
 
-### Schema Example
+## Policy Notes
 
-```prisma
-// prisma/schema.prisma
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String
-  role      Role     @default(EMPLOYEE)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  attendances Attendance[]
-}
+- Attendance check-in requires `shiftId` and real GPS coordinates.
+- Approved full-day leave blocks check-in.
+- One user has at most one active shift for today.
+- Non-GET write operations are expected to emit audit logs.
 
-model Attendance {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  checkIn   DateTime
-  checkOut  DateTime?
-  status    AttendanceStatus
-}
+## Smoke Testing
+
+From repository root:
+
+```bash
+npm run test:core-apis
 ```
 
-### Migrations
+This script validates key attendance, shift, and audit endpoints with seeded accounts.
 
-- Stored in `prisma/migrations/`
-- Auto-generated when running `prisma migrate dev`
-- Applied automatically in Docker on startup
-- Production: use `prisma migrate deploy`
+## Troubleshooting
 
----
+- Prisma type mismatch after schema change:
 
-## Environment Variables
-
-Create `.env` file in backend directory:
-
-```env
-# Database
-DATABASE_URL="postgresql://user:password@localhost:5432/easycheck?schema=public&pgbouncer=true"
-DIRECT_URL="postgresql://user:password@localhost:5432/easycheck?schema=public"
-
-# Supabase
-SUPABASE_URL="https://your-project.supabase.co"
-SUPABASE_KEY="your-supabase-anon-key"
-
-# Server
-PORT=3000
-NODE_ENV=development
-
-# JWT (if using custom auth)
-JWT_SECRET="your-secret-key"
-JWT_EXPIRES_IN="7d"
-
-# CORS
-CORS_ORIGIN="http://localhost:3000"
+```bash
+npx prisma generate
+npm run lint
 ```
 
-**Required Variables:**
-- `DATABASE_URL` - Prisma connection string
-- `DIRECT_URL` - Direct database connection (for migrations)
-- `SUPABASE_URL` - Supabase project URL
-- `SUPABASE_KEY` - Supabase anonymous key
+- Docker volume uses stale Prisma client: regenerate inside container and restart backend.
 
----
-
-## Docker
-
-### Development
+```bash
+docker exec -it easycheck-backend npx prisma generate
+docker-compose restart backend
+```
 
 ```bash
 # Start with docker-compose (from root)

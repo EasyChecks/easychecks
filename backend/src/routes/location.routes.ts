@@ -30,7 +30,7 @@ router.get('/admin/statistics', authenticate, authorizeRole('ADMIN', 'SUPERADMIN
 // ID-based routes
 router.get('/:id', authenticate, getLocationById); // ดูสถานที่ตาม ID
 
-router.patch('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), updateLocation); // แก้ไข
+router.put('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), updateLocation); // แก้ไข
 
 router.delete('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), deleteLocation); // ลบ (soft delete)
 

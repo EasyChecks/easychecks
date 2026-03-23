@@ -21,50 +21,34 @@ model User {
   emergent_relation                                       String               @map("emergent_relation")
   phone                                                   String               @map("phone")
   email                                                   String               @unique
-  password                                                String               @map("password")
+  password                                                String?              @map("password")
+  adminPassword                                           String?              @map("admin_password")
   avatarUrl                                               String?              @map("avatar_url")
   birthDate                                               DateTime?            @map("birth_date") @db.Date
+  department                                              String?              @map("department")
+  position                                                String?              @map("position")
+  bloodType                                               String?              @map("blood_type")
   branchId                                                Int?                 @map("branch_id")
   role                                                    Role                 @default(USER)
   status                                                  UserStatus           @default(ACTIVE)
-  createdAt                                               DateTime             @default(now()) @map("created_at")
-  updatedAt                                               DateTime             @default(now()) @updatedAt @map("updated_at")
-  updatedByUserId                                         Int?                 @map("updated_by_user_id")
+  createdAt                                               DateTime             @default(now()) @map("created_on")
+  updatedAt                                               DateTime             @default(now()) @updatedAt @map("updated_on")
   attendances                                             Attendance[]
   auditLogs                                               AuditLog[]
   branchesCreated                                         Branch[]             @relation("BranchCreator")
-  branchesDeleted                                         Branch[]             @relation("BranchDeleter")
-  branchesUpdated                                         Branch[]             @relation("BranchUpdater")
-  downloadLogs                                            DownloadLog[]
+  approvalActions                                         ApprovalAction[]
   EventParticipants                                       EventParticipant[]
   events_events_created_by_user_idTousers                 Event[]              @relation("events_created_by_user_idTousers")
-  events_events_deleted_by_user_idTousers                 Event[]              @relation("events_deleted_by_user_idTousers")
-  events_events_updated_by_user_idTousers                 Event[]              @relation("events_updated_by_user_idTousers")
-  late_requests_late_requests_approved_by_user_idTousers  LateRequest[]        @relation("late_requests_approved_by_user_idTousers")
-  late_requests_late_requests_deleted_by_user_idTousers   LateRequest[]        @relation("late_requests_deleted_by_user_idTousers")
-  late_requests_late_requests_updated_by_user_idTousers   LateRequest[]        @relation("late_requests_updated_by_user_idTousers")
   late_requests_late_requests_user_idTousers              LateRequest[]        @relation("late_requests_user_idTousers")
-  approvedLeaves                                          LeaveRequest[]       @relation("Approver")
-  leave_requests_leave_requests_deleted_by_user_idTousers LeaveRequest[]       @relation("leave_requests_deleted_by_user_idTousers")
-  leave_requests_leave_requests_updated_by_user_idTousers LeaveRequest[]       @relation("leave_requests_updated_by_user_idTousers")
   leaveRequests                                           LeaveRequest[]       @relation("Requester")
-  locationsDeleted                                        Location[]           @relation("LocationDeleter")
-  locationsUpdated                                        Location[]           @relation("LocationUpdater")
   locationsCreated                                        Location[]           @relation("LocationCreator")
   notifications                                           Notification[]
-  shiftsCreated                                           Shift[]              @relation("ShiftCreator")
-  shiftsDeleted                                           Shift[]              @relation("ShiftDeleter")
-  shiftsUpdated                                           Shift[]              @relation("ShiftUpdater")
   shifts                                                  Shift[]              @relation("UserShift")
   branch                                                  Branch?              @relation("UserBranch", fields: [branchId], references: [branchId])
-  updatedBy                                               User?                @relation("UserUpdater", fields: [updatedByUserId], references: [userId])
-  usersUpdated                                            User[]               @relation("UserUpdater")
-  passwordResets                                          PasswordReset[]
   sessions                                                Session[]
   
   // Announcement Relations
   createdAnnouncements                                    Announcement[]       @relation("AnnouncementCreator")
-  updatedAnnouncements                                    Announcement[]       @relation("AnnouncementUpdater")
   sentAnnouncements                                       Announcement[]       @relation("AnnouncementSender")
   announcementRecipients                                  AnnouncementRecipient[]
 
@@ -76,15 +60,8 @@ model Branch {
   name               String               @map("name")
   code               String               @unique @map("code")
   address            String?              @map("address")
-  createdAt          DateTime             @default(now()) @map("created_at")
-  updatedAt          DateTime             @default(now()) @updatedAt @map("updated_at")
   createdByUserId    Int?                 @map("created_by_user_id")
-  updatedByUserId    Int?                 @map("updated_by_user_id")
-  deletedAt          DateTime?            @map("deleted_at")
-  deletedByUserId    Int?                 @map("deleted_by_user_id")
   creator            User?                @relation("BranchCreator", fields: [createdByUserId], references: [userId])
-  deletedBy          User?                @relation("BranchDeleter", fields: [deletedByUserId], references: [userId])
-  updatedBy          User?                @relation("BranchUpdater", fields: [updatedByUserId], references: [userId])
   EventParticipants  EventParticipant[]
   users              User[]               @relation("UserBranch")
 
@@ -112,11 +89,9 @@ model Attendance {
   lateMinutes      Int?             @map("late_minutes")
   note             String?
   isAutoCheckout   Boolean          @default(false) @map("is_auto_checkout")
-  createdAt        DateTime         @default(now()) @map("created_at")
   eventId          Int?             @map("event_id")
   deleteReason     String?          @map("delete_reason")
-  deletedAt        DateTime?        @map("deleted_at")
-  deletedByUserId  Int?             @map("deleted_by_user_id")
+  isDeleted        Boolean          @default(false) @map("is_deleted")
   event            Event?           @relation(fields: [eventId], references: [eventId])
   location         Location?        @relation(fields: [locationId], references: [locationId])
   shift            Shift?           @relation(fields: [shiftId], references: [shiftId])
@@ -129,26 +104,21 @@ model LeaveRequest {
   leaveId                                        Int         @id @default(autoincrement()) @map("leave_id")
   userId                                         Int         @map("user_id")
   leaveType                                      LeaveType   @map("leave_type")
+  isHourly                                       Boolean     @default(false) @map("is_hourly")
   startDate                                      DateTime    @map("start_date") @db.Date
   endDate                                        DateTime    @map("end_date") @db.Date
+  startTime                                      String?     @map("start_time")
+  endTime                                        String?     @map("end_time")
+  leaveHours                                     Float?      @map("leave_hours")
   reason                                         String?
   status                                         LeaveStatus @default(PENDING)
   attachmentUrl                                  String?     @map("attachment_url")
   medicalCertificateUrl                          String?     @map("medical_certificate_url") // ใบรับรองแพทย์ (สำหรับ SICK >= 3 วัน, MATERNITY, STERILIZATION)
-  approvedByUserId                               Int?        @map("approved_by_user_id")
   adminComment                                   String?     @map("admin_comment")
-  createdAt                                      DateTime    @default(now()) @map("created_at")
-  updatedAt                                      DateTime    @default(now()) @updatedAt @map("updated_at")
-  approvedAt                                     DateTime?   @map("approved_at")
   numberOfDays                                   Int         @default(1) @map("number_of_days")
   paidDays                                       Int?        @map("paid_days") // จำนวนวันที่ได้รับค่าจ้าง (คำนวณตาม LeaveType)
   rejectionReason                                String?     @map("rejection_reason")
-  deletedAt                                      DateTime?   @map("deleted_at")
-  deletedByUserId                                Int?        @map("deleted_by_user_id")
-  updatedByUserId                                Int?        @map("updated_by_user_id")
-  approver                                       User?       @relation("Approver", fields: [approvedByUserId], references: [userId])
-  users_leave_requests_deleted_by_user_idTousers User?       @relation("leave_requests_deleted_by_user_idTousers", fields: [deletedByUserId], references: [userId])
-  users_leave_requests_updated_by_user_idTousers User?       @relation("leave_requests_updated_by_user_idTousers", fields: [updatedByUserId], references: [userId])
+  approvalActions                                ApprovalAction[]
   user                                           User        @relation("Requester", fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("leave_requests")
@@ -164,7 +134,7 @@ model AuditLog {
   newValues   Json?    @map("new_values")
   ipAddress   String?  @map("ip_address")
   userAgent   String?  @map("user_agent")
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime @default(now()) @map("created_on")
   user        User?    @relation(fields: [userId], references: [userId])
 
   @@map("audit_logs")
@@ -175,21 +145,9 @@ model Notification {
   userId         Int      @map("user_id")
   message        String
   isRead         Boolean  @default(false) @map("is_read")
-  createdAt      DateTime @default(now()) @map("created_at")
   user           User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("notifications")
-}
-
-model DownloadLog {
-  logId      Int      @id @default(autoincrement()) @map("log_id")
-  userId     Int      @map("user_id")
-  fileName   String   @map("file_name")
-  reportType String   @map("report_type")
-  downloadAt DateTime @default(now()) @map("download_at")
-  user       User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
-
-  @@map("download_logs")
 }
 
 model Location {
@@ -199,11 +157,6 @@ model Location {
   longitude       Float           @map("longitude")
   radius          Float           @default(100) @map("radius")
   userId          Int             @map("user_id")
-  createdAt       DateTime        @default(now()) @map("created_at")
-  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at")
-  updatedByUserId Int?            @map("updated_by_user_id")
-  deletedAt       DateTime?       @map("deleted_at")
-  deletedByUserId Int?            @map("deleted_by_user_id")
   deleteReason    String?         @map("delete_reason")
   address         String?
   description     String?
@@ -212,8 +165,6 @@ model Location {
   purpose         LocationPurpose @default(WORK_SITE)
   attendances     Attendance[]
   events          Event[]
-  deletedBy       User?           @relation("LocationDeleter", fields: [deletedByUserId], references: [userId])
-  updatedBy       User?           @relation("LocationUpdater", fields: [updatedByUserId], references: [userId])
   creator         User            @relation("LocationCreator", fields: [userId], references: [userId], onDelete: Cascade)
   shifts          Shift[]
 
@@ -233,18 +184,10 @@ model Shift {
   locationId           Int?         @map("location_id")
   userId               Int          @map("user_id")
   isActive             Boolean      @default(true) @map("is_active")
-  createdAt            DateTime     @default(now()) @map("created_at")
-  updatedAt            DateTime     @default(now()) @updatedAt @map("updated_at")
-  createdByUserId      Int?         @map("created_by_user_id")
-  updatedByUserId      Int?         @map("updated_by_user_id")
-  deletedAt            DateTime?    @map("deleted_at")
-  deletedByUserId      Int?         @map("deleted_by_user_id")
   deleteReason         String?      @map("delete_reason")
+  isDeleted            Boolean      @default(false) @map("is_deleted")
   attendances          Attendance[]
-  creator              User?        @relation("ShiftCreator", fields: [createdByUserId], references: [userId])
-  deletedBy            User?        @relation("ShiftDeleter", fields: [deletedByUserId], references: [userId])
   location             Location?    @relation(fields: [locationId], references: [locationId])
-  updatedBy            User?        @relation("ShiftUpdater", fields: [updatedByUserId], references: [userId])
   user                 User         @relation("UserShift", fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("shifts")
@@ -256,7 +199,6 @@ model EventParticipant {
   userId        Int?     @map("user_id")
   branchId      Int?     @map("branch_id")
   role          Role?
-  createdAt     DateTime @default(now()) @map("created_at")
   branches      Branch?  @relation(fields: [branchId], references: [branchId], onDelete: Cascade)
   event         Event    @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
   users         User?    @relation(fields: [userId], references: [userId], onDelete: Cascade)
@@ -268,24 +210,20 @@ model Event {
   eventId                                Int                  @id @default(autoincrement()) @map("event_id")
   eventName                              String               @map("event_name")
   description                            String?
-  locationId                             Int                  @map("location_id")
+  locationId                             Int?                 @map("location_id")
+  venueName                              String?              @map("venue_name")
+  venueLatitude                          Float?               @map("venue_latitude")
+  venueLongitude                         Float?               @map("venue_longitude")
   startDateTime                          DateTime             @map("start_date_time")
   endDateTime                            DateTime             @map("end_date_time")
   participantType                        EventParticipantType @default(ALL) @map("participant_type")
   isActive                               Boolean              @default(true) @map("is_active")
   createdByUserId                        Int                  @map("created_by_user_id")
-  createdAt                              DateTime             @default(now()) @map("created_at")
-  updatedByUserId                        Int?                 @map("updated_by_user_id")
-  updatedAt                              DateTime             @default(now()) @map("updated_at")
-  deletedAt                              DateTime?            @map("deleted_at")
-  deletedByUserId                        Int?                 @map("deleted_by_user_id")
   deleteReason                           String?              @map("delete_reason")
   attendance                             Attendance[]
   event_participants                     EventParticipant[]
   creator                                User                 @relation("events_created_by_user_idTousers", fields: [createdByUserId], references: [userId], onDelete: Cascade)
-  deletedBy                              User?                @relation("events_deleted_by_user_idTousers", fields: [deletedByUserId], references: [userId])
-  location                               Location             @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
-  updatedBy                              User?                @relation("events_updated_by_user_idTousers", fields: [updatedByUserId], references: [userId])
+  location                               Location?            @relation(fields: [locationId], references: [locationId], onDelete: SetNull)
 
   @@map("events")
 }
@@ -301,34 +239,12 @@ model LateRequest {
   reason                                       String
   status                                       ApprovalStatus @default(PENDING)
   attachmentUrl                                String?        @map("attachment_url")
-  approvedByUserId                             Int?           @map("approved_by_user_id")
   adminComment                                 String?        @map("admin_comment")
-  approvedAt                                   DateTime?      @map("approved_at")
   rejectionReason                              String?        @map("rejection_reason")
-  createdAt                                    DateTime       @default(now()) @map("created_at")
-  updatedAt                                    DateTime       @default(now()) @map("updated_at")
-  deletedAt                                    DateTime?      @map("deleted_at")
-  deletedByUserId                              Int?           @map("deleted_by_user_id")
-  updatedByUserId                              Int?           @map("updated_by_user_id")
-  approver                                     User?          @relation("late_requests_approved_by_user_idTousers", fields: [approvedByUserId], references: [userId])
-  deletedBy                                    User?          @relation("late_requests_deleted_by_user_idTousers", fields: [deletedByUserId], references: [userId])
-  updatedBy                                    User?          @relation("late_requests_updated_by_user_idTousers", fields: [updatedByUserId], references: [userId])
+  approvalActions                              ApprovalAction[]
   user                                         User           @relation("late_requests_user_idTousers", fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("late_requests")
-}
-
-model PasswordReset {
-  resetId   Int      @id @default(autoincrement()) @map("reset_id")
-  userId    Int      @map("user_id")
-  token     String   @unique @map("token")
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  isUsed    Boolean  @default(false) @map("is_used")
-  usedAt    DateTime? @map("used_at")
-  user      User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
-
-  @@map("password_resets")
 }
 
 enum Role {
@@ -358,6 +274,7 @@ enum Title {
 enum AttendanceStatus {
   ON_TIME
   LATE
+  LATE_APPROVED // มาสายแต่ได้รับการอนุมัติคำขอมาสายแล้ว
   ABSENT
   LEAVE_APPROVED  // ลาได้รับอนุมัติแล้ว แต่มาเข้างานจริง (ถือว่า on-time)
 }
@@ -429,7 +346,7 @@ model Session {
   expiresAt                DateTime @map("expires_at")
   refreshToken             String  @unique
   refreshTokenExpiresAt    DateTime @map("refresh_token_expires_at")
-  createdAt                DateTime @default(now()) @map("created_at")
+  createdAt                DateTime @default(now()) @map("created_on")
   ipAddress                String? @map("ip_address")
   userAgent                String? @map("user_agent")
   
@@ -443,24 +360,36 @@ model Session {
   @@map("sessions")
 }
 
+model ApprovalAction {
+  approvalActionId Int                @id @default(autoincrement()) @map("approval_action_id")
+  leaveId          Int?               @map("leave_id")
+  lateRequestId    Int?               @map("late_request_id")
+  actorUserId      Int                @map("actor_user_id")
+  action           ApprovalActionType
+  adminComment     String?            @map("admin_comment")
+  rejectionReason  String?            @map("rejection_reason")
+  actor            User               @relation(fields: [actorUserId], references: [userId], onDelete: Cascade)
+  leaveRequest     LeaveRequest?      @relation(fields: [leaveId], references: [leaveId], onDelete: Cascade)
+  lateRequest      LateRequest?       @relation(fields: [lateRequestId], references: [lateRequestId], onDelete: Cascade)
+
+  @@index([leaveId, approvalActionId])
+  @@index([lateRequestId, approvalActionId])
+  @@index([actorUserId])
+  @@map("approval_actions")
+}
+
 model Announcement {
   announcementId        Int                    @id @default(autoincrement()) @map("announcement_id")
   title                 String                 @map("title")
   content               String                 @map("content")
   targetRoles           Role[]                 @default([]) // บุคลากรประเภท เว้นไว้ = EVERYONE
   targetBranchIds       Int[]                  @default([]) @map("target_branch_ids") // สาขาเฉพาะ เว้นไว้ = EVERYONE
+  targetUserIds         Int[]                  @default([]) @map("target_user_ids") // ระบุ userId เฉพาะ เว้นไว้ = ใช้ role/branch filter
   status                AnnouncementStatus     @default(DRAFT) @map("status")
   createdByUserId       Int                    @map("created_by_user_id")
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedByUserId       Int?                   @map("updated_by_user_id")
-  updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at")
-  sentAt                DateTime?              @map("sent_at")
   sentByUserId          Int?                   @map("sent_by_user_id")
-  deletedAt             DateTime?              @map("deleted_at")
-  deleteReason          String?                @map("delete_reason")
 
   creator               User                   @relation("AnnouncementCreator", fields: [createdByUserId], references: [userId], onDelete: Cascade)
-  updatedBy             User?                  @relation("AnnouncementUpdater", fields: [updatedByUserId], references: [userId])
   sentBy                User?                  @relation("AnnouncementSender", fields: [sentByUserId], references: [userId])
   recipients            AnnouncementRecipient[]
 
@@ -471,9 +400,6 @@ model AnnouncementRecipient {
   recipientId           Int                    @id @default(autoincrement()) @map("recipient_id")
   announcementId        Int                    @map("announcement_id")
   userId                Int                    @map("user_id")
-  sentAt                DateTime?              @map("sent_at")
-  createdAt             DateTime               @default(now()) @map("created_at")
-
   announcement          Announcement           @relation(fields: [announcementId], references: [announcementId], onDelete: Cascade)
   user                  User                   @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
@@ -483,4 +409,9 @@ model AnnouncementRecipient {
 enum AnnouncementStatus {
   DRAFT
   SENT
+}
+
+enum ApprovalActionType {
+  APPROVED
+  REJECTED
 }

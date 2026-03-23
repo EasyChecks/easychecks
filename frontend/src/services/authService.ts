@@ -29,6 +29,7 @@ export interface LoginResponse {
   accessToken: string;  // JWT สำหรับแนบกับ API request ถัดไปทั้งหมด
   refreshToken: string; // ใช้ขอ accessToken ใหม่เมื่อหมดอายุ
   expiresIn: number;    // อายุของ accessToken (วินาที)
+  dashboardMode: 'superadmin' | 'admin' | 'manager' | 'user'; // redirect target หลัง login
   user: AuthUser;       // ข้อมูล user ที่ map มาจาก backend แล้ว
 }
 
@@ -42,7 +43,7 @@ export const authService = {
    */
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
-      const response = await api.post<LoginResponse>('api/auth/login', {
+      const response = await api.post<LoginResponse>('/auth/login', {
         employeeId: credentials.employeeId,
         password: credentials.password
       });
@@ -50,6 +51,8 @@ export const authService = {
       // แปลง backend user → AuthUser format ที่ frontend ใช้
       // cast เป็น unknown ก่อน เพราะ backend ส่งมาเป็น raw object ไม่ใช่ AuthUser จริงๆ
       const user = mapBackendUserToAuthUser(response.data.user as unknown as Record<string, unknown>);
+      // เซ็ต dashboardMode จาก backend เพื่อให้ ProtectedRoute ใช้ตัดสิน access จริง
+      user.dashboardMode = response.data.dashboardMode as UserRole;
 
       return {
         ...response.data,
@@ -184,6 +187,7 @@ function mapBackendUserToAuthUser(backendUser: Record<string, unknown>): AuthUse
     branch: String(backendUser.branch ?? ''),
     provinceCode: String(backendUser.provinceCode ?? ''),
     branchCode: String(backendUser.branchCode ?? ''),
+    branchId: backendUser.branchId != null ? Number(backendUser.branchId) : undefined,
     avatar: String(backendUser.avatarUrl ?? ''),
     phone: String(backendUser.phone ?? '')
   };

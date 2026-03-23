@@ -16,11 +16,11 @@ const options: swaggerJsdoc.Options = {
     },
     servers: [
       {
-        url: 'http://localhost:3000',
+        url: 'http://localhost:3001',
         description: 'Development server',
       },
       {
-        url: 'https://api.easycheck.com',
+        url: 'https://easycheck-backend.onrender.com',
         description: 'Production server',
       },
     ],
@@ -29,8 +29,7 @@ const options: swaggerJsdoc.Options = {
         BearerAuth: {
           type: 'http',
           scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'ใส่ JWT Token ที่ได้จากการ Login',
+          description: 'ใส่ Session Token ที่ได้จากการ Login (accessToken) ใน Authorization: Bearer <token>',
         },
       },
       schemas: {
@@ -66,9 +65,9 @@ const options: swaggerJsdoc.Options = {
         Shift: {
           type: 'object',
           properties: {
-            id: {
+            shiftId: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             name: {
               type: 'string',
@@ -91,12 +90,12 @@ const options: swaggerJsdoc.Options = {
             },
             userId: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             locationId: {
               type: 'integer',
               nullable: true,
-              example: 1,
+              example: 151,
             },
             gracePeriodMinutes: {
               type: 'integer',
@@ -119,19 +118,28 @@ const options: swaggerJsdoc.Options = {
               nullable: true,
               example: '2026-02-15',
             },
-            createdAt: {
-              type: 'string',
-              format: 'date-time',
+            isActive: {
+              type: 'boolean',
+              example: true,
             },
-            updatedAt: {
+            isDeleted: {
+              type: 'boolean',
+              example: false,
+            },
+            deleteReason: {
               type: 'string',
-              format: 'date-time',
+              nullable: true,
+              example: null,
             },
           },
         },
         CreateShiftRequest: {
           type: 'object',
-          required: ['name', 'shiftType', 'startTime', 'endTime', 'userId'],
+          required: ['name', 'shiftType', 'startTime', 'endTime'],
+          anyOf: [
+            { required: ['userId'] },
+            { required: ['userIds'] },
+          ],
           properties: {
             name: {
               type: 'string',
@@ -158,14 +166,23 @@ const options: swaggerJsdoc.Options = {
             },
             userId: {
               type: 'integer',
-              example: 1,
-              description: 'รหัสพนักงานที่รับกะนี้',
+              example: 151,
+              description: 'รหัสพนักงานที่รับกะนี้ (single-user create)',
+            },
+            userIds: {
+              type: 'array',
+              items: {
+                type: 'integer',
+              },
+              example: [151, 152, 153],
+              description: 'รายชื่อ userId ที่จะสร้างกะพร้อมกันแบบ all-or-nothing',
             },
             locationId: {
               type: 'integer',
               nullable: true,
-              example: 1,
-              description: 'รหัสสถานที่ทำงาน (optional)',
+              default: 151,
+              example: 151,
+              description: 'รหัสสถานที่ทำงาน (optional, แนะนำใส่ค่า default 151 สำหรับเดโม)',
             },
             gracePeriodMinutes: {
               type: 'integer',
@@ -193,6 +210,129 @@ const options: swaggerJsdoc.Options = {
               example: '2026-02-15',
               description: 'วันที่เฉพาะ (สำหรับ CUSTOM)',
             },
+            replaceExisting: {
+              type: 'boolean',
+              example: false,
+              description: 'ถ้า user มี active shift อยู่แล้ว ให้แทนที่กะเดิมเมื่อกำหนดเป็น true',
+            },
+          },
+        },
+        CreateBulkShiftRequest: {
+          type: 'object',
+          required: ['name', 'shiftType', 'startTime', 'endTime', 'userIds'],
+          properties: {
+            name: {
+              type: 'string',
+              example: 'กะเช้า',
+              description: 'ชื่อของกะงาน',
+            },
+            shiftType: {
+              type: 'string',
+              enum: ['REGULAR', 'SPECIFIC_DAY', 'CUSTOM'],
+              example: 'REGULAR',
+              description: 'ประเภทของกะ',
+            },
+            startTime: {
+              type: 'string',
+              format: 'time',
+              example: '08:00',
+              description: 'เวลาเริ่มงาน (HH:MM)',
+            },
+            endTime: {
+              type: 'string',
+              format: 'time',
+              example: '17:00',
+              description: 'เวลาเลิกงาน (HH:MM)',
+            },
+            userIds: {
+              type: 'array',
+              items: {
+                type: 'integer',
+              },
+              example: [151, 152, 153],
+              description: 'รายชื่อ userId ที่จะสร้างกะ (all-or-nothing)',
+            },
+            locationId: {
+              type: 'integer',
+              nullable: true,
+              example: 201,
+              description: 'รหัสสถานที่ทำงาน (optional)',
+            },
+            gracePeriodMinutes: {
+              type: 'integer',
+              example: 15,
+              description: 'ระยะเวลาที่เข้าก่อนได้ (นาที)',
+            },
+            lateThresholdMinutes: {
+              type: 'integer',
+              example: 30,
+              description: 'ระยะเวลาที่นับว่าสาย (นาที)',
+            },
+            specificDays: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
+              },
+              example: ['MONDAY', 'WEDNESDAY', 'FRIDAY'],
+              description: 'วันที่ใช้กะนี้ (สำหรับ SPECIFIC_DAY)',
+            },
+            customDate: {
+              type: 'string',
+              format: 'date',
+              nullable: true,
+              example: '2026-03-15',
+              description: 'วันที่เฉพาะ (สำหรับ CUSTOM)',
+            },
+            replaceExisting: {
+              type: 'boolean',
+              example: false,
+              description: 'ถ้าพบ active shift เดิม ให้แทนที่กะเดิมเมื่อกำหนดเป็น true',
+            },
+          },
+        },
+        BulkShiftErrorDetail: {
+          type: 'object',
+          properties: {
+            userId: {
+              type: 'integer',
+              nullable: true,
+              example: 151,
+            },
+            code: {
+              type: 'string',
+              enum: ['INVALID_PAYLOAD', 'SHIFT_CONFLICT', 'INVALID_LOCATION', 'FORBIDDEN_BRANCH', 'USER_NOT_FOUND'],
+              example: 'SHIFT_CONFLICT',
+            },
+            message: {
+              type: 'string',
+              example: 'พนักงานมี active shift อยู่แล้ว',
+            },
+            userName: {
+              type: 'string',
+              nullable: true,
+              example: 'สมชาย ใจดี',
+            },
+            employeeId: {
+              type: 'string',
+              nullable: true,
+              example: 'BKK0151',
+            },
+          },
+        },
+        BulkCreateShiftResponse: {
+          type: 'object',
+          properties: {
+            createdCount: {
+              type: 'integer',
+              example: 3,
+            },
+            shifts: {
+              type: 'array',
+              items: {
+                $ref: '#/components/schemas/Shift',
+              },
+            },
           },
         },
         
@@ -202,32 +342,32 @@ const options: swaggerJsdoc.Options = {
           properties: {
             id: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             userId: {
               type: 'integer',
-              example: 1,
+              example: 151,
             },
             shiftId: {
               type: 'integer',
               nullable: true,
-              example: 1,
+              example: 151,
             },
             locationId: {
               type: 'integer',
               nullable: true,
-              example: 1,
+              example: 151,
             },
             checkInTime: {
               type: 'string',
               format: 'date-time',
-              example: '2026-02-13T08:00:00Z',
+              example: '2026-02-13T08:00:00+07:00',
             },
             checkOutTime: {
               type: 'string',
               format: 'date-time',
               nullable: true,
-              example: '2026-02-13T17:00:00Z',
+              example: '2026-02-13T17:00:00+07:00',
             },
             checkInPhoto: {
               type: 'string',
@@ -283,33 +423,20 @@ const options: swaggerJsdoc.Options = {
               type: 'integer',
               example: 0,
             },
-            createdAt: {
-              type: 'string',
-              format: 'date-time',
-            },
-            updatedAt: {
-              type: 'string',
-              format: 'date-time',
-            },
           },
         },
         CheckInRequest: {
           type: 'object',
-          required: ['userId'],
+          required: ['shiftId', 'latitude', 'longitude'],
           properties: {
-            userId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัสผู้ใช้',
-            },
             shiftId: {
               type: 'integer',
-              example: 1,
-              description: 'รหัสกะงาน (optional)',
+              example: 151,
+              description: 'รหัสกะงาน (required)',
             },
             locationId: {
               type: 'integer',
-              example: 1,
+              example: 151,
               description: 'รหัสสถานที่ (optional)',
             },
             photo: {
@@ -321,13 +448,13 @@ const options: swaggerJsdoc.Options = {
               type: 'number',
               format: 'double',
               example: 13.7563,
-              description: 'ละติจูด GPS (optional)',
+              description: 'ละติจูด GPS (required)',
             },
             longitude: {
               type: 'number',
               format: 'double',
               example: 100.5018,
-              description: 'ลองจิจูด GPS (optional)',
+              description: 'ลองจิจูด GPS (required)',
             },
             address: {
               type: 'string',
@@ -338,21 +465,15 @@ const options: swaggerJsdoc.Options = {
         },
         CheckOutRequest: {
           type: 'object',
-          required: ['userId'],
           properties: {
-            userId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัสผู้ใช้',
-            },
             attendanceId: {
               type: 'integer',
-              example: 1,
+              example: 151,
               description: 'รหัส attendance ที่จะออก (optional)',
             },
             shiftId: {
               type: 'integer',
-              example: 1,
+              example: 151,
               description: 'รหัสกะงาน (optional)',
             },
             photo: {
@@ -389,12 +510,12 @@ const options: swaggerJsdoc.Options = {
           properties: {
             employeeId: {
               type: 'string',
-              example: 'BKK001',
-              description: 'รหัสพนักงาน เช่น BKK001, CNX002',
+              example: 'BKK0001',
+              description: 'รหัสพนักงาน เช่น BKK0001, CNX0002',
             },
             password: {
               type: 'string',
-              example: '1234567890123',
+              example: '4850495039640',
               description: 'รหัสผ่าน (nationalId เริ่มต้น หรือรหัสที่เปลี่ยนแล้ว)',
             },
           },
@@ -404,17 +525,40 @@ const options: swaggerJsdoc.Options = {
           properties: {
             accessToken: {
               type: 'string',
-              description: 'JWT Access Token (อายุ 15 นาที)',
-              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+              description: 'Session Token (อายุ 15 นาที) — ใช้ใน Authorization: Bearer <token>',
+              example: 'a3f8d2c1b5e9...',
             },
             refreshToken: {
               type: 'string',
-              description: 'Refresh Token (อายุ 7 วัน)',
-              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+              description: 'Refresh Token (อายุ 7 วัน) — ใช้ขอ accessToken ใหม่',
+              example: 'f7c4e6a2d1b8...',
+            },
+            expiresIn: {
+              type: 'integer',
+              description: 'อายุของ accessToken (วินาที)',
+              example: 900,
             },
             user: {
-              $ref: '#/components/schemas/UserProfile',
+              $ref: '#/components/schemas/LoginUser',
             },
+          },
+        },
+        LoginUser: {
+          type: 'object',
+          description: 'ข้อมูลผู้ใช้ที่ได้รับหลัง Login สำเร็จ',
+          properties: {
+            userId: { type: 'integer', example: 5 },
+            employeeId: { type: 'string', example: 'BKK0001' },
+            firstName: { type: 'string', example: 'สมชาย' },
+            lastName: { type: 'string', example: 'ใจดี' },
+            email: { type: 'string', example: 'somchai@example.com' },
+            role: {
+              type: 'string',
+              enum: ['USER', 'MANAGER', 'ADMIN', 'SUPERADMIN'],
+              example: 'ADMIN',
+            },
+            avatarUrl: { type: 'string', nullable: true, example: 'https://xxx.supabase.co/storage/v1/object/public/avatars/male-1.png' },
+            branchId: { type: 'integer', nullable: true, example: 1 },
           },
         },
 
@@ -428,7 +572,7 @@ const options: swaggerJsdoc.Options = {
             userId: { type: 'integer', example: 5 },
             employeeId: {
               type: 'string',
-              example: 'BKK001',
+              example: 'BKK0001',
               description: 'รหัสพนักงาน auto-generate',
             },
             title: {
@@ -483,29 +627,12 @@ const options: swaggerJsdoc.Options = {
         CreateUserRequest: {
           type: 'object',
           required: [
-            'createdByUserId', 'creatorRole',
             'title', 'firstName', 'lastName', 'gender', 'nationalId',
             'emergent_tel', 'emergent_first_name', 'emergent_last_name',
             'emergent_relation', 'phone', 'email', 'password',
             'birthDate', 'branchId',
           ],
           properties: {
-            createdByUserId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัส Admin ที่สร้าง (audit log)',
-            },
-            creatorRole: {
-              type: 'string',
-              enum: ['ADMIN', 'SUPERADMIN'],
-              example: 'ADMIN',
-            },
-            creatorBranchId: {
-              type: 'integer',
-              nullable: true,
-              example: 1,
-              description: 'สาขาของ Admin (จำเป็นถ้า creatorRole=ADMIN)',
-            },
             title: {
               type: 'string',
               enum: ['MR', 'MRS', 'MISS'],
@@ -559,23 +686,7 @@ const options: swaggerJsdoc.Options = {
         },
         UpdateUserRequest: {
           type: 'object',
-          required: ['updatedByUserId', 'updaterRole'],
           properties: {
-            updatedByUserId: {
-              type: 'integer',
-              example: 1,
-              description: 'รหัส Admin ที่แก้ไข (audit log)',
-            },
-            updaterRole: {
-              type: 'string',
-              enum: ['ADMIN', 'SUPERADMIN'],
-              example: 'ADMIN',
-            },
-            updaterBranchId: {
-              type: 'integer',
-              nullable: true,
-              example: 1,
-            },
             firstName: { type: 'string', example: 'สมชาย' },
             lastName: { type: 'string', example: 'ใจดี' },
             nickname: { type: 'string', example: 'ชาย' },
@@ -627,7 +738,7 @@ const options: swaggerJsdoc.Options = {
             employeeId: { type: 'string', example: 'BKK001' },
             name: { type: 'string', example: 'สมชาย ใจดี' },
             branch: { type: 'string', example: 'สำนักงานใหญ่' },
-            status: { type: 'string', enum: ['ON_TIME', 'LATE', 'ABSENT'], example: 'ON_TIME' },
+            status: { type: 'string', enum: ['ON_TIME', 'LATE', 'LATE_APPROVED', 'ABSENT', 'LEAVE_APPROVED'], example: 'ON_TIME' },
             checkIn: { type: 'string', example: '08:30', description: 'เวลาเข้างาน (HH:mm)' },
             checkOut: { type: 'string', nullable: true, example: '17:30', description: 'เวลาออกงาน (HH:mm)' },
             lateMinutes: { type: 'integer', example: 0 },
@@ -658,19 +769,6 @@ const options: swaggerJsdoc.Options = {
             timestamp: { type: 'string', format: 'date-time' },
           },
         },
-        BranchStats: {
-          type: 'object',
-          description: 'สถิติ KPI ของสาขา',
-          properties: {
-            branchId: { type: 'integer', example: 1 },
-            name: { type: 'string', example: 'สำนักงานใหญ่' },
-            totalEmployees: { type: 'integer', example: 50 },
-            presentToday: { type: 'integer', example: 40 },
-            lateToday: { type: 'integer', example: 5 },
-            absentToday: { type: 'integer', example: 5 },
-            attendanceRate: { type: 'integer', example: 80, description: 'อัตราการมา (%)' },
-          },
-        },
 
         // ──────────────────────────────────────────────
         // Event Schemas
@@ -689,11 +787,8 @@ const options: swaggerJsdoc.Options = {
               example: 'ALL',
             },
             isActive: { type: 'boolean', example: true },
-            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000Z' },
-            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000Z' },
-            createdAt: { type: 'string', format: 'date-time' },
-            updatedAt: { type: 'string', format: 'date-time', nullable: true },
-            deletedAt: { type: 'string', format: 'date-time', nullable: true },
+            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000+07:00' },
+            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000+07:00' },
             deleteReason: { type: 'string', nullable: true },
             location: {
               type: 'object',
@@ -730,8 +825,8 @@ const options: swaggerJsdoc.Options = {
             eventName: { type: 'string', example: 'ประชุมประจำเดือน', description: 'ชื่อกิจกรรม' },
             description: { type: 'string', example: 'ประชุมสรุปผลงาน', description: 'รายละเอียด (optional)' },
             locationId: { type: 'integer', example: 1, description: 'ID สถานที่จัดกิจกรรม' },
-            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000Z', description: 'วันเวลาเริ่ม' },
-            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000Z', description: 'วันเวลาสิ้นสุด' },
+            startDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T09:00:00.000+07:00', description: 'วันเวลาเริ่ม (เวลาไทย)' },
+            endDateTime: { type: 'string', format: 'date-time', example: '2026-03-01T12:00:00.000+07:00', description: 'วันเวลาสิ้นสุด (เวลาไทย)' },
             participantType: {
               type: 'string',
               enum: ['ALL', 'INDIVIDUAL', 'BRANCH', 'ROLE'],
@@ -807,26 +902,81 @@ const options: swaggerJsdoc.Options = {
           },
         },
 
-        // ──────────────────────────────────────────────
-        // Download Report Schemas
-        // ──────────────────────────────────────────────
-        DownloadLog: {
+        // ───────────────────────────────────────────
+        // 📢 Announcement Schemas
+        // ───────────────────────────────────────────
+        Announcement: {
           type: 'object',
-          description: 'ประวัติการดาวน์โหลดรายงาน',
           properties: {
-            downloadLogId: { type: 'integer', example: 1 },
-            userId: { type: 'integer', example: 1 },
-            fileName: { type: 'string', example: 'attendance_1708588800000.xlsx' },
-            reportType: { type: 'string', example: 'attendance' },
-            downloadAt: { type: 'string', format: 'date-time' },
-            user: {
+            announcementId:   { type: 'integer', example: 1 },
+            title:            { type: 'string',  example: 'ประกาศหยุดวันสงกรานต์' },
+            content:          { type: 'string',  example: 'Hdays in 2026 จะมีวันหยุดเพิ่มเติม 1 วัน' },
+            targetRoles:      { type: 'array', items: { type: 'string', enum: ['SUPERADMIN','ADMIN','MANAGER','USER'] }, example: ['ADMIN','USER'] },
+            targetBranchIds:  { type: 'array', items: { type: 'integer' }, example: [1, 2] },
+            status:           { type: 'string', enum: ['DRAFT','SENT'], example: 'DRAFT' },
+            createdByUserId:  { type: 'integer', example: 3 },
+            sentByUserId:     { type: 'integer', nullable: true, example: null },
+            deleteReason:     { type: 'string',  nullable: true, example: null },
+            creator: {
               type: 'object',
               properties: {
-                employeeId: { type: 'string', example: 'BKK001' },
-                firstName: { type: 'string', example: 'สมชาย' },
-                lastName: { type: 'string', example: 'ใจดี' },
+                userId:    { type: 'integer', example: 3 },
+                firstName: { type: 'string',  example: 'สมคิด' },
+                lastName:  { type: 'string',  example: 'เก่งกาจ' },
               },
             },
+          },
+        },
+
+        AnnouncementWithRecipients: {
+          allOf: [
+            { '$ref': '#/components/schemas/Announcement' },
+            {
+              type: 'object',
+              properties: {
+                recipients: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      recipientId:    { type: 'integer', example: 10 },
+                      announcementId: { type: 'integer', example: 1 },
+                      userId:         { type: 'integer', example: 7 },
+                      user: {
+                        type: 'object',
+                        properties: {
+                          userId:    { type: 'integer', example: 7 },
+                          firstName: { type: 'string',  example: 'อนุวัตร' },
+                          lastName:  { type: 'string',  example: 'ค์เกื้อ' },
+                          email:     { type: 'string',  example: 'anuwatch@company.com' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+
+        CreateAnnouncementRequest: {
+          type: 'object',
+          required: ['title', 'content'],
+          properties: {
+            title:           { type: 'string', example: 'ประกาศหยุดวันสงกรานต์' },
+            content:         { type: 'string', example: 'บริษัทหยุดวันสงกรานต์ทุกวัน' },
+            targetRoles:     { type: 'array', items: { type: 'string', enum: ['SUPERADMIN','ADMIN','MANAGER','USER'] }, description: 'ตั้งค่าว่าง = ส่งหาทุก role', example: ['ADMIN','USER'] },
+            targetBranchIds: { type: 'array', items: { type: 'integer' }, description: 'ตั้งค่าว่าง = ส่งทุกสาขา', example: [1, 2] },
+          },
+        },
+
+        UpdateAnnouncementRequest: {
+          type: 'object',
+          properties: {
+            title:           { type: 'string', example: 'ประกาศแก้ไข' },
+            content:         { type: 'string', example: 'เนื้อหาใหม่' },
+            targetRoles:     { type: 'array', items: { type: 'string', enum: ['SUPERADMIN','ADMIN','MANAGER','USER'] } },
+            targetBranchIds: { type: 'array', items: { type: 'integer' } },
           },
         },
       },

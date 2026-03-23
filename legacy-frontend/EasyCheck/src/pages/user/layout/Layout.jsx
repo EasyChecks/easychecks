@@ -373,8 +373,8 @@ function Layout() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold">ระบบลงเวลา</h1>
-                <p className="text-xs text-orange-100">EasyCheck</p>
+                <h1 className="text-xl font-bold">EASYCHECK</h1>
+                <p className="text-xs text-orange-100">ระบบบันทึกเวลาเข้า-ออกเวลา</p>
               </div>
             </div>
 

@@ -1,6 +1,7 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import { Server } from 'http';
 import { parse } from 'url';
+import { toThaiIso } from '../utils/timezone.js';
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: number;
@@ -89,7 +90,7 @@ export function setupLateRequestWebSocket(server: Server) {
             break;
             
           case 'ping':
-            ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+            ws.send(JSON.stringify({ type: 'pong', timestamp: toThaiIso(new Date()) }));
             break;
             
           default:
@@ -223,7 +224,7 @@ export function broadcastLateRequestUpdate(userId: number, action: string, data:
     userId,
     action,
     data,
-    timestamp: new Date().toISOString()
+    timestamp: toThaiIso(new Date())
   };
 
   watchers.forEach((ws) => {

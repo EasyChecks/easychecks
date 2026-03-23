@@ -8,6 +8,9 @@ import {
   updateEvent,
   deleteEvent,
   restoreEvent,
+  eventCheckIn,
+  eventCheckOut,
+  getMyEventAttendance,
 } from '../controllers/event.controller.js';
 import { authenticate, authorizeRole } from '../middleware/auth.middleware.js';
 
@@ -60,10 +63,10 @@ router.get('/', authenticate, getAllEvents);
 router.get('/:id', authenticate, getEventById);
 
 /**
- * PATCH /api/events/:id
+ * PUT /api/events/:id
  * แก้ไขกิจกรรม (Admin/SuperAdmin only)
  */
-router.patch('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), updateEvent);
+router.put('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), updateEvent);
 
 /**
  * DELETE /api/events/:id
@@ -76,5 +79,23 @@ router.delete('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), delete
  * กู้คืนกิจกรรมที่ถูกลบ (Admin/SuperAdmin only)
  */
 router.post('/:id/restore', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), restoreEvent);
+
+/**
+ * POST /api/events/:id/checkin
+ * เข้าร่วมกิจกรรม (ทุก role ที่เป็น eligible participant)
+ */
+router.post('/:id/checkin', authenticate, eventCheckIn);
+
+/**
+ * POST /api/events/:id/checkout
+ * ออกจากกิจกรรม
+ */
+router.post('/:id/checkout', authenticate, eventCheckOut);
+
+/**
+ * GET /api/events/:id/my-attendance
+ * ดึงสถานะการเข้าร่วมกิจกรรมของตัวเอง
+ */
+router.get('/:id/my-attendance', authenticate, getMyEventAttendance);
 
 export default router;

@@ -131,7 +131,7 @@ async function getAllLocations(params: SearchLocationParams): Promise<{
   inactive: number;
 }> {
   const where: any = {
-    deletedAt: null, // ไม่แสดงที่ถูกลบ
+    deleteReason: null,
   };
 
   if (params.search) {
@@ -157,7 +157,7 @@ async function getAllLocations(params: SearchLocationParams): Promise<{
       take: params.take || 20,
       orderBy: [
         { isActive: 'desc' },
-        { createdAt: 'desc' }
+        { locationId: 'desc' }
       ],
       include: {
         creator: {
@@ -166,13 +166,6 @@ async function getAllLocations(params: SearchLocationParams): Promise<{
             firstName: true,
             lastName: true,
             email: true,
-          },
-        },
-        updatedBy: {
-          select: {
-            userId: true,
-            firstName: true,
-            lastName: true,
           },
         },
       },
@@ -201,20 +194,6 @@ async function getLocationById(locationId: number): Promise<Location | null> {
           role: true,
         },
       },
-      updatedBy: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      deletedBy: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
     },
   });
 }
@@ -234,7 +213,7 @@ async function getNearbyLocations(
 
   const locations = await prisma.location.findMany({
     where: {
-      deletedAt: null,
+      deleteReason: null,
       isActive: true,
       latitude: {
         gte: latitude - latRange,
@@ -315,7 +294,7 @@ async function updateLocation(
     throw new Error('ไม่พบสถานที่');
   }
 
-  if (location.deletedAt) {
+  if (location.deleteReason) {
     throw new Error('ไม่สามารถแก้ไขสถานที่ที่ถูกลบแล้ว');
   }
 
@@ -348,18 +327,9 @@ async function updateLocation(
       radius: data.radius,
       description: data.description,
       isActive: data.isActive,
-      updatedByUserId: data.updatedByUserId,
-      updatedAt: new Date(),
     },
     include: {
       creator: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      updatedBy: {
         select: {
           userId: true,
           firstName: true,
@@ -396,7 +366,7 @@ async function deleteLocation(
     throw new Error('ไม่พบสถานที่');
   }
 
-  if (location.deletedAt) {
+  if (location.deleteReason) {
     throw new Error('สถานที่นี้ถูกลบไปแล้ว');
   }
 
@@ -417,20 +387,11 @@ async function deleteLocation(
   const deletedLocation = await prisma.location.update({
     where: { locationId },
     data: {
-      deletedAt: new Date(),
-      deletedByUserId: data.deletedByUserId,
       deleteReason: data.deleteReason,
       isActive: false, // ปิดการใช้งานทันที
     },
     include: {
       creator: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-      deletedBy: {
         select: {
           userId: true,
           firstName: true,
@@ -446,7 +407,7 @@ async function deleteLocation(
     targetTable: 'locations',
     targetId: locationId,
     oldValues: { locationName: location.locationName, isActive: location.isActive },
-    newValues: { deletedAt: new Date(), deleteReason: data.deleteReason },
+    newValues: { deleted: true, deleteReason: data.deleteReason },
   });
 
   return deletedLocation;
@@ -464,16 +425,15 @@ async function restoreLocation(locationId: number, restoredByUserId?: number): P
     throw new Error('ไม่พบสถานที่');
   }
 
-  if (!location.deletedAt) {
+  if (!location.deleteReason) {
     throw new Error('สถานที่นี้ยังไม่ถูกลบ');
   }
 
   const restoredLocation = await prisma.location.update({
     where: { locationId },
     data: {
-      deletedAt: null,
-      deletedByUserId: null,
       deleteReason: null,
+      isActive: true,
     },
     include: {
       creator: {
@@ -491,8 +451,8 @@ async function restoreLocation(locationId: number, restoredByUserId?: number): P
     action: AuditAction.RESTORE_LOCATION,
     targetTable: 'locations',
     targetId: locationId,
-    oldValues: { deletedAt: location.deletedAt, deleteReason: location.deleteReason },
-    newValues: { deletedAt: null },
+    oldValues: { deleteReason: location.deleteReason, isActive: location.isActive },
+    newValues: { deleteReason: null, isActive: true },
   });
 
   return restoredLocation;
@@ -515,13 +475,13 @@ async function getLocationStatistics(): Promise<{
     deletedLocations,
     byTypeRaw,
   ] = await Promise.all([
-    prisma.location.count({ where: { deletedAt: null } }),
-    prisma.location.count({ where: { deletedAt: null, isActive: true } }),
-    prisma.location.count({ where: { deletedAt: null, isActive: false } }),
-    prisma.location.count({ where: { deletedAt: { not: null } } }),
+    prisma.location.count({ where: { deleteReason: null } }),
+    prisma.location.count({ where: { deleteReason: null, isActive: true } }),
+    prisma.location.count({ where: { deleteReason: null, isActive: false } }),
+    prisma.location.count({ where: { deleteReason: { not: null } } }),
     prisma.location.groupBy({
       by: ['locationType'],
-      where: { deletedAt: null },
+      where: { deleteReason: null },
       _count: true,
     }),
   ]);

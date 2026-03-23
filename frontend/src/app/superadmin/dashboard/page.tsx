@@ -1,25 +1,27 @@
 "use client";
 
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  UserX, 
-  Calendar, 
-  Clock,
+import {
   X,
   Search,
   Map as MapIcon,
-  Satellite
+  Satellite,
+  AlertTriangle,
+  CalendarIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem } from "@/services/dashboardService";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { th } from "date-fns/locale";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem, LocationEvent } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
-import type L from "leaflet";
+
 
 // Dynamic import for Map components (client-side only)
 const MapContainer = dynamic(
@@ -42,6 +44,7 @@ const Popup = dynamic(
   () => import("react-leaflet").then((mod) => mod.Popup),
   { ssr: false }
 );
+
 
 // Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
 if (typeof window !== "undefined") {
@@ -124,13 +127,11 @@ const CHART_COLORS = {
 };
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
+  useAuth();
 
   // States
   const [selectedBranch, setSelectedBranch] = useState("all");
   const [statsType, setStatsType] = useState<StatsType>("attendance");
-  const [expandedLocationIds, setExpandedLocationIds] = useState<string[]>([]);
-  const mapRef = useRef<L.Map | null>(null);
 
   // Modal states
   const [showDetailModal, setShowDetailModal] = useState(false);
@@ -148,7 +149,12 @@ export default function AdminDashboard() {
   const [branchesMap, setBranchesMap] = useState<BranchMapItem[]>([]);
   const [apiEvents, setApiEvents] = useState<ApiEventItem[]>([]);
   const [apiLocations, setApiLocations] = useState<LocationItem[]>([]);
+  const [locationEvents, setLocationEvents] = useState<LocationEvent[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   // Branch options: dynamic from API
   const branchOptions: BranchOption[] = useMemo(() => [
@@ -156,35 +162,53 @@ export default function AdminDashboard() {
     ...branchesMap.map(b => ({ code: String(b.branchId), name: b.name })),
   ], [branchesMap]);
 
-  // ── Fetch dashboard data when branch changes ──
+  // ── Fetch dashboard data when branch or date changes ──
   useEffect(() => {
     const branchIdNum =
       selectedBranch !== "all" ? parseInt(selectedBranch, 10) : undefined;
+    // format date as YYYY-MM-DD for API
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
+    const dateParam = isToday ? undefined : dateStr;
 
     const fetchData = async () => {
-      setIsLoading(true);
+      // ครั้งแรกแสดง spinner เต็มหน้า, ครั้งหลังไม่ unmount หน้า
+      if (!dashboardSummary) {
+        setIsLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
       try {
+        // ดึงข้อมูลหลัก (ถ้าพังจะไม่แสดงอะไรเลย)
         const [summary, employees, branches, eventsResp, locations] = await Promise.all([
-          dashboardService.getAttendanceSummary(branchIdNum),
-          dashboardService.getEmployeesToday(branchIdNum),
+          dashboardService.getAttendanceSummary(branchIdNum, dateParam),
+          dashboardService.getEmployeesToday(branchIdNum, dateParam),
           dashboardService.getBranchesMap(),
-          eventService.getAll({ take: 100 }),
+          eventService.getAll({ take: 100, branchId: branchIdNum }),
           locationService.getAll(),
         ]);
         setDashboardSummary(summary);
         setEmployeesToday(employees.data);
         setBranchesMap(branches.data);
         setApiEvents(eventsResp.data);
-        setApiLocations(locations);
+        setApiLocations(locations.data);
+
+        // ดึงข้อมูลเสริม (ถ้าพังไม่กระทบข้อมูลหลัก)
+        const [locEventsResult] = await Promise.allSettled([
+          dashboardService.getLocationEvents(branchIdNum, dateParam),
+        ]);
+        if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
       } catch (err) {
         console.error('[Dashboard] Failed to fetch data:', err);
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     };
 
     fetchData();
-  }, [selectedBranch]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranch, selectedDate]);
 
   // ── Map API employees → AttendanceStats ──
   const attendanceStats = useMemo((): AttendanceStats => {
@@ -199,15 +223,16 @@ export default function AdminDashboard() {
     });
     const absentUsers = employeesToday.filter(e => e.status === 'ABSENT').map(toUser);
     const lateUsers   = employeesToday.filter(e => e.status === 'LATE').map(toUser);
-    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME').map(toUser);
+    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME' || e.status === 'LEAVE_APPROVED').map(toUser);
+    const leaveUsers  = employeesToday.filter(e => e.status === 'LEAVE').map(toUser);
     return {
       totalEmployees: dashboardSummary?.total ?? employeesToday.length,
       absentCount:    dashboardSummary?.absent ?? absentUsers.length,
-      leaveCount:     0,
+      leaveCount:     dashboardSummary?.leave ?? leaveUsers.length,
       lateCount:      dashboardSummary?.late ?? lateUsers.length,
       onTimeCount:    dashboardSummary?.onTime ?? onTimeUsers.length,
       absentUsers,
-      leaveUsers:     [],
+      leaveUsers,
       lateUsers,
       onTimeUsers,
     };
@@ -235,6 +260,47 @@ export default function AdminDashboard() {
       lateEventUsers:       [],
     };
   }, [apiEvents]);
+
+  // ── Filter events for display (date + branch) ──
+  // วันนี้ → แสดงเฉพาะ ongoing/upcoming เรียงใกล้สุด
+  // วันอื่น → แสดงกิจกรรมที่ overlap กับวันนั้น
+  const displayedEvents = useMemo(() => {
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const selectedStr = format(selectedDate, 'yyyy-MM-dd');
+    const isToday = todayStr === selectedStr;
+
+    let filtered: ApiEventItem[];
+
+    if (isToday) {
+      filtered = apiEvents.filter(e => new Date(e.endDateTime) >= now);
+    } else {
+      const dayStart = new Date(selectedDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(selectedDate);
+      dayEnd.setHours(23, 59, 59, 999);
+      filtered = apiEvents.filter(e => {
+        const start = new Date(e.startDateTime);
+        const end = new Date(e.endDateTime);
+        return start <= dayEnd && end >= dayStart;
+      });
+    }
+
+    // กรองตามสาขาที่เลือก โดยเทียบจาก location ของกิจกรรมกับชื่อสาขา
+    if (selectedBranch !== 'all') {
+      const branch = branchesMap.find(b => String(b.branchId) === selectedBranch);
+      if (branch) {
+        filtered = filtered.filter(e => {
+          const locName = e.location?.locationName || '';
+          return locName.includes(branch.name) || branch.name.includes(locName);
+        });
+      }
+    }
+
+    return filtered.sort(
+      (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+    );
+  }, [apiEvents, selectedDate, selectedBranch, branchesMap]);
 
   // Combine locations from API data
   const mappingLocations: LocationWithStatus[] = apiLocations.map((loc) => ({
@@ -277,6 +343,21 @@ export default function AdminDashboard() {
     return location.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
            location.description?.toLowerCase().includes(searchQuery.toLowerCase());
   });
+
+  // ── คำนวณจุดกลางแผนที่ตามสาขาที่เลือก ──
+  const mapCenter: [number, number] = useMemo(() => {
+    if (selectedBranch !== "all" && branchesMap.length > 0 && apiLocations.length > 0) {
+      const branch = branchesMap.find(b => String(b.branchId) === selectedBranch);
+      if (branch) {
+        const matchedLoc = apiLocations.find(
+          loc => loc.locationName.includes(branch.name) || branch.name.includes(loc.locationName)
+        );
+        if (matchedLoc) return [matchedLoc.latitude, matchedLoc.longitude] as [number, number];
+      }
+    }
+    // fallback: กรุงเทพ (สำนักงานใหญ่)
+    return [13.7563, 100.5018] as [number, number];
+  }, [selectedBranch, branchesMap, apiLocations]);
 
   // Donut chart data
   const donutChartData = useMemo(() => {
@@ -322,14 +403,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const toggleLocationDetails = (locationId: string) => {
-    const wasExpanded = expandedLocationIds.includes(locationId);
-    if (wasExpanded) {
-      setExpandedLocationIds(prev => prev.filter(id => id !== locationId));
-    } else {
-      setExpandedLocationIds(prev => [...prev, locationId]);
-    }
-  };
+
 
   const getTileLayerUrl = () => {
     if (mapType === "satellite") {
@@ -355,6 +429,19 @@ export default function AdminDashboard() {
       </div>
     );
   }
+
+  const statusLabel = (status: string) => {
+    switch (status) {
+      case 'ON_TIME':        return { text: 'ตรงเวลา', cls: 'bg-emerald-100 text-emerald-700' };
+      case 'LATE':           return { text: 'มาสาย',   cls: 'bg-orange-100 text-orange-700'   };
+      case 'ABSENT':         return { text: 'ขาดงาน',  cls: 'bg-red-100 text-red-700'         };
+      case 'LEAVE':          return { text: 'ลางาน',   cls: 'bg-blue-100 text-blue-700'       };
+      case 'LEAVE_APPROVED': return { text: 'ลา(มางาน)', cls: 'bg-emerald-100 text-emerald-700' };
+      default:               return { text: 'ไม่ทราบ', cls: 'bg-gray-100 text-gray-600'       };
+    }
+  };
+
+  const totalChart = donutChartData.reduce((a, b) => a + b.value, 0) || 1;
 
   return (
     <div className="min-h-screen bg-secondaryMain">
@@ -405,366 +492,363 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Page Header */}
+      {/* ── Header ── */}
       <div className="bg-white border-b border-borderMain px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-primaryMain">ภาพรวมการปฏิบัติงานทั้งหมด</h1>
-            <p className="text-sm text-textMain/70 mt-1">
-              ข้อมูลเรียลไทม์ของระบบตรวจสอบการเข้างาน การลางาน และพื้นที่อนุญาต
-            </p>
+            <h1 className="text-2xl font-bold text-primaryMain">ภาพรวมการปฏิบัติงาน</h1>
+            <p className="text-sm text-textMain/70 mt-0.5">ข้อมูลเรียลไทม์ · ระบบตรวจสอบการเข้างาน</p>
           </div>
-
-          {/* Branch Filter (SuperAdmin only) */}
-          {user?.role === "superadmin" && (
-            <div className="flex items-center gap-3">
-              <label className="text-sm font-medium text-textMain">สาขา:</label>
-              <select
-                value={selectedBranch}
-                onChange={(e) => setSelectedBranch(e.target.value)}
-                className="appearance-none px-4 py-2.5 pr-10 border-2 border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain focus:border-accentMain focus:ring-2 focus:ring-accentMain/20 transition-all outline-none cursor-pointer bg-white min-w-50"
-              >
-                {branchOptions.map((branch) => (
-                  <option key={branch.code} value={branch.code}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <select
+            value={selectedBranch}
+            onChange={(e) => setSelectedBranch(e.target.value)}
+            className="appearance-none pl-4 pr-10 py-2.5 border-2 border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain focus:border-accentMain focus:ring-2 focus:ring-accentMain/20 outline-none cursor-pointer bg-white min-w-48"
+          >
+            {branchOptions.map((b) => (
+              <option key={b.code} value={b.code}>{b.name}</option>
+            ))}
+          </select>
+          {isRefreshing && (
+            <div className="w-5 h-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
           )}
         </div>
       </div>
 
-      {/* Main Content */}
-      <main className="px-6 py-8 max-w-8xl mx-auto">
-        {/* Section 1: Stats with Selector */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-primaryMain">
-              {statsType === "attendance" ? "สถิติการเข้างาน" : "สถิติการเข้าร่วมกิจกรรม"}
-            </h2>
-            <div className="flex gap-2 bg-borderMain/50 rounded-lg p-1">
-              <Button
-                variant={statsType === "attendance" ? "default" : "ghost"}
-                onClick={() => setStatsType("attendance")}
-              >
-                การเข้างาน
-              </Button>
-              <Button
-                variant={statsType === "event" ? "default" : "ghost"}
-                onClick={() => setStatsType("event")}
-              >
-                กิจกรรม
-              </Button>
-            </div>
-          </div>
+      {/* ── Main 2-column layout ── */}
+      <main className="flex gap-0 h-[calc(100vh-73px)] overflow-hidden">
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {statsType === "attendance" ? (
-              <>
-                <button
-                  onClick={() => handleDetailClick("absent", attendanceStats.absentUsers)}
-                  className="bg-red-500 rounded-2xl shadow-sm p-6 text-white hover:bg-red-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <UserX className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ขาดงาน</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{attendanceStats.absentCount}</p>
-                  </div>
-                </button>
+        {/* ───── LEFT COLUMN: Map + Activity Log ───── */}
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
 
-                <button
-                  onClick={() => handleDetailClick("leave", attendanceStats.leaveUsers)}
-                  className="bg-blue-500 rounded-2xl shadow-sm p-6 text-white hover:bg-blue-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Calendar className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ลางาน</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{attendanceStats.leaveCount}</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleDetailClick("late", attendanceStats.lateUsers)}
-                  className="bg-orange-500 rounded-2xl shadow-sm p-6 text-white hover:bg-orange-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Clock className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">มาสาย</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{attendanceStats.lateCount}</p>
-                  </div>
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => handleDetailClick("notParticipated", eventStats.notParticipatedUsers)}
-                  className="bg-red-500 rounded-2xl shadow-sm p-6 text-white hover:bg-red-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <UserX className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ยังไม่เข้าร่วม</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{eventStats.notParticipatedCount}</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleDetailClick("leave", eventStats.leaveEventUsers)}
-                  className="bg-blue-500 rounded-2xl shadow-sm p-6 text-white hover:bg-blue-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Calendar className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">ลางาน</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{eventStats.leaveEventCount}</p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleDetailClick("late", eventStats.lateEventUsers)}
-                  className="bg-orange-500 rounded-2xl shadow-sm p-6 text-white hover:bg-orange-600 transition-all transform hover:scale-105"
-                >
-                  <div className="flex items-center justify-between h-full gap-4">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                      <Clock className="w-12 h-12" />
-                    </div>
-                    <div className="flex-1 text-left">
-                      <h3 className="text-white/90 text-xl font-semibold mb-1">มาสาย</h3>
-                      <p className="text-sm text-white/80">คลิกเพื่อดูรายละเอียด →</p>
-                    </div>
-                    <p className="text-6xl font-bold">{eventStats.lateEventCount}</p>
-                  </div>
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Section 2: Donut Chart */}
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle className="text-primaryMain">
-              {statsType === "attendance" ? "สัดส่วนการมาทำงาน" : "สัดส่วนการเข้าร่วมกิจกรรม"}
-            </CardTitle>
-            <CardDescription>
-              แสดงสัดส่วนข้อมูลในรูปแบบกราฟวงกลม (Donut Chart)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-col md:flex-row items-center gap-8">
-              {/* Donut Chart */}
-              <div className="w-full md:w-1/2 h-75">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={donutChartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
-                      dataKey="value"
-                      label={({ name, percent }: { name?: string; percent?: number }) => 
-                        `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`
-                      }
-                    >
-                      {donutChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: "white",
-                        border: "2px solid #E2E8F0",
-                        borderRadius: "8px",
-                        padding: "8px",
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Legend */}
-              <div className="w-full md:w-1/2 space-y-4">
-                {donutChartData.map((item) => (
-                  <div key={item.name} className="flex items-center justify-between p-4 bg-secondaryMain rounded-lg border-2 border-borderMain">
-                    <div className="flex items-center gap-3">
-                      <div 
-                        className="w-4 h-4 rounded-full" 
-                        style={{ backgroundColor: item.color }}
-                      />
-                      <span className="font-medium text-textMain">{item.name}</span>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-primaryMain">{item.value}</p>
-                      <p className="text-xs text-textMain/70">
-                        {((item.value / donutChartData.reduce((a, b) => a + b.value, 0)) * 100).toFixed(1)}%
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Section 3: Map ต้องใช้ MapContainer จาก react-leaflet */}
-        <Card>
-          <CardHeader className="border-b border-borderMain">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-primaryMain">ตั้งค่าพื้นที่และกิจกรรม</CardTitle>
-                <CardDescription className="mt-1">
-                  กำหนดพื้นที่ปฏิบัติงานและกิจกรรมต่างๆ ที่พนักงานสามารถเข้าถึงได้
-                </CardDescription>
-              </div>
-              <Badge variant="secondary" className="text-accentMain bg-accentMain/10 text-sm px-4 py-2">
-                {locationsWithStatus.length} รายการ
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="p-6">
-            {/* Map Controls */}
-            <div className="flex flex-col md:flex-row gap-4 mb-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-textMain/40" />
+          {/* Map */}
+          <div className="relative flex-1 min-h-0">
+            {/* Map Controls overlay */}
+            <div className="absolute top-3 left-12 right-3 z-999 flex gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-52">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="text"
                   placeholder="ค้นหาพื้นที่หรือกิจกรรม..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-borderMain rounded-lg focus:outline-none focus:ring-2 focus:ring-primaryMain"
+                  className="w-full pl-9 pr-3 py-2 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-lg text-sm shadow focus:outline-none focus:ring-2 focus:ring-primaryMain"
                 />
               </div>
-              <div className="flex gap-2">
-                <Button
-                  variant={filterType === 'all' ? 'default' : 'outline'}
-                  onClick={() => setFilterType('all')}
-                  size="sm"
-                >
-                  ทั้งหมด
-                </Button>
-                <Button
-                  variant={filterType === 'location' ? 'default' : 'outline'}
-                  onClick={() => setFilterType('location')}
-                  size="sm"
-                >
-                  พื้นที่
-                </Button>
-                <Button
-                  variant={filterType === 'event' ? 'default' : 'outline'}
-                  onClick={() => setFilterType('event')}
-                  size="sm"
-                >
-                  กิจกรรม
-                </Button>
-                <Button
-                  variant={mapType === 'default' ? 'default' : 'outline'}
+              <div className="flex gap-1">
+                {(['all','location','event'] as FilterType[]).map(f => (
+                  <Button key={f} size="sm" variant="ghost"
+                    onClick={() => setFilterType(f)}
+                    style={filterType === f ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                    className="text-xs shadow-md border border-gray-300 rounded-md"
+                  >
+                    {{ all: 'ทั้งหมด', location: 'พื้นที่', event: 'กิจกรรม' }[f]}
+                  </Button>
+                ))}
+                <Button size="sm" variant="ghost"
                   onClick={() => setMapType('default')}
-                  size="sm"
-                >
-                  <MapIcon className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant={mapType === 'satellite' ? 'default' : 'outline'}
+                  style={mapType === 'default' ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                  className="shadow-md border border-gray-300 rounded-md"
+                ><MapIcon className="h-4 w-4" /></Button>
+                <Button size="sm" variant="ghost"
                   onClick={() => setMapType('satellite')}
-                  size="sm"
-                >
-                  <Satellite className="h-4 w-4" />
-                </Button>
+                  style={mapType === 'satellite' ? { backgroundColor: '#0f172a', color: '#fff' } : { backgroundColor: '#fff', color: '#334155' }}
+                  className="shadow-md border border-gray-300 rounded-md"
+                ><Satellite className="h-4 w-4" /></Button>
               </div>
             </div>
 
-            {/* Map */}
-            {typeof window !== 'undefined' && filteredLocations.length > 0 && (
-              <div className="h-125 rounded-lg overflow-hidden border border-borderMain">
-                <MapContainer
-                  center={[filteredLocations[0].latitude, filteredLocations[0].longitude]}
-                  zoom={13}
-                  className="h-full w-full"
-                  ref={mapRef}
-                >
-                  <TileLayer
-                    attribution={getTileLayerAttribution()}
-                    url={getTileLayerUrl()}
-                  />
-                  {filteredLocations.map((location) => (
-                    <React.Fragment key={location.id}>
-                      <Marker
-                        position={[location.latitude, location.longitude]}
-                      >
-                        <Popup>
-                          <div className="p-2">
-                            <h3 className="font-bold text-sm">{location.name}</h3>
-                            {location.description && (
-                              <p className="text-xs text-gray-600 mt-1">{location.description}</p>
-                            )}
-                            <div className="mt-2 space-y-1">
-                              <p className="text-xs">
-                                <span className="font-medium">ทีม:</span> {location.team}
-                              </p>
-                              <p className="text-xs">
-                                <span className="font-medium">เวลา:</span> {location.time}
-                              </p>
-                              <p className={`text-xs font-medium ${location.statusColor}`}>
-                                {location.checkInStatus}
-                              </p>
-                            </div>
-                          </div>
-                        </Popup>
-                      </Marker>
-                      <Circle
-                        center={[location.latitude, location.longitude]}
-                        radius={location.radius}
-                        pathOptions={{
-                          color: location.type === 'event' ? '#f97316' : '#10b981',
-                          fillColor: location.type === 'event' ? '#f97316' : '#10b981',
-                          fillOpacity: 0.2,
-                        }}
-                      />
-                    </React.Fragment>
-                  ))}
-                </MapContainer>
+            {/* Map itself */}
+            {typeof window !== 'undefined' && filteredLocations.length > 0 ? (
+              <MapContainer
+                key={`map-${selectedBranch}`}
+                center={mapCenter}
+                zoom={selectedBranch !== "all" ? 15 : 13}
+                className="h-full w-full"
+              >
+                <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
+                {filteredLocations.map((location) => (
+                  <React.Fragment key={location.id}>
+                    <Marker position={[location.latitude, location.longitude]}>
+                      <Popup>
+                        <div className="p-2 min-w-40">
+                          <p className="font-bold text-sm">{location.name}</p>
+                          {location.description && <p className="text-xs text-gray-500 mt-1">{location.description}</p>}
+                          <span className={`text-xs font-medium mt-2 inline-block ${location.statusColor}`}>{location.checkInStatus}</span>
+                        </div>
+                      </Popup>
+                    </Marker>
+                    <Circle
+                      center={[location.latitude, location.longitude]}
+                      radius={location.radius}
+                      pathOptions={{
+                        color: location.type === 'event' ? '#f97316' : '#10b981',
+                        fillColor: location.type === 'event' ? '#f97316' : '#10b981',
+                        fillOpacity: 0.15,
+                      }}
+                    />
+                  </React.Fragment>
+                ))}
+              </MapContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center bg-gray-100">
+                <div className="text-center text-gray-400">
+                  <MapIcon className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">ไม่พบข้อมูลพื้นที่</p>
+                </div>
               </div>
             )}
+          </div>
 
-            {/* No Data */}
-            {filteredLocations.length === 0 && (
-              <div className="text-center py-12 text-textMain/60">
-                <MapIcon className="w-16 h-16 mx-auto mb-4 text-textMain/30" />
-                <p className="text-lg font-medium">ไม่พบข้อมูล</p>
-                <p className="text-sm mt-2 text-textMain/50">
-                  ลองค้นหาด้วยคำอื่นหรือเปลี่ยนตัวกรอง
-                </p>
+          {/* Location Events Alert (endpoint #4) */}
+          {locationEvents.length > 0 && (
+            <div className="border-t-2 border-borderMain bg-amber-50 px-4 py-2 shrink-0">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <span className="text-xs font-semibold text-amber-700">แจ้งเตือน: Check-in นอกพื้นที่ ({locationEvents.length} รายการ)</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <div className="space-y-1 max-h-24 overflow-y-auto">
+                {locationEvents.map((evt) => (
+                  <div key={evt.eventId} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1 border border-amber-200">
+                    <span className="text-textMain font-medium">{evt.employeeName}</span>
+                    <span className="text-textMain/60">{evt.expectedLocation}</span>
+                    <span className="text-amber-700 font-mono">{evt.actualDistance}m / {evt.allowedRadius}m</span>
+                    <span className="text-textMain/50">{evt.checkInTime}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Activity Log — สลับตาม tab การเข้างาน / กิจกรรม */}
+          <div className="border-t-2 border-borderMain bg-white flex flex-col flex-1 min-h-0">
+            <div className="px-4 py-2 border-b border-borderMain flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-semibold text-primaryMain">
+                {statsType === 'attendance' ? 'บันทึกการเข้างาน' : 'รายการกิจกรรม'}
+              </h3>
+              <span className="text-xs text-textMain/60">
+                {statsType === 'attendance' ? employeesToday.length : displayedEvents.length} รายการ
+              </span>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {statsType === 'attendance' ? (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderMain/50">
+                    {employeesToday.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
+                    ) : (
+                      employeesToday.map((emp) => {
+                        const nameParts = emp.name.split(' ');
+                        const firstName = nameParts[0] ?? emp.name;
+                        const lastName  = nameParts.slice(1).join(' ');
+                        const sl = statusLabel(emp.status);
+                        return (
+                          <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
+                            <td className="px-3 py-2 text-textMain">{firstName}</td>
+                            <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
+                            <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
+                                {sl.text}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อกิจกรรม</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานที่</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">เริ่ม</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สิ้นสุด</th>
+                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-borderMain/50">
+                    {displayedEvents.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบกิจกรรม</td></tr>
+                    ) : (
+                      displayedEvents.map((evt) => {
+                        const now = new Date();
+                        const start = new Date(evt.startDateTime);
+                        const end = new Date(evt.endDateTime);
+                        const isOngoing = evt.isActive && start <= now && end >= now;
+                        const isUpcoming = start > now;
+                        const evtStatus = isOngoing
+                          ? { text: 'กำลังดำเนินการ', cls: 'bg-green-100 text-green-700' }
+                          : isUpcoming
+                            ? { text: 'กำลังจะมาถึง', cls: 'bg-blue-100 text-blue-700' }
+                            : { text: 'สิ้นสุดแล้ว', cls: 'bg-gray-100 text-gray-600' };
+                        return (
+                          <tr key={evt.eventId} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-3 py-2 text-textMain font-medium">{evt.eventName}</td>
+                            <td className="px-3 py-2 text-textMain/70">{evt.location?.locationName || '-'}</td>
+                            <td className="px-3 py-2 text-textMain/70">{format(start, 'd MMM yy HH:mm', { locale: th })}</td>
+                            <td className="px-3 py-2 text-textMain/70">{format(end, 'd MMM yy HH:mm', { locale: th })}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${evtStatus.cls}`}>
+                                {evtStatus.text}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ───── RIGHT PANEL ───── */}
+        <div className="w-80 shrink-0 border-l-2 border-borderMain bg-white flex flex-col overflow-y-auto">
+
+          {/* Tabs */}
+          <div className="flex shrink-0 border-b-2 border-borderMain">
+            <button
+              onClick={() => setStatsType('attendance')}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
+                statsType === 'attendance'
+                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
+                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+              }`}
+            >
+              การเข้างาน
+            </button>
+            <button
+              onClick={() => setStatsType('event')}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors border-l border-borderMain ${
+                statsType === 'event'
+                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
+                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+              }`}
+            >
+              กิจกรรม
+            </button>
+          </div>
+
+          {/* Date picker */}
+          <div className="px-4 py-2 bg-gray-50 border-b border-borderMain shrink-0">
+            <p className="text-xs text-textMain/60 mb-1">เลือกวันที่เพื่อดูข้อมูล</p>
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+              <PopoverTrigger asChild>
+                <button className="flex items-center gap-2 w-full px-3 py-1.5 bg-white border border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain transition-colors">
+                  <CalendarIcon className="h-4 w-4 text-primaryMain/60" />
+                  <span>{format(selectedDate, 'EEEE d MMMM yyyy', { locale: th })}</span>
+                  {format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd') && (
+                    <span className="ml-auto text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">วันนี้</span>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(day) => { if (day) { setSelectedDate(day); setCalendarOpen(false); } }}
+                  disabled={{ after: new Date() }}
+                  defaultMonth={selectedDate}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Donut Chart */}
+          <div className="px-4 py-3 shrink-0">
+            <div className="h-52">
+              {donutChartData.every(d => d.value === 0) ? (
+                <div className="h-full flex flex-col items-center justify-center text-textMain/40">
+                  <div className="w-28 h-28 rounded-full border-8 border-gray-200 flex items-center justify-center">
+                    <span className="text-xs text-center">ยังไม่มี<br/>ข้อมูล</span>
+                  </div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={donutChartData}
+                      cx="50%" cy="50%"
+                      innerRadius={52} outerRadius={82}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {donutChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px' }}
+                      formatter={(value: number | undefined) => [(value ?? 0) + ' คน']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          {/* Legend rows — clickable */}
+          <div className="px-4 pb-4 space-y-2 shrink-0">
+            {donutChartData.map((item) => {
+              let detailFn: (() => void) | undefined;
+              if (statsType === 'attendance') {
+                if (item.name === 'ขาดงาน') detailFn = () => handleDetailClick('absent', attendanceStats.absentUsers);
+                if (item.name === 'ลางาน')  detailFn = () => handleDetailClick('leave',  attendanceStats.leaveUsers);
+                if (item.name === 'มาสาย')  detailFn = () => handleDetailClick('late',   attendanceStats.lateUsers);
+              } else {
+                if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', eventStats.notParticipatedUsers);
+                if (item.name === 'ลางาน')      detailFn = () => handleDetailClick('leave', eventStats.leaveEventUsers);
+                if (item.name === 'มาสาย')      detailFn = () => handleDetailClick('late',  eventStats.lateEventUsers);
+              }
+              const pct = ((item.value / totalChart) * 100).toFixed(0);
+              return (
+                <button
+                  key={item.name}
+                  onClick={detailFn}
+                  disabled={!detailFn}
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-borderMain hover:border-primaryMain hover:bg-gray-50 transition-colors disabled:cursor-default"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                    <span className="text-sm text-textMain">{item.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-primaryMain">{item.value}</span>
+                    <span className="text-xs text-textMain/50 w-8 text-right">{pct}%</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-borderMain mx-4" />
+
+          {/* Summary totals */}
+          <div className="px-4 py-3 space-y-1">
+            <div className="flex justify-between text-xs">
+              <span className="text-textMain/60">พนักงานทั้งหมด</span>
+              <span className="font-bold text-primaryMain">{attendanceStats.totalEmployees} คน</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-textMain/60">คิดรวมอัตราการสถิติ</span>
+              <span className="font-bold text-emerald-600">{totalChart} คน</span>
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   );

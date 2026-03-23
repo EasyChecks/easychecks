@@ -3,6 +3,11 @@ import type { Shift, Location } from '@prisma/client';
 import { getDistance } from 'geolib';
 import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
+import { getThaiDayRange, getThaiTimeHHMM } from '../utils/timezone.js';
+import { uploadAttendancePhotoToSupabase } from '../utils/supabase-storage.js';
+
+const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
+const AUTO_CHECKOUT_GRACE_MINUTES = 30;
 
 /**
  * 📋 Attendance Service — บริการจัดการการเข้า-ออกงาน
@@ -18,9 +23,9 @@ import { createAuditLog, AuditAction } from './audit.service.js';
 
 export interface CheckInDTO {
   userId: number;       // รหัสพนักงาน — ดึงจาก req.user หลัง authenticate
-  shiftId?: number;     // ถ้าไม่ส่งมา ระบบจะบันทึกแบบไม่มีกะ (walk-in)
+  shiftId?: number;     // บังคับต้องส่งสำหรับ check-in ปกติ
   locationId?: number;  // ถ้าไม่ส่งมา ระบบจะไม่ตรวจสอบพิกัด
-  photo?: string;       // Base64 selfie ใช้พิสูจน์ตัวตน
+  photo?: string;       // Base64/DataURL selfie (อัปโหลด Supabase แล้วเก็บ URL)
   latitude?: number;    // GPS จาก frontend — ใช้คู่กับ locationId
   longitude?: number;
   address?: string;     // ที่อยู่ที่ reverse geocode มาจาก frontend
@@ -30,7 +35,7 @@ export interface CheckOutDTO {
   userId: number;
   attendanceId?: number; // ระบุตรงเพื่อ check-out กะใดกะหนึ่ง; ถ้าไม่ระบุ → หาล่าสุดอัตโนมัติ
   shiftId?: number;
-  photo?: string;
+  photo?: string;        // Base64/DataURL selfie (อัปโหลด Supabase แล้วเก็บ URL)
   latitude?: number;
   longitude?: number;
   address?: string;
@@ -87,6 +92,109 @@ function calculateDistance(
   );
 }
 
+function getShiftEndDateFromCheckIn(checkIn: Date, shiftEndTime: string): Date {
+  const [endHour, endMinute] = shiftEndTime.split(':').map((v) => Number(v));
+
+  const thaiCheckIn = new Date(checkIn.getTime() + THAI_OFFSET_MS);
+  const thaiShiftEnd = new Date(thaiCheckIn);
+  thaiShiftEnd.setUTCHours(endHour ?? 0, endMinute ?? 0, 0, 0);
+
+  // กะข้ามวัน: เวลาเลิก <= เวลาเข้างานในวันเดียวกัน ให้เลื่อนไปวันถัดไป
+  if (thaiShiftEnd.getTime() <= thaiCheckIn.getTime()) {
+    thaiShiftEnd.setUTCDate(thaiShiftEnd.getUTCDate() + 1);
+  }
+
+  return new Date(thaiShiftEnd.getTime() - THAI_OFFSET_MS);
+}
+
+function getShiftDurationMinutes(startTime: string, endTime: string): number {
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  let diff = end - start;
+  if (diff <= 0) diff += 24 * 60;
+  return diff;
+}
+
+async function getApprovedHourlyLeaveMinutes(userId: number, baseDate: Date): Promise<number> {
+  const { start: dayStart } = getThaiDayRange(baseDate);
+
+  const hourlyLeaves = await prisma.leaveRequest.findMany({
+    where: {
+      userId,
+      status: 'APPROVED',
+      isHourly: true,
+      startDate: { lte: dayStart },
+      endDate: { gte: dayStart },
+    },
+    select: {
+      leaveHours: true,
+      startTime: true,
+      endTime: true,
+    },
+  });
+
+  if (hourlyLeaves.length === 0) return 0;
+
+  return hourlyLeaves.reduce((sum, leave) => {
+    if (leave.leaveHours !== null && leave.leaveHours !== undefined) {
+      return sum + Math.max(0, Math.round(leave.leaveHours * 60));
+    }
+
+    if (leave.startTime && leave.endTime) {
+      let duration = timeToMinutes(leave.endTime) - timeToMinutes(leave.startTime);
+      if (duration < 0) duration += 24 * 60;
+      return sum + Math.max(0, duration);
+    }
+
+    return sum;
+  }, 0);
+}
+
+type AttendanceWithShiftForSummary = {
+  userId: number;
+  checkIn: Date;
+  checkOut: Date | null;
+  shift: Pick<Shift, 'startTime' | 'endTime'> | null;
+};
+
+async function enrichWithWorkSummary<T extends AttendanceWithShiftForSummary>(attendance: T): Promise<T & {
+  workedMinutes: number | null;
+  breakDeductedMinutes: number;
+  leaveDeductedMinutes: number;
+  netWorkedMinutes: number | null;
+}> {
+  if (!attendance.checkOut) {
+    return {
+      ...attendance,
+      workedMinutes: null,
+      breakDeductedMinutes: 0,
+      leaveDeductedMinutes: 0,
+      netWorkedMinutes: null,
+    };
+  }
+
+  const workedMinutes = Math.max(
+    0,
+    Math.round((attendance.checkOut.getTime() - attendance.checkIn.getTime()) / 60000),
+  );
+
+  const shiftDurationMinutes = attendance.shift
+    ? getShiftDurationMinutes(attendance.shift.startTime, attendance.shift.endTime)
+    : 0;
+
+  const breakDeductedMinutes = shiftDurationMinutes > 5 * 60 ? 60 : 0;
+  const leaveDeductedMinutes = await getApprovedHourlyLeaveMinutes(attendance.userId, attendance.checkIn);
+  const netWorkedMinutes = Math.max(0, workedMinutes - breakDeductedMinutes - leaveDeductedMinutes);
+
+  return {
+    ...attendance,
+    workedMinutes,
+    breakDeductedMinutes,
+    leaveDeductedMinutes,
+    netWorkedMinutes,
+  };
+}
+
 /**
  * ตัดสินสถานะการเข้างาน ON_TIME / LATE / ABSENT
  *
@@ -94,29 +202,35 @@ function calculateDistance(
  * Admin สามารถตั้ง gracePeriodMinutes และ lateThresholdMinutes ต่อกะได้
  * → frontend ส่งมาใน CreateShiftDTO, บันทึกไว้ใน Shift record
  *
- * Logic:
- * diff ≤ 0  AND |diff| ≤ gracePeriod  → ON_TIME  (มาก่อน ภายใน grace)
- * diff = 0                             → ON_TIME  (ตรงเวลาพอดี)
- * 0 < diff ≤ lateThreshold             → LATE
- * diff > lateThreshold                 → ABSENT   (สายมากเกินไป)
+ * Logic ที่แก้แล้ว (v2):
+ * diff ≤ grace  → ON_TIME  (มาก่อน หรือสายไม่เกิน grace — ยังถือว่าตรงเวลา)
+ * grace < diff ≤ threshold → LATE    (สายแต่ยังไม่ถึงเกณฑ์ขาด)
+ * diff > threshold         → ABSENT  (สายเกินไป — ขาดงาน)
+ *
+ * ทำไมเปลี่ยน?
+ * เวอร์ชันเก่ามี bug: เงื่อนไข `diff === 0` อยู่หลัง `diff <= 0` → ไม่มีทางเข้าถึง
+ * และ grace ควรรวม "มาก่อน" + "สายนิดหน่อย" ด้วย เช่น grace=15 แปลว่า
+ * มาสายได้ 15 นาทีแล้วยังถือว่า ON_TIME
  */
 function calculateAttendanceStatus(
   checkInTime: string,
   shift: Shift,
 ): { status: AttendanceStatus; lateMinutes: number; message: string } {
   const diff = calculateTimeDifference(checkInTime, shift.startTime);
-  const grace = shift.gracePeriodMinutes;       // เข้าก่อนได้กี่นาที
+  const grace = shift.gracePeriodMinutes;       // สายไม่เกินกี่นาทียังตรงเวลา
   const threshold = shift.lateThresholdMinutes; // สายเกินนี้ถือว่าขาด
 
-  if (diff <= 0 && Math.abs(diff) <= grace) {
-    return { status: 'ON_TIME', lateMinutes: 0, message: `เข้างานตรงเวลา (มาก่อน ${Math.abs(diff)} นาที)` };
+  // diff ≤ 0 = มาก่อนเวลา, diff > 0 = มาหลังเวลา
+  if (diff <= grace) {
+    // มาก่อนหรือสายไม่เกิน grace → ตรงเวลา
+    const earlyOrLate = diff <= 0 ? `มาก่อน ${Math.abs(diff)} นาที` : 'ตรงเวลาพอดี';
+    return { status: 'ON_TIME', lateMinutes: 0, message: `เข้างานตรงเวลา (${earlyOrLate})` };
   }
-  if (diff === 0) {
-    return { status: 'ON_TIME', lateMinutes: 0, message: 'เข้างานตรงเวลา' };
-  }
-  if (diff > 0 && diff <= threshold) {
+  if (diff <= threshold) {
+    // สายแต่ยังไม่ถึง threshold → LATE
     return { status: 'LATE', lateMinutes: diff, message: `มาสาย ${diff} นาที` };
   }
+  // สายเกิน threshold → ABSENT
   return { status: 'ABSENT', lateMinutes: diff, message: `สายเกิน ${threshold} นาที — ถือว่าขาดงาน` };
 }
 
@@ -153,95 +267,135 @@ export const checkIn = async (data: CheckInDTO) => {
   // [A] Destructure ทุก field จาก DTO ที่ controller ส่งมา
   const { userId, shiftId, locationId, photo, latitude, longitude, address } = data;
 
-  // ===== 1. ตรวจสอบการลงชื่อซ้ำในวันเดียวกัน =====
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1); // วันพรุ่งนี้ 00:00 → ใช้เป็น upper bound ของ range วันนี้
+  // ===== 0.5 Validate shift selection =====
+  // บังคับให้ check-in ต้องอิงกะเสมอ เพื่อใช้ location ของกะและป้องกันความคลุมเครือ
+  if (shiftId === undefined || shiftId === null) {
+    throw new Error('กรุณาเลือกกะก่อนเข้างาน');
+  }
+
+  // ===== 0. Validate GPS — ปฏิเสธพิกัด (0,0) เพราะเป็น default ที่ frontend ส่งมาเมื่อ GPS ไม่ทำงาน =====
+  // ทำไมต้องตรวจ? frontend เดิมส่ง lat:0, lng:0 เมื่อ GPS ไม่พร้อม
+  // พิกัด (0,0) อยู่กลางมหาสมุทรแอตแลนติก → ไม่มีทางเป็นตำแหน่งจริง
+  if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
+    throw new Error('กรุณาเปิด GPS เพื่อบันทึกพิกัดตำแหน่ง');
+  }
+  if (latitude === 0 && longitude === 0) {
+    throw new Error('พิกัด GPS ไม่ถูกต้อง (0,0) — กรุณาเปิด GPS แล้วลองใหม่');
+  }
+
+  // ===== 1. ตรวจสอบการลงชื่อซ้ำในวันเดียวกัน (Double-Punch Prevention) =====
+  // ทำไมต้องเพิ่ม isDeleted: false?
+  // ถ้า Admin soft-delete record เก่าไปแล้ว → ต้องให้ check-in ใหม่ได้
+  // ไม่งั้น record ที่ถูกลบจะยังบล็อกอยู่ตลอด
+  const { start: today, end: tomorrow } = getThaiDayRange(); // ขอบวันอ้างอิง Asia/Bangkok
 
   // SQL: SELECT 1 FROM "LeaveRequest"
   //   WHERE "userId"=$1 AND status='APPROVED'
   //   AND "startDate" <= TODAY AND "endDate" >= TODAY
-  //   AND "deletedAt" IS NULL
+  //   AND "isDeleted" = false
   const approvedLeave = await prisma.leaveRequest.findFirst({
     where: {
       userId,
       status: 'APPROVED',     // เฉพาะใบลาที่อนุมัติแล้วเท่านั้น
-      deletedAt: null,         // soft-delete: ไม่นับใบลาที่ถูกลบ
+      isHourly: false,        // บล็อกเฉพาะใบลาเต็มวัน
       startDate: { lte: today },  // ใบลาเริ่มก่อนหรือวันนี้
       endDate: { gte: today },    // ใบลายังไม่หมด
     },
   });
   const hasApprovedLeave = approvedLeave !== null; // true = มีใบลาอนุมัติวันนี้
 
+  if (hasApprovedLeave) {
+    throw new Error('คุณมีใบลาอนุมัติในวันนี้ ไม่สามารถ check-in ได้');
+  }
+
   // SQL: SELECT 1 FROM "Attendance"
   //   WHERE "userId"=$1 AND "checkIn" >= TODAY AND "checkIn" < TOMORROW
   //   AND ("shiftId"=$2 OR $2 IS NULL)
+  //   AND "isDeleted" = false  ← สำคัญ: ไม่นับ record ที่ soft-delete แล้ว
   const existingAttendance = await prisma.attendance.findFirst({
     where: {
       userId,
+      isDeleted: false,
       ...(shiftId !== undefined && { shiftId }), // spread ว่างถ้า shiftId ไม่มี → ตรวจทุกกะ
       checkIn: { gte: today, lt: tomorrow },       // ช่วงวันนี้เท่านั้น
     },
   });
   if (existingAttendance !== null) {
-    // พบ record วันนี้แล้ว → โยน Error ให้ controller ส่ง 500
+    // พบ record วันนี้แล้ว → โยน Error (จะถูก map เป็น 409 Conflict)
     throw new Error(shiftId !== undefined ? 'คุณได้ check-in กะนี้ไปแล้ววันนี้' : 'คุณได้ check-in ไปแล้ววันนี้');
   }
 
   // ===== 2. ดึงข้อมูล Shift (ถ้ามี) =====
   // SQL: SELECT * FROM "Shift" WHERE "shiftId"=$1
   let shift: Shift | null = null;
-  if (shiftId !== undefined) {
-    shift = await prisma.shift.findUnique({ where: { shiftId } });
-    if (shift === null) throw new Error('ไม่พบกะที่ระบุ');               // กะถูกลบไปแล้ว
-    if (shift.userId !== userId) throw new Error('กะนี้ไม่ใช่ของคุณ');  // ป้องกัน check-in สลับกะคนอื่น
-    if (!shift.isActive) throw new Error('กะนี้ถูกปิดใช้งานแล้ว');      // Admin ปิดกะแล้ว
+  shift = await prisma.shift.findUnique({
+    where: { shiftId },
+    include: { location: true }, // ← เพิ่ม: ดึง location ที่ผูกกับกะ เพื่อใช้คำนวณ GPS
+  });
+  if (shift === null) throw new Error('ไม่พบกะที่ระบุ');               // กะถูกลบไปแล้ว
+  if (shift.userId !== userId) throw new Error('กะนี้ไม่ใช่ของคุณ');  // ป้องกัน check-in สลับกะคนอื่น
+  if (!shift.isActive) throw new Error('กะนี้ถูกปิดใช้งานแล้ว');      // Admin ปิดกะแล้ว
+
+  // ===== 2.1 ตรวจสอบว่าเลยเวลาออกงานหรือยัง =====
+  // ทำไมต้องเช็ค? ถ้ากะ 08:00-17:00 แล้วมาเข้างานตอน 18:00
+  // ไม่มีประโยชน์แล้ว → บล็อกไว้เลย ไม่ให้สร้าง record ขยะ
+  // ใช้ calculateTimeDifference ซึ่งรองรับกะข้ามเที่ยงคืน (เช่น 22:00-06:00) ด้วย
+  //
+  // SQL เทียบเท่า: ไม่มี — เป็น business logic ฝั่ง application
+  const currentTimeHHMM = getThaiTimeHHMM();
+  const diffFromEnd = calculateTimeDifference(currentTimeHHMM, shift.endTime);
+  if (diffFromEnd > 0) {
+    throw new Error(`ไม่สามารถเข้างานได้ — เลยเวลาออกงาน (${shift.endTime}) แล้ว`);
   }
 
   // ===== 3. ตรวจสอบ Location (ถ้ามี) =====
-  // SQL: SELECT * FROM "Location" WHERE "locationId"=$1
+  // ลำดับความสำคัญ: locationId ที่ส่งมาตรง > locationId จาก Shift > ไม่มี
+  // ทำไมใช้ลำดับนี้? Admin อาจส่ง locationId เฉพาะกิจ override location ของกะ
   let location: Location | null = null;
   let distance: number | null = null;
-  // ลำดับความสำคัญ: locationId ที่ส่งมาตรง > locationId จาก Shift > ไม่มี
   const targetLocationId = locationId ?? shift?.locationId ?? undefined;
 
   if (targetLocationId !== undefined) {
+    // SQL: SELECT * FROM "Location" WHERE "locationId"=$1
     location = await prisma.location.findUnique({ where: { locationId: targetLocationId } });
     if (location === null) throw new Error('ไม่พบสถานที่ที่ระบุ');
 
-    // ทำไมต้องตรวจสอบ GPS ก่อน write?
-    // ป้องกัน record ค้างที่ไม่มี checkOut เพราะ location ผิด
-    if (latitude !== undefined && longitude !== undefined) {
-      distance = calculateDistance(latitude, longitude, location.latitude, location.longitude);
-      // distance > radius → อยู่นอกพื้นที่ → ไม่อนุญาต
-      if (distance > location.radius) {
-        throw new Error(
-          `คุณอยู่นอกพื้นที่ (ห่าง ${distance.toFixed(0)} ม., อนุญาตสูงสุด ${location.radius} ม.)`,
-        );
-      }
+    // คำนวณระยะห่างระหว่างพนักงานกับศูนย์กลาง location เสมอ
+    // ทำไมบังคับ? เพื่อให้ distance ถูกบันทึกทุกครั้ง ไม่เป็น NULL
+    distance = calculateDistance(latitude, longitude, location.latitude, location.longitude);
+    // distance > radius → อยู่นอกพื้นที่ → ไม่อนุญาต
+    if (distance > location.radius) {
+      throw new Error(
+        `คุณอยู่นอกพื้นที่ (ห่าง ${distance.toFixed(0)} ม., อนุญาตสูงสุด ${location.radius} ม.)`,
+      );
     }
   }
 
   // ===== 4. คำนวณสถานะ =====
-  // แปลงเวลาปัจจุบันเป็น "HH:MM" เพื่อเปรียบเทียบกับ shift.startTime
-  const checkInTime = new Date().toLocaleTimeString('th-TH', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
+  // ทำไมใช้ UTC+7 แทน toLocaleTimeString?
+  // toLocaleTimeString('th-TH') ขึ้นกับ locale ของ server → ต่าง OS ได้ค่าต่างกัน
+  // ใช้ manual offset ให้ได้ format "HH:MM" ที่แน่นอนเสมอ
+  const checkInTime = getThaiTimeHHMM();
+
+  // ถ้ามีคำขอมาสายที่อนุมัติแล้วของวันนี้ ให้ override เป็น LATE_APPROVED ตาม policy
+  const approvedLateRequest = await prisma.lateRequest.findFirst({
+    where: {
+      userId,
+      status: 'APPROVED',
+      requestDate: { gte: today, lt: tomorrow },
+    },
+    orderBy: { lateRequestId: 'desc' },
   });
 
-  let status: AttendanceStatus = 'ON_TIME'; // default ถ้าไม่มีกะ
+  let status: AttendanceStatus = 'ON_TIME';
   let lateMinutes = 0;
   let message = 'เข้างาน';
 
-  if (hasApprovedLeave) {
-    // ทำไม LEAVE_APPROVED ไม่บล็อก check-in?
-    // บางองค์กรต้องให้พนักงานลงชื่อแม้ในวันลา เพื่อยืนยันว่ามาจริง
-    status = 'LEAVE_APPROVED';
-    lateMinutes = 0;
-    message = 'เข้างานในวันที่มีใบลาอนุมัติ';
-  } else if (shift !== null) {
+  if (approvedLateRequest) {
+    status = 'LATE_APPROVED' as AttendanceStatus;
+    lateMinutes = approvedLateRequest.lateMinutes;
+    message = `มาสายอนุมัติแล้ว ${approvedLateRequest.lateMinutes} นาที`;
+  } else {
     // มีกะ → คำนวณด้วย gracePeriodMinutes และ lateThresholdMinutes ของกะนั้น
     const result = calculateAttendanceStatus(checkInTime, shift);
     status = result.status;           // ON_TIME / LATE / ABSENT
@@ -252,16 +406,20 @@ export const checkIn = async (data: CheckInDTO) => {
   // ===== 5. บันทึกลง Database =====
   // SQL: INSERT INTO "Attendance" (...) VALUES (...) RETURNING *
   //      + JOIN "User", "Shift", "Location"
+  const checkInPhotoUrl = photo
+    ? await uploadAttendancePhotoToSupabase(userId, photo, 'check-in')
+    : null;
+
   const attendance = await prisma.attendance.create({
     data: {
       userId,
-      shiftId: shiftId ?? null,                    // null ถ้าเป็น walk-in
-      locationId: targetLocationId ?? null,         // null ถ้าไม่ตรวจ GPS
-      checkInPhoto: photo ?? null,                  // Base64 selfie
-      checkInLat: latitude ?? null,                 // พิกัดตอนเข้า
-      checkInLng: longitude ?? null,
+      shiftId,                                     // check-in ปกติบังคับต้องมีกะ
+      locationId: targetLocationId ?? null,         // ← บันทึก locationId FK เสมอ (ไม่ NULL ถ้ามี shift.location)
+      checkInPhoto: checkInPhotoUrl,                // URL รูปจาก Supabase Storage
+      checkInLat: latitude,                         // ← บังคับบันทึก GPS (ไม่ใช่ null)
+      checkInLng: longitude,
       checkInAddress: address ?? null,              // ที่อยู่ reverse geocode
-      checkInDistance: distance ?? null,            // ระยะห่างจาก location (เมตร)
+      checkInDistance: distance,                    // ← บันทึกระยะห่างจาก location (เมตร)
       status,                                       // ON_TIME / LATE / ABSENT / LEAVE_APPROVED
       lateMinutes,                                  // 0 ถ้าตรงเวลา
       note: message,                                // ข้อความสรุปสถานะ
@@ -312,23 +470,33 @@ export const checkOut = async (data: CheckOutDTO) => {
   // [A] Destructure จาก DTO ที่ controller ส่งมา
   const { userId, attendanceId, shiftId, photo, latitude, longitude, address } = data;
 
+  // ===== 0. Validate GPS — เหมือน checkIn, ปฏิเสธพิกัดที่ไม่ถูกต้อง =====
+  if (latitude === undefined || longitude === undefined || latitude === null || longitude === null) {
+    throw new Error('กรุณาเปิด GPS เพื่อบันทึกพิกัดตำแหน่ง');
+  }
+  if (latitude === 0 && longitude === 0) {
+    throw new Error('พิกัด GPS ไม่ถูกต้อง (0,0) — กรุณาเปิด GPS แล้วลองใหม่');
+  }
+
   // ===== 1. หา record check-in ที่ยังไม่ได้ check-out =====
+  // เพิ่ม isDeleted: false เพื่อไม่ให้หา record ที่ soft-delete ไปแล้ว
   let attendance;
   if (attendanceId !== undefined) {
     // มี attendanceId ตรง → ใช้กันกรณีพนักงานเปิดหลายกะพร้อมกัน (เลือก check-out กะใดกะหนึ่ง)
-    // WHERE "attendanceId"=$1 AND "userId"=$2 AND "checkOut" IS NULL
+    // WHERE "attendanceId"=$1 AND "userId"=$2 AND "checkOut" IS NULL AND "isDeleted"=false
     attendance = await prisma.attendance.findFirst({
-      where: { attendanceId, userId, checkOut: null }, // checkOut: null = ยังไม่ออก
+      where: { attendanceId, userId, checkOut: null, isDeleted: false },
       include: { location: true }, // ต้องการ location.radius สำหรับตรวจ GPS
     });
   } else {
     // ไม่มี attendanceId → หา record ล่าสุดที่ยังไม่ check-out ของ user นี้
-    // SQL: ORDER BY "checkIn" DESC LIMIT 1
+    // SQL: ... AND "isDeleted"=false ORDER BY "checkIn" DESC LIMIT 1
     attendance = await prisma.attendance.findFirst({
       where: {
         userId,
         ...(shiftId !== undefined && { shiftId }), // กรองเพิ่มถ้าระบุ shiftId
         checkOut: null,                             // ยังไม่ได้ออก
+        isDeleted: false,
       },
       orderBy: { checkIn: 'desc' }, // เอาล่าสุดก่อนเสมอ
       include: { location: true },
@@ -342,7 +510,7 @@ export const checkOut = async (data: CheckOutDTO) => {
 
   // ===== 2. ตรวจสอบ GPS (ถ้ามี location ผูกอยู่) =====
   let distance: number | null = null;
-  if (attendance.location !== null && latitude !== undefined && longitude !== undefined) {
+  if (attendance.location !== null) {
     // คำนวณระยะห่างระหว่างพนักงานกับ location ที่ผูกไว้ตอน check-in
     distance = calculateDistance(
       latitude,             // GPS ปัจจุบันของพนักงาน
@@ -360,15 +528,19 @@ export const checkOut = async (data: CheckOutDTO) => {
 
   // ===== 3. อัพเดต check-out =====
   // SQL: UPDATE "Attendance" SET ... WHERE "attendanceId"=$1 RETURNING *
+  const checkOutPhotoUrl = photo
+    ? await uploadAttendancePhotoToSupabase(userId, photo, 'check-out')
+    : null;
+
   const updatedAttendance = await prisma.attendance.update({
     where: { attendanceId: attendance.attendanceId }, // id ของ record ที่พบข้างบน
     data: {
       checkOut: new Date(),          // timestamp ปัจจุบัน
-      checkOutPhoto: photo ?? null,  // selfie ตอนออก
-      checkOutLat: latitude ?? null, // GPS ตอนออก
-      checkOutLng: longitude ?? null,
+      checkOutPhoto: checkOutPhotoUrl, // URL รูปจาก Supabase Storage
+      checkOutLat: latitude,         // ← บังคับบันทึก GPS (ไม่ใช่ null)
+      checkOutLng: longitude,
       checkOutAddress: address ?? null,    // reverse geocode ตอนออก
-      checkOutDistance: distance ?? null,  // ระยะห่างจาก location (เมตร)
+      checkOutDistance: distance,          // ← บันทึกระยะห่างจาก location (เมตร)
     },
     include: {
       // include เพื่อให้ response ที่ส่งกลับมีข้อมูลครบ
@@ -389,7 +561,9 @@ export const checkOut = async (data: CheckOutDTO) => {
     newValues: updatedAttendance,        // สภาพหลัง update (มี checkOut แล้ว)
   });
 
-  return updatedAttendance; // ส่งกลับ controller → WebSocket broadcast
+  const responseAttendance = await enrichWithWorkSummary(updatedAttendance);
+
+  return responseAttendance; // ส่งกลับ controller → WebSocket broadcast
 };
 
 /**
@@ -405,16 +579,15 @@ export const checkOut = async (data: CheckOutDTO) => {
  *   ORDER BY "checkIn" DESC
  */
 export const getTodayAttendance = async (userId: number) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const { start: today, end: tomorrow } = getThaiDayRange();
 
-  return prisma.attendance.findMany({
-    where: { userId, checkIn: { gte: today, lt: tomorrow } },
+  const rows = await prisma.attendance.findMany({
+    where: { userId, isDeleted: false, checkIn: { gte: today, lt: tomorrow } },
     include: { shift: true, location: true },
     orderBy: { checkIn: 'desc' },
   });
+
+  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -431,9 +604,10 @@ export const getAttendanceHistory = async (
   userId: number,
   filters?: { startDate?: Date; endDate?: Date; status?: AttendanceStatus },
 ) => {
-  return prisma.attendance.findMany({
+  const rows = await prisma.attendance.findMany({
     where: {
       userId,
+      isDeleted: false,
       ...(filters?.startDate !== undefined && { checkIn: { gte: filters.startDate } }),
       ...(filters?.endDate !== undefined && { checkIn: { lte: filters.endDate } }),
       ...(filters?.status !== undefined && { status: filters.status }),
@@ -441,6 +615,8 @@ export const getAttendanceHistory = async (
     include: { shift: true, location: true },
     orderBy: { checkIn: 'desc' },
   });
+
+  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -463,8 +639,9 @@ export const getAllAttendances = async (filters?: {
   endDate?: Date;
   status?: AttendanceStatus;
 }) => {
-  return prisma.attendance.findMany({
+  const rows = await prisma.attendance.findMany({
     where: {
+      isDeleted: false,
       ...(filters?.userId !== undefined && { userId: filters.userId }),
       ...(filters?.startDate !== undefined && { checkIn: { gte: filters.startDate } }),
       ...(filters?.endDate !== undefined && { checkIn: { lte: filters.endDate } }),
@@ -479,6 +656,8 @@ export const getAllAttendances = async (filters?: {
     },
     orderBy: { checkIn: 'desc' },
   });
+
+  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -492,16 +671,26 @@ export const getAllAttendances = async (filters?: {
  */
 export const updateAttendance = async (
   attendanceId: number,
-  data: { status?: AttendanceStatus; note?: string; checkIn?: Date; checkOut?: Date },
-  updatedByUserId?: number,
+  data: { status?: AttendanceStatus; note?: string; checkIn?: Date; checkOut?: Date; editReason?: string },
+  editedByUserId?: number,
 ) => {
   // SQL: SELECT 1 FROM "Attendance" WHERE "attendanceId"=$1
-  const attendance = await prisma.attendance.findUnique({ where: { attendanceId } });
+  const attendance = await prisma.attendance.findFirst({ where: { attendanceId, isDeleted: false } });
   if (attendance === null) throw new Error('ไม่พบข้อมูลการเข้างานที่ระบุ');
+
+  const isTimeChanged = (
+    (data.checkIn && attendance.checkIn.getTime() !== data.checkIn.getTime())
+    || (data.checkOut && attendance.checkOut?.getTime() !== data.checkOut.getTime())
+  );
+  if (isTimeChanged && (!data.editReason || data.editReason.trim().length === 0)) {
+    throw new Error('การแก้เวลาเข้างาน/ออกงานต้องระบุเหตุผล (editReason)');
+  }
+
+  const { editReason, ...updatePayload } = data;
 
   const updatedAttendance = await prisma.attendance.update({
     where: { attendanceId },
-    data,
+    data: updatePayload,
     include: {
       user: { select: { userId: true, firstName: true, lastName: true, employeeId: true } },
       shift: true,
@@ -510,12 +699,15 @@ export const updateAttendance = async (
   });
 
   await createAuditLog({
-    userId: updatedByUserId ?? attendance.userId,
+    userId: editedByUserId ?? attendance.userId,
     action: AuditAction.UPDATE_ATTENDANCE,
     targetTable: 'attendance',
     targetId: attendanceId,
-    oldValues: attendance,
-    newValues: updatedAttendance,
+    oldValues: attendance as unknown as Record<string, unknown>,
+    newValues: {
+      ...(updatedAttendance as unknown as Record<string, unknown>),
+      editReason: editReason ?? null,
+    },
   });
 
   return updatedAttendance;
@@ -530,7 +722,7 @@ export const updateAttendance = async (
  * - ถ้าลบผิดสามารถ restore ได้
  *
  * SQL: UPDATE "Attendance"
- *   SET "deletedAt"=NOW(), "deletedByUserId"=$2, "deleteReason"=$3
+ *   SET "isDeleted"=true, "deleteReason"=$2
  *   WHERE "attendanceId"=$1
  */
 export const deleteAttendance = async (
@@ -538,14 +730,13 @@ export const deleteAttendance = async (
   deletedByUserId?: number,
   deleteReason?: string,
 ) => {
-  const attendance = await prisma.attendance.findUnique({ where: { attendanceId } });
+  const attendance = await prisma.attendance.findFirst({ where: { attendanceId, isDeleted: false } });
   if (attendance === null) throw new Error('ไม่พบข้อมูลการเข้างานที่ระบุ');
 
   await prisma.attendance.update({
     where: { attendanceId },
     data: {
-      deletedAt: new Date(),
-      deletedByUserId: deletedByUserId ?? attendance.userId,
+      isDeleted: true,
       deleteReason: deleteReason ?? null,
     },
   });
@@ -555,10 +746,72 @@ export const deleteAttendance = async (
     action: AuditAction.DELETE_ATTENDANCE,
     targetTable: 'attendance',
     targetId: attendanceId,
-    oldValues: attendance,
+    oldValues: attendance as unknown as Record<string, unknown>,
+    newValues: { isDeleted: true, deleteReason: deleteReason ?? null },
   });
 
   return { message: 'ลบข้อมูลการเข้างานเรียบร้อยแล้ว (Soft Delete)' };
+};
+
+/**
+ * 🤖 Auto Checkout
+ * ปิดงานอัตโนมัติเมื่อเลยเวลาเลิกกะ + grace แล้ว แต่ยังไม่ได้ check-out
+ */
+export const autoCheckoutOverdueAttendances = async (): Promise<number> => {
+  const now = new Date();
+
+  const openAttendances = await prisma.attendance.findMany({
+    where: {
+      isDeleted: false,
+      checkOut: null,
+      shiftId: { not: null },
+    },
+    include: {
+      shift: true,
+    },
+    orderBy: { checkIn: 'asc' },
+  });
+
+  let updatedCount = 0;
+
+  for (const attendance of openAttendances) {
+    if (!attendance.shift) continue;
+
+    const shiftEndDate = getShiftEndDateFromCheckIn(attendance.checkIn, attendance.shift.endTime);
+    const autoCheckoutAt = new Date(shiftEndDate.getTime() + AUTO_CHECKOUT_GRACE_MINUTES * 60 * 1000);
+
+    if (now < autoCheckoutAt) continue;
+
+    await prisma.attendance.update({
+      where: { attendanceId: attendance.attendanceId },
+      data: {
+        checkOut: autoCheckoutAt,
+        isAutoCheckout: true,
+        note: attendance.note
+          ? `${attendance.note} | auto-checkout`
+          : 'auto-checkout',
+      },
+    });
+
+    await createAuditLog({
+      userId: attendance.userId,
+      action: AuditAction.AUTO_CHECK_OUT,
+      targetTable: 'attendance',
+      targetId: attendance.attendanceId,
+      oldValues: {
+        checkOut: attendance.checkOut,
+        isAutoCheckout: attendance.isAutoCheckout,
+      },
+      newValues: {
+        checkOut: autoCheckoutAt,
+        isAutoCheckout: true,
+      },
+    });
+
+    updatedCount += 1;
+  }
+
+  return updatedCount;
 };
 
 // ============================================
@@ -573,6 +826,7 @@ export const attendanceService = {
   getAllAttendances,
   updateAttendance,
   deleteAttendance,
+  autoCheckoutOverdueAttendances,
 };
 
 export default attendanceService;

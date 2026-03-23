@@ -1,9 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
+import { parse } from 'url';
 import mainRouter from './routes/index.js';
 import { setupAttendanceWebSocket } from './websocket/attendance.websocket.js';
+import { setupEventWebSocket } from './websocket/event.websocket.js';
 import { setupSwagger } from './config/swagger.js';
+import { startAuditCleanupCron } from './services/audit-cron.service.js';
+import { startAttendanceAutoCheckoutCron } from './services/attendance-cron.service.js';
+import { toThaiIso } from './utils/timezone.js';
+import { AppError } from './utils/custom-errors.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -19,7 +25,7 @@ setupSwagger(app);
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
-    timestamp: new Date().toISOString(),
+    timestamp: toThaiIso(new Date()),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development'
   });
@@ -39,13 +45,22 @@ app.use((req, res) => {
 });
 
 // Error Handler
-app.use((err: any, req: any, res: any, next: any) => {
+import type { Request, Response, NextFunction } from 'express';
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
-  res.status(500).json({
+
+  const maybeAppError = err as Error & { statusCode?: number };
+
+  const statusCode = err instanceof AppError
+    ? err.statusCode
+    : (typeof maybeAppError.statusCode === 'number' ? maybeAppError.statusCode : 500);
+
+  res.status(statusCode).json({
     success: false,
+    statusCode,
     error: err.message || 'Internal server error'
   });
-}); 
+});
 
 // Health Check (เอาไว้เทสว่า Server ดับไหม)
 app.get('/', (req, res) => {
@@ -64,9 +79,32 @@ app.get('/api/test', (req, res) => {
 // สร้าง HTTP server สำหรับ WebSocket
 const server = createServer(app);
 
-// Setup WebSocket สำหรับ real-time attendance
-setupAttendanceWebSocket(server);
+// Setup WebSocket servers (แต่ละตัวจะ register upgrade handler ของตัวเอง)
+const attendanceWss = setupAttendanceWebSocket(server);
+const eventWss = setupEventWebSocket(server);
+
+// แทนที่ upgrade handlers แยกกัน ด้วย centralized routing ตัวเดียว
+// เพราะ attendance handler ทำ socket.destroy() กับ path ที่ไม่ใช่ /ws/attendance
+// ทำให้ /ws/events ถูกปิดก่อนจะถึง event handler
+server.removeAllListeners('upgrade');
+server.on('upgrade', (request, socket, head) => {
+  const { pathname } = parse(request.url || '');
+  if (pathname === '/ws/attendance') {
+    attendanceWss.handleUpgrade(request, socket, head, (ws) => {
+      attendanceWss.emit('connection', ws, request);
+    });
+  } else if (pathname === '/ws/events') {
+    eventWss.handleUpgrade(request, socket, head, (ws) => {
+      eventWss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 server.listen(PORT, () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
+  // เริ่ม cron job ลบ audit log เก่า — เรียกครั้งเดียวตอน server start
+  startAuditCleanupCron();
+  startAttendanceAutoCheckoutCron();
 });

@@ -2,6 +2,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { Server } from 'http';
 import { parse } from 'url';
 import { EventUserActions } from '../services/event.service.js';
+import { toThaiIso } from '../utils/timezone.js';
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: number;
@@ -104,7 +105,7 @@ export function setupEventWebSocket(server: Server) {
           break;
             
         case 'ping':
-          ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+          ws.send(JSON.stringify({ type: 'pong', timestamp: toThaiIso(new Date()) }));
           break;
             
         default:
@@ -170,8 +171,8 @@ async function handleEventSubscription(ws: AuthenticatedWebSocket, message: Even
 
     ws.send(JSON.stringify({
       type: 'success',
-      message: `Subscribed to event: ${event.event_name}`,
-      data: { eventId, eventName: event.event_name }
+      message: `Subscribed to event: ${event.eventName}`,
+      data: { eventId, eventName: event.eventName }
     } as SuccessResponse));
 
     console.log(`✅ User ${ws.employeeId} subscribed to event ${eventId}`);

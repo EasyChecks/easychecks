@@ -1,6 +1,7 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import { Server } from 'http';
 import { parse } from 'url';
+import { toThaiIso } from '../utils/timezone.js';
 
 /**
  * 📡 Attendance WebSocket — real-time broadcast หลัง CUD
@@ -138,7 +139,7 @@ export function setupAttendanceWebSocket(server: Server) {
     ws.send(JSON.stringify({
       type: 'connected',
       message: 'เชื่อมต่อกับระบบ real-time สำเร็จ',
-      timestamp: new Date().toISOString(),
+      timestamp: toThaiIso(new Date()),
       ...(ws.userId     && { userId: ws.userId }),
       ...(ws.employeeId && { employeeId: ws.employeeId }),
       ...(ws.role       && { role: ws.role }),
@@ -154,7 +155,7 @@ export function setupAttendanceWebSocket(server: Server) {
         switch (message.type) {
         case 'ping':
           // client ping มาเอง (ต่างจาก server ping ที่ใช้ heartbeat)
-          ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+          ws.send(JSON.stringify({ type: 'pong', timestamp: toThaiIso(new Date()) }));
           break;
 
         case 'subscribe':
@@ -232,7 +233,7 @@ export function broadcastAttendanceUpdate(action: AttendanceAction, data: unknow
     type: 'attendance_update', // client filter ด้วย type นี้
     action,                    // CHECK_IN / CHECK_OUT / UPDATE / DELETE
     data,                      // attendance record หรือ { attendanceId } สำหรับ DELETE
-    timestamp: new Date().toISOString(),
+    timestamp: toThaiIso(new Date()),
   });
   console.log(`📡 Broadcasted attendance ${action}`);
 }
@@ -253,7 +254,7 @@ export function broadcastShiftUpdate(action: ShiftAction, data: unknown) {
     type: 'shift_update', // client filter ด้วย type นี้
     action,               // CREATE / UPDATE / DELETE
     data,                 // shift record หรือ { shiftId } สำหรับ DELETE
-    timestamp: new Date().toISOString(),
+    timestamp: toThaiIso(new Date()),
   });
   console.log(`📡 Broadcasted shift ${action}`);
 }
@@ -263,7 +264,7 @@ export function broadcastShiftUpdate(action: ShiftAction, data: unknown) {
  * ตัวอย่าง: notification, announcement
  */
 export function broadcastMessage(type: string, data: unknown) {
-  broadcast({ type, data, timestamp: new Date().toISOString() });
+  broadcast({ type, data, timestamp: toThaiIso(new Date()) });
   console.log(`📡 Broadcasted ${type}`);
 }
 
@@ -281,7 +282,7 @@ export function broadcastUserUpdate(action: UserAction, data: unknown) {
     type: 'user_update', // client filter ด้วย type นี้
     action,              // CREATE / UPDATE / DELETE / BULK_CREATE
     data,
-    timestamp: new Date().toISOString(),
+    timestamp: toThaiIso(new Date()),
   });
   console.log(`📡 Broadcasted user ${action}`);
 }

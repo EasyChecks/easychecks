@@ -32,8 +32,8 @@ export interface User {
  * WHERE branchId = ? AND DATE(checkIn) = TODAY()
  * GROUP BY status;
  */
-export async function getAttendanceSummary(user: User, branchId?: number) {
-  const today = new Date();
+export async function getAttendanceSummary(user: User, branchId?: number, date?: string) {
+  const today = date ? new Date(date) : new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -41,6 +41,7 @@ export async function getAttendanceSummary(user: User, branchId?: number) {
   // เลือก branch ตามสิทธิ์ (SUPERADMIN สามารถเลือก branch อื่นได้)
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
+  // ดึง attendance records วันนี้
   const attendances = await prisma.attendance.findMany({
     where: {
       user: {
@@ -60,16 +61,29 @@ export async function getAttendanceSummary(user: User, branchId?: number) {
     },
   });
 
+  // ดึงจำนวนพนักงานที่ลาอนุมัติแล้ววันนี้ (จาก LeaveRequest table)
+  const leaveCount = await prisma.leaveRequest.count({
+    where: {
+      status: 'APPROVED',
+      startDate: { lte: today },
+      endDate: { gte: today },
+      user: {
+        branchId: queryBranchId,
+      },
+    },
+  });
+
   // นับจำนวนตามสถานะ (เพื่อให้ Donut chart มี component แต่ละส่วน)
   const summary = {
     onTime: 0,
     late: 0,
     absent: 0,
-    total: attendances.length,
+    leave: leaveCount,
+    total: attendances.length + leaveCount,
   };
 
   attendances.forEach((att) => {
-    if (att.status === 'ON_TIME') summary.onTime++;
+    if (att.status === 'ON_TIME' || att.status === 'LEAVE_APPROVED') summary.onTime++;
     else if (att.status === 'LATE') summary.late++;
     else if (att.status === 'ABSENT') summary.absent++;
   });
@@ -94,14 +108,15 @@ export async function getAttendanceSummary(user: User, branchId?: number) {
  * WHERE u.branchId = ? AND DATE(a.checkIn) = TODAY()
  * ORDER BY a.checkIn DESC;
  */
-export async function getEmployeesToday(user: User, branchId?: number) {
-  const today = new Date();
+export async function getEmployeesToday(user: User, branchId?: number, date?: string) {
+  const today = date ? new Date(date) : new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
+  // ดึง attendance records วันนี้
   const attendances = await prisma.attendance.findMany({
     where: {
       user: {
@@ -133,7 +148,36 @@ export async function getEmployeesToday(user: User, branchId?: number) {
     },
   });
 
-  return attendances.map((att) => ({
+  // ดึงพนักงานที่ลาอนุมัติแล้ววันนี้ (จาก LeaveRequest table)
+  const approvedLeaves = await prisma.leaveRequest.findMany({
+    where: {
+      status: 'APPROVED',
+      startDate: { lte: today },
+      endDate: { gte: today },
+      user: {
+        branchId: queryBranchId,
+      },
+    },
+    include: {
+      user: {
+        select: {
+          userId: true,
+          employeeId: true,
+          firstName: true,
+          lastName: true,
+          branch: {
+            select: {
+              branchId: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  // รวมข้อมูล attendance + leave
+  const attendanceRows = attendances.map((att) => ({
     employeeId: att.user.employeeId,
     name: `${att.user.firstName} ${att.user.lastName}`,
     branch: att.user.branch?.name || 'N/A',
@@ -152,6 +196,23 @@ export async function getEmployeesToday(user: User, branchId?: number) {
       : null,
     lateMinutes: att.lateMinutes || 0,
   }));
+
+  // เอา userId ที่มี attendance แล้วไม่ต้องซ้ำ
+  const attendedUserIds = new Set(attendances.map(a => a.user.userId));
+
+  const leaveRows = approvedLeaves
+    .filter(lr => !attendedUserIds.has(lr.user.userId))
+    .map((lr) => ({
+      employeeId: lr.user.employeeId,
+      name: `${lr.user.firstName} ${lr.user.lastName}`,
+      branch: lr.user.branch?.name || 'N/A',
+      status: 'LEAVE' as const,
+      checkIn: null,
+      checkOut: null,
+      lateMinutes: 0,
+    }));
+
+  return [...attendanceRows, ...leaveRows];
 }
 
 /**
@@ -200,8 +261,6 @@ export async function getBranchesMap(user: User) {
   return branches.map((branch) => ({
     branchId: branch.branchId,
     name: branch.name,
-    latitude: branch.latitude,
-    longitude: branch.longitude,
     totalEmployees: branch._count.users,
     address: branch.address || '',
   }));
@@ -224,8 +283,8 @@ export async function getBranchesMap(user: User) {
  *   AND u.branchId = ?
  *   AND DATE(a.checkIn) = TODAY();
  */
-export async function getLocationEvents(user: User, branchId?: number) {
-  const today = new Date();
+export async function getLocationEvents(user: User, branchId?: number, date?: string) {
+  const today = date ? new Date(date) : new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -269,7 +328,7 @@ export async function getLocationEvents(user: User, branchId?: number) {
         minute: '2-digit',
         hour12: false,
       }),
-      expectedLocation: att.location?.name || 'Unknown',
+      expectedLocation: att.location?.locationName || 'Unknown',
       actualDistance: Math.round(att.checkInDistance || 0),
       allowedRadius: att.location?.radius || 0,
       timestamp: att.checkIn,
@@ -278,86 +337,11 @@ export async function getLocationEvents(user: User, branchId?: number) {
   return outsideEvents;
 }
 
-/**
- * ดึงสถิติสาขา (Branch Statistics)
- * 
- * ทำไมต้องแยก function นี้?
- * - Admin ต้องเห็นอัตราการมาของพนักงาน (Overall) ในสาขาตัวเอง
- * - ต้อง focus ที่จำนวนคนมาแล้ว vs ทั้งหมด (เป็น percentage)
- * 
- * SQL ที่ใช้:
- * SELECT 
- *   b.branchId, b.name, 
- *   COUNT(DISTINCT u.userId) as totalEmployees,
- *   SUM(CASE WHEN a.status = 'ON_TIME' THEN 1 ELSE 0 END) as presentToday,
- *   SUM(CASE WHEN a.status = 'LATE' THEN 1 ELSE 0 END) as lateToday,
- *   SUM(CASE WHEN a.status = 'ABSENT' THEN 1 ELSE 0 END) as absentToday,
- *   (presentToday / totalEmployees * 100) as attendanceRate
- * FROM branch b
- * LEFT JOIN user u ON b.branchId = u.branchId
- * LEFT JOIN attendance a ON u.userId = a.userId AND DATE(a.checkIn) = TODAY()
- * WHERE b.branchId = ?
- * GROUP BY b.branchId;
- */
-export async function getBranchStats(user: User, branchId?: number) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
-
-  // ดึงข้อมูลเฉพาะของ branch (ชื่อ, ที่อยู่, จำนวนพนักงาน)
-  const branch = await prisma.branch.findUnique({
-    where: { branchId: queryBranchId },
-    include: {
-      _count: {
-        select: { users: true },
-      },
-    },
-  });
-
-  if (!branch) {
-    throw new Error('Branch not found');
-  }
-
-  // ดึง attendance วันนี้
-  const attendances = await prisma.attendance.findMany({
-    where: {
-      user: {
-        branchId: queryBranchId,
-      },
-      checkIn: {
-        gte: today,
-        lt: tomorrow,
-      },
-    },
-  });
-
-  const stats = {
-    branchId: branch.branchId,
-    name: branch.name,
-    totalEmployees: branch._count.users,
-    presentToday: attendances.filter((a) => a.status === 'ON_TIME').length,
-    lateToday: attendances.filter((a) => a.status === 'LATE').length,
-    absentToday: attendances.filter((a) => a.status === 'ABSENT').length,
-    attendanceRate:
-      branch._count.users > 0
-        ? Math.round(
-          ((attendances.length / branch._count.users) * 100 * 100) / 100
-        )
-        : 0,
-  };
-
-  return stats;
-}
-
 export const dashboardService = {
   getAttendanceSummary,
   getEmployeesToday,
   getBranchesMap,
   getLocationEvents,
-  getBranchStats,
 };
 
 export default dashboardService;

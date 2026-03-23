@@ -1,7 +1,16 @@
 import axios from 'axios';
 
+// ใช้ /api-local ซึ่ง Next.js จะ proxy ไปที่ backend container
+// ทำให้ทำงานได้ทั้ง local dev และ production โดยไม่ต้องเปลี่ยน NEXT_PUBLIC_API_URL
+const isLocalDev = typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+const baseURL = isLocalDev
+  ? '/api-local'  // ผ่าน Next.js proxy → http://backend:3001/api
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api');
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api',
+  baseURL,
   headers: {
     'Content-Type': 'application/json',
   },

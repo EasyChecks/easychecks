@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import type { LateRequest, ApprovalStatus } from '@prisma/client';
+import type { LateRequest, ApprovalStatus, Gender, ApprovalActionType } from '@prisma/client';
 import { differenceInMinutes, parse, format } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
 
@@ -34,6 +34,108 @@ export interface ApproveLateRequestDTO {
 export interface RejectLateRequestDTO {
   approvedByUserId: number;
   rejectionReason: string;
+}
+
+interface LateApproverSummary {
+  userId: number;
+  firstName: string;
+  lastName: string;
+  employeeId?: string;
+  email?: string;
+  role?: string;
+  gender?: Gender;
+}
+
+type LateRequestWithApprover = LateRequest & {
+  approvedByUserId: number | null;
+  approver: LateApproverSummary | null;
+};
+
+type LateApprovalActionRow = {
+  lateRequestId: number;
+  actorUserId: number;
+  action: ApprovalActionType;
+  adminComment: string | null;
+  rejectionReason: string | null;
+  actor: {
+    userId: number;
+    firstName: string;
+    lastName: string;
+    employeeId: string;
+    email: string;
+    role: string;
+    gender: Gender;
+  };
+};
+
+async function getLatestLateApprovalMap(lateRequestIds: number[]): Promise<Map<number, LateApprovalActionRow>> {
+  if (lateRequestIds.length === 0) {
+    return new Map();
+  }
+
+  const actions = await prisma.approvalAction.findMany({
+    where: {
+      lateRequestId: { in: lateRequestIds },
+    },
+    orderBy: [
+      { approvalActionId: 'desc' },
+    ],
+    select: {
+      lateRequestId: true,
+      actorUserId: true,
+      action: true,
+      adminComment: true,
+      rejectionReason: true,
+      actor: {
+        select: {
+          userId: true,
+          firstName: true,
+          lastName: true,
+          employeeId: true,
+          email: true,
+          role: true,
+          gender: true,
+        },
+      },
+    },
+  });
+
+  const latestMap = new Map<number, LateApprovalActionRow>();
+  for (const action of actions) {
+    if (action.lateRequestId && !latestMap.has(action.lateRequestId)) {
+      latestMap.set(action.lateRequestId, action as LateApprovalActionRow);
+    }
+  }
+
+  return latestMap;
+}
+
+function attachLateApprover<T extends LateRequest>(
+  requests: T[],
+  latestMap: Map<number, LateApprovalActionRow>
+): LateRequestWithApprover[] {
+  return requests.map((request) => {
+    const latest = latestMap.get(request.lateRequestId);
+    const approver = latest
+      ? {
+          userId: latest.actor.userId,
+          firstName: latest.actor.firstName,
+          lastName: latest.actor.lastName,
+          employeeId: latest.actor.employeeId,
+          email: latest.actor.email,
+          role: latest.actor.role,
+          gender: latest.actor.gender,
+        }
+      : null;
+
+    return {
+      ...request,
+      approvedByUserId: latest?.actorUserId ?? null,
+      approver,
+      adminComment: request.adminComment ?? latest?.adminComment ?? null,
+      rejectionReason: request.rejectionReason ?? latest?.rejectionReason ?? null,
+    };
+  });
 }
 
 /**
@@ -72,7 +174,7 @@ function calculateLateMinutes(scheduledTime: string, actualTime: string): number
  */
 async function createLateRequest(
   data: CreateLateRequestDTO
-): Promise<LateRequest> {
+): Promise<LateRequestWithApprover> {
   // ✅ Validate รูปแบบเวลา HH:MM (00:00 - 23:59)
   // เพื่อป้องกัน invalid format ก่อนที่จะคำนวณ
   const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -139,7 +241,9 @@ async function createLateRequest(
     newValues: { requestDate: data.requestDate, scheduledTime: data.scheduledTime, actualTime: data.actualTime, lateMinutes, reason: data.reason },
   });
 
-  return newLateRequest;
+  const latestMap = await getLatestLateApprovalMap([newLateRequest.lateRequestId]);
+  const [enriched] = attachLateApprover([newLateRequest], latestMap);
+  return enriched;
 }
 
 /**
@@ -150,7 +254,7 @@ async function getLateRequestsByUser(
   status?: ApprovalStatus,
   skip?: number,
   take?: number
-): Promise<{ data: LateRequest[]; total: number }> {
+): Promise<{ data: LateRequestWithApprover[]; total: number }> {
   const where: any = { userId };
 
   if (status) {
@@ -162,7 +266,7 @@ async function getLateRequestsByUser(
       where,
       skip: skip || 0,
       take: take || 10,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { lateRequestId: 'desc' },
       include: {
         user: {
           select: {
@@ -172,19 +276,13 @@ async function getLateRequestsByUser(
             email: true,
           },
         },
-        approver: {
-          select: {
-            userId: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
       },
     }),
     prisma.lateRequest.count({ where }),
   ]);
 
-  return { data, total };
+  const latestMap = await getLatestLateApprovalMap(data.map((request) => request.lateRequestId));
+  return { data: attachLateApprover(data, latestMap), total };
 }
 
 /**
@@ -192,8 +290,8 @@ async function getLateRequestsByUser(
  */
 async function getLateRequestById(
   lateRequestId: number
-): Promise<LateRequest | null> {
-  return prisma.lateRequest.findUnique({
+): Promise<LateRequestWithApprover | null> {
+  const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
     include: {
       user: {
@@ -206,15 +304,16 @@ async function getLateRequestById(
           role: true,
         },
       },
-      approver: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
     },
   });
+
+  if (!lateRequest) {
+    return null;
+  }
+
+  const latestMap = await getLatestLateApprovalMap([lateRequestId]);
+  const [enriched] = attachLateApprover([lateRequest], latestMap);
+  return enriched;
 }
 
 /**
@@ -223,7 +322,7 @@ async function getLateRequestById(
 async function updateLateRequest(
   lateRequestId: number,
   data: UpdateLateRequestDTO
-): Promise<LateRequest> {
+): Promise<LateRequestWithApprover> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
   });
@@ -266,7 +365,6 @@ async function updateLateRequest(
       lateMinutes,
       reason: data.reason,
       attachmentUrl: data.attachmentUrl,
-      updatedAt: new Date(),
     },
   });
 
@@ -279,7 +377,9 @@ async function updateLateRequest(
     newValues: { scheduledTime, actualTime, lateMinutes, reason: data.reason },
   });
 
-  return updatedLateRequest;
+  const latestMap = await getLatestLateApprovalMap([updatedLateRequest.lateRequestId]);
+  const [enriched] = attachLateApprover([updatedLateRequest], latestMap);
+  return enriched;
 }
 
 /**
@@ -362,7 +462,7 @@ async function getAllLateRequests(
   status?: ApprovalStatus,
   skip?: number,
   take?: number
-): Promise<{ data: LateRequest[]; total: number }> {
+): Promise<{ data: LateRequestWithApprover[]; total: number }> {
   const where: any = {};
 
   if (status) {
@@ -374,7 +474,7 @@ async function getAllLateRequests(
       where,
       skip: skip || 0,
       take: take || 10,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { lateRequestId: 'desc' },
       include: {
         user: {
           select: {
@@ -386,19 +486,13 @@ async function getAllLateRequests(
             role: true,
           },
         },
-        approver: {
-          select: {
-            userId: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
       },
     }),
     prisma.lateRequest.count({ where }),
   ]);
 
-  return { data, total };
+  const latestMap = await getLatestLateApprovalMap(data.map((request) => request.lateRequestId));
+  return { data: attachLateApprover(data, latestMap), total };
 }
 
 /**
@@ -407,7 +501,7 @@ async function getAllLateRequests(
 async function approveLateRequest(
   lateRequestId: number,
   data: ApproveLateRequestDTO
-): Promise<LateRequest> {
+): Promise<LateRequestWithApprover> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
   });
@@ -420,16 +514,30 @@ async function approveLateRequest(
     throw new Error('ไม่สามารถอนุมัติคำขอที่มีสถานะอื่นได้');
   }
 
-  const approvedRequest = await prisma.lateRequest.update({
-    where: { lateRequestId },
-    data: {
-      status: 'APPROVED',
-      approvedByUserId: data.approvedByUserId,
-      adminComment: data.adminComment,
-      approvedAt: new Date(),
-      updatedAt: new Date(),
-    },
+  const approvedRequest = await prisma.$transaction(async (tx) => {
+    const updated = await tx.lateRequest.update({
+      where: { lateRequestId },
+      data: {
+        status: 'APPROVED',
+        adminComment: data.adminComment,
+        rejectionReason: null,
+      },
+    });
+
+    await tx.approvalAction.create({
+      data: {
+        lateRequestId,
+        actorUserId: data.approvedByUserId,
+        action: 'APPROVED',
+        adminComment: data.adminComment,
+      },
+    });
+
+    return updated;
   });
+
+  const latestMap = await getLatestLateApprovalMap([approvedRequest.lateRequestId]);
+  const [enriched] = attachLateApprover([approvedRequest], latestMap);
 
   await createAuditLog({
     userId: data.approvedByUserId,
@@ -440,7 +548,7 @@ async function approveLateRequest(
     newValues: { status: 'APPROVED', adminComment: data.adminComment },
   });
 
-  return approvedRequest;
+  return enriched;
 }
 
 /**
@@ -449,7 +557,7 @@ async function approveLateRequest(
 async function rejectLateRequest(
   lateRequestId: number,
   data: RejectLateRequestDTO
-): Promise<LateRequest> {
+): Promise<LateRequestWithApprover> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
   });
@@ -462,16 +570,29 @@ async function rejectLateRequest(
     throw new Error('ไม่สามารถปฏิเสธคำขอที่มีสถานะอื่นได้');
   }
 
-  const rejectedRequest = await prisma.lateRequest.update({
-    where: { lateRequestId },
-    data: {
-      status: 'REJECTED',
-      approvedByUserId: data.approvedByUserId,
-      rejectionReason: data.rejectionReason,
-      approvedAt: new Date(),
-      updatedAt: new Date(),
-    },
+  const rejectedRequest = await prisma.$transaction(async (tx) => {
+    const updated = await tx.lateRequest.update({
+      where: { lateRequestId },
+      data: {
+        status: 'REJECTED',
+        rejectionReason: data.rejectionReason,
+      },
+    });
+
+    await tx.approvalAction.create({
+      data: {
+        lateRequestId,
+        actorUserId: data.approvedByUserId,
+        action: 'REJECTED',
+        rejectionReason: data.rejectionReason,
+      },
+    });
+
+    return updated;
   });
+
+  const latestMap = await getLatestLateApprovalMap([rejectedRequest.lateRequestId]);
+  const [enriched] = attachLateApprover([rejectedRequest], latestMap);
 
   await createAuditLog({
     userId: data.approvedByUserId,
@@ -482,7 +603,7 @@ async function rejectLateRequest(
     newValues: { status: 'REJECTED', rejectionReason: data.rejectionReason },
   });
 
-  return rejectedRequest;
+  return enriched;
 }
 
 // ========================================================================================

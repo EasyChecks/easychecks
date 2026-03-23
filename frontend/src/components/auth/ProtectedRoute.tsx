@@ -30,14 +30,17 @@ export default function ProtectedRoute({
       return;
     }
 
-    // Check role-based access
-    if (requireAuth && user && allowedRoles && !allowedRoles.includes(user.role)) {
-      // Redirect to appropriate dashboard based on role
-      if (user.role === 'user') {
+    // Check role-based access — use dashboardMode if set (admin logging in as user, etc.)
+    const effectiveRole = user?.dashboardMode ?? user?.role;
+    if (requireAuth && user && allowedRoles && !allowedRoles.includes(effectiveRole)) {
+      // Redirect to appropriate dashboard based on effective role
+      if (effectiveRole === 'user') {
         router.push('/user/dashboard');
-      } else if (user.role === 'manager') {
+      } else if (effectiveRole === 'manager') {
         router.push('/manager/dashboard');
-      } else if (user.role === 'admin' || user.role === 'superadmin') {
+      } else if (effectiveRole === 'superadmin') {
+        router.push('/superadmin/dashboard');
+      } else if (effectiveRole === 'admin') {
         router.push('/admin/dashboard');
       }
     }
@@ -71,8 +74,9 @@ export default function ProtectedRoute({
     return null; // Will redirect in useEffect
   }
 
-  // Check role-based access
-  if (requireAuth && user && allowedRoles && !allowedRoles.includes(user.role)) {
+  // Check role-based access — use dashboardMode if set (admin logging in as user, etc.)
+  const effectiveRoleRender = user?.dashboardMode ?? user?.role;
+  if (requireAuth && user && allowedRoles && !allowedRoles.includes(effectiveRoleRender)) {
     return null; // Will redirect in useEffect
   }
 

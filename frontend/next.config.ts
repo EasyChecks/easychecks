@@ -3,17 +3,19 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   /* config options here */
   reactCompiler: true,
-  // For production with Nginx, use static export
-  // Uncomment this for Docker production build
-  // output: 'export',
-  
-  // For standalone server (without Nginx)
   output: 'standalone',
-  
-  // Optionally configure image domains if using next/image
-  // images: {
-  //   domains: ['your-domain.com'],
-  // },
+
+  // Proxy /api-local/* → backend container (ใช้ Docker internal network)
+  // ทำให้ browser ไม่ต้องรู้จัก backend URL โดยตรง
+  async rewrites() {
+    const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://backend:3001';
+    return [
+      {
+        source: '/api-local/:path*',
+        destination: `${backendUrl}/api/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -26,6 +26,10 @@ const router = Router();
 // ทำไมใช้ router.use แทนใส่ทีละ route? ลด duplication ถ้าเพิ่ม route ใหม่ก็ protected ทันที
 router.use(authenticate);
 
+// POST /api/attendance/check-gps
+// ตรวจสอบว่า GPS อยู่ในรัศมีสถานที่ของกะหรือไม่ — ทุก role ใช้ได้
+router.post('/check-gps', attendanceController.checkGps);
+
 // POST /api/attendance/check-in
 // ทำไมไม่มี authorizeRole? พนักงานทุก role (USER/MANAGER/ADMIN) เข้างานได้ทั้งนั้น
 router.post('/check-in', attendanceController.checkIn);

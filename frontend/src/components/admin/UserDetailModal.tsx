@@ -13,7 +13,6 @@ interface UserDetailModalProps {
   currentUser: User | null;
   onClose: () => void;
   onEdit: (user?: User) => void;
-  onDownloadPDF: () => void;
   onDelete: (user: User) => void;
   onToggleAttendance: () => void;
   getStatusBadge: (status: string) => string;
@@ -29,7 +28,6 @@ export default function UserDetailModal({
   currentUser,
   onClose,
   onEdit,
-  onDownloadPDF,
   onDelete,
   onToggleAttendance,
   getFilteredAttendanceRecords
@@ -45,8 +43,9 @@ export default function UserDetailModal({
     return 'default';
   };
 
-  const canEditOrDelete = currentUser?.role === 'superadmin' || 
-    (currentUser?.role === 'admin' && user.role !== 'superadmin');
+  const canEditOrDelete = (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'superadmin') || 
+    (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'admin' && 
+     user.role && user.role.toLowerCase() !== 'superadmin');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -194,17 +193,6 @@ export default function UserDetailModal({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             {showAttendance ? 'ซ่อนบันทึกเวลา' : 'แสดงบันทึกเวลา'}
-          </Button>
-          
-          <Button
-            onClick={onDownloadPDF}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-            </svg>
-            ดาวน์โหลด PDF
           </Button>
 
           {canEditOrDelete && (

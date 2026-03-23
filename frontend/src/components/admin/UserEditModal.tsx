@@ -49,8 +49,9 @@ export default function UserEditModal({
 
   if (!show) return null;
 
-  const canEditRole = currentUser?.role === 'superadmin' ||
-    (currentUser?.role === 'admin' && editingUser.role !== 'superadmin');
+  const canEditRole = (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'superadmin') ||
+    (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'admin' && 
+     editingUser.role && editingUser.role.toLowerCase() !== 'superadmin');
 
   const handleFieldChange = (field: string, value: string | number | boolean | null) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -132,7 +133,9 @@ export default function UserEditModal({
                   <option value="user">User</option>
                   <option value="manager">Manager</option>
                   <option value="admin">Admin</option>
-                  <option value="superadmin">Super Admin</option>
+                  {(currentUser && currentUser.role && currentUser.role.toLowerCase() === 'superadmin') && (
+                    <option value="superadmin">Super Admin</option>
+                  )}
                 </select>
               </div>
               <div>

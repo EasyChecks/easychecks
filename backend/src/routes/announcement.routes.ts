@@ -68,11 +68,8 @@ router.post('/:id/send', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), ann
 
 /**
  * @route   DELETE /api/announcements/:id
- * @desc    ลบประกาศ (Soft Delete)
+ * @desc    ลบประกาศ
  * @access  SuperAdmin/Admin only
- * @body    {
- *            deleteReason: string        // เหตุผล (จำเป็น)
- *          }
  */
 router.delete('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.deleteAnnouncement);
 

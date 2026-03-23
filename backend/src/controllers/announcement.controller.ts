@@ -179,17 +179,11 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
 
 /**
  * 🗑️ DELETE /api/announcements/:id
- *
- * ทำไม require deleteReason?
- * → Soft Delete เป็นแค่การตั้ง flag deletedAt
- *   ถ้าไม่มี reason ยังบันทึกได้แต่ไม่รู้ว่าลบเพราะอะไร
- *   audit log จะไม่มีประโยชน์
  */
 export const deleteAnnouncement = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
     const announcementId = parseInt(req.params.id as string);
-    const { deleteReason } = req.body;
 
     if (!userId) {
       return sendError(res, 'ต้องเข้าสู่ระบบก่อน', 401);
@@ -199,21 +193,16 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
       return sendError(res, 'ต้องระบุ announcementId ที่ถูกต้อง', 400);
     }
 
-    if (!deleteReason) {
-      return sendError(res, 'ต้องระบุ deleteReason', 400);
-    }
-
     if (!req.user) {
       return sendError(res, 'ไม่พบข้อมูลผู้ใช้', 401);
     }
 
     const deleted = await announcementService.deleteAnnouncement(
       announcementId,
-      deleteReason,
       req.user.userId
     );
 
-    sendSuccess(res, deleted, 'ลบประกาศเรียบร้อยแล้ว (Soft Delete)');
+    sendSuccess(res, deleted, 'ลบประกาศเรียบร้อยแล้ว');
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการลบประกาศ');
   }

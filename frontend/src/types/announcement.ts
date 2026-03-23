@@ -38,8 +38,6 @@ export interface Announcement {
   updatedAt: string;
   sentAt: string | null;
   sentByUserId: number | null;
-  deletedAt: string | null;
-  deleteReason: string | null;
   creator: AnnouncementCreator;
   recipients?: AnnouncementRecipient[];
 }

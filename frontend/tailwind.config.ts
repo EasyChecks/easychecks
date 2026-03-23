@@ -27,8 +27,8 @@ const config: Config = {
             text: "#B45309",
           },
           pending: {
-            bg: "#F1F5F9",
-            text: "#64748B",
+            bg: "#FFFBEB",
+            text: "#92400E",
           },
           leave: {
             bg: "#FFF1F2",

@@ -600,7 +600,7 @@ export default function AdminManageUser() {
           users={filteredUsers}
           onSelectUser={openDetail}
           getStatusBadge={getStatusBadge}
-          currentUser={currentUser}
+          currentUser={currentUser as User | null}
           onAttendanceEdit={handleAttendanceEdit}
           onSaveAttendanceEdit={saveAttendanceEdit}
           editingAttendance={editing.attendance}
@@ -654,7 +654,7 @@ export default function AdminManageUser() {
             showDetail={modals.detail}
             showAttendance={modals.attendance}
             selectedDate={ui.selectedDate}
-            currentUser={currentUser}
+            currentUser={currentUser as User | null}
             onClose={closeDetail}
             onEdit={openEditUser}
             onDownloadPDF={downloadPDF}
@@ -670,7 +670,7 @@ export default function AdminManageUser() {
           <UserEditModal
             show={modals.editUser}
             editingUser={editing.user}
-            currentUser={currentUser}
+            currentUser={currentUser as User | null}
             onClose={closeEditUser}
             onSave={saveEditUser}
           />

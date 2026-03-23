@@ -160,6 +160,45 @@ export async function ensureBucketExists(): Promise<void> {
   }
 }
 
+const ALLOWED_MIME_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'application/pdf': 'pdf',
+};
+
+/**
+ * อัปโหลดไฟล์แนบ (รูปภาพ / PDF) จาก base64 ไปยัง Supabase Storage
+ * @param base64 - base64 string ของไฟล์ (ไม่รวม data URI prefix)
+ * @param mimeType - MIME type เช่น 'image/jpeg', 'application/pdf'
+ * @param userId - user ID สำหรับบอก folder
+ * @param originalFilename - ชื่อไฟล์ต้นฉบับ
+ * @returns public URL ของไฟล์ที่อัปโหลด
+ */
+export async function uploadAttachmentToSupabase(
+  base64: string,
+  mimeType: string,
+  userId: number,
+  originalFilename?: string,
+): Promise<string> {
+  const ext = ALLOWED_MIME_TYPES[mimeType];
+  if (!ext) throw new Error(`ไม่รองรับไฟล์ประเภท ${mimeType}`);
+
+  const buffer = Buffer.from(base64, 'base64');
+  const safeName = originalFilename
+    ? originalFilename.replace(/[^a-zA-Z0-9.\-_]/g, '_').slice(0, 60)
+    : `file.${ext}`;
+  const fileName = `attachments/${userId}/${Date.now()}_${safeName}`;
+
+  const { error } = await supabase.storage
+    .from(bucketName)
+    .upload(fileName, buffer, { contentType: mimeType, upsert: false });
+
+  if (error) throw new Error(`อัปโหลดไม่สำเร็จ: ${error.message}`);
+
+  const { data: publicData } = supabase.storage.from(bucketName).getPublicUrl(fileName);
+  return publicData.publicUrl;
+}
+
 /**
  * ลบรูปภาพจาก Supabase Storage
  */

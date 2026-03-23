@@ -91,40 +91,40 @@ export default function UserEditModal({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <FormField
                 label="ชื่อ-นามสกุล"
-                value={form.name || ''}
+                value={String(form.name || '')}
                 onChange={(value) => handleFieldChange('name', value)}
               />
               <FormField
                 label="อีเมล"
                 type="email"
-                value={form.email || ''}
+                value={String(form.email || '')}
                 onChange={(value) => handleFieldChange('email', value)}
               />
               <FormField
                 label="เบอร์โทร"
-                value={form.phone || ''}
+                value={String(form.phone || '')}
                 onChange={(value) => handleFieldChange('phone', value)}
               />
               <FormField
                 label="รหัสพนักงาน"
-                value={form.employeeId || ''}
+                value={String(form.employeeId || '')}
                 onChange={(value) => handleFieldChange('employeeId', value)}
                 disabled
               />
               <FormField
                 label="แผนก"
-                value={form.department || ''}
+                value={String(form.department || '')}
                 onChange={(value) => handleFieldChange('department', value)}
               />
               <FormField
                 label="ตำแหน่ง"
-                value={form.position || ''}
+                value={String(form.position || '')}
                 onChange={(value) => handleFieldChange('position', value)}
               />
               <div>
                 <label className="block mb-2 text-sm font-semibold text-gray-700">บทบาท</label>
                 <select
-                  value={form.role || ''}
+                  value={String(form.role || '')}
                   onChange={(e) => handleFieldChange('role', e.target.value)}
                   disabled={!canEditRole}
                   className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none disabled:bg-gray-100"
@@ -138,7 +138,7 @@ export default function UserEditModal({
               <div>
                 <label className="block mb-2 text-sm font-semibold text-gray-700">สถานะ</label>
                 <select
-                  value={form.status || ''}
+                  value={String(form.status || '')}
                   onChange={(e) => handleFieldChange('status', e.target.value)}
                   className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none"
                 >
@@ -158,30 +158,30 @@ export default function UserEditModal({
               <FormField
                 label="วันเกิด"
                 type="date"
-                value={form.birthDate || ''}
+                value={String(form.birthDate || '')}
                 onChange={(value) => handleFieldChange('birthDate', value)}
               />
               <FormField
                 label="หมู่เลือด"
-                value={form.bloodType || ''}
+                value={String(form.bloodType || '')}
                 onChange={(value) => handleFieldChange('bloodType', value)}
               />
               <FormField
                 label="เลขบัตรประชาชน"
-                value={form.nationalId || ''}
+                value={String(form.nationalId || '')}
                 onChange={(value) => handleFieldChange('nationalId', value)}
               />
               <FormField
                 label="รหัสผ่าน"
                 type="password"
-                value={form.password || ''}
+                value={String(form.password || '')}
                 onChange={(value) => handleFieldChange('password', value)}
               />
             </div>
             <div className="mt-4">
               <FormField
                 label="ที่อยู่"
-                value={form.address || ''}
+                value={String(form.address || '')}
                 onChange={(value) => handleFieldChange('address', value)}
                 textarea
               />
@@ -194,17 +194,17 @@ export default function UserEditModal({
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <FormField
                 label="ชื่อ"
-                value={form.emergencyContactName || ''}
+                value={String(form.emergencyContactName || '')}
                 onChange={(value) => handleFieldChange('emergencyContactName', value)}
               />
               <FormField
                 label="เบอร์โทร"
-                value={form.emergencyContactPhone || ''}
+                value={String(form.emergencyContactPhone || '')}
                 onChange={(value) => handleFieldChange('emergencyContactPhone', value)}
               />
               <FormField
                 label="ความสัมพันธ์"
-                value={form.emergencyContactRelation || ''}
+                value={String(form.emergencyContactRelation || '')}
                 onChange={(value) => handleFieldChange('emergencyContactRelation', value)}
               />
             </div>

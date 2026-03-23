@@ -14,6 +14,9 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3001
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    mem_limit: 2g
+    memswap_limit: 2g
     volumes:
       - ./backend:/app
       - /app/node_modules
@@ -31,26 +34,25 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-    # image=
     image: easycheck-frontend:dev
     container_name: easycheck-frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
+    mem_limit: 3g
+    memswap_limit: 3g
     environment:
       NODE_ENV: development
-      # when running via docker-compose use internal network name
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-      # Required on Windows: Docker Desktop does not forward inotify events
-      # into the Linux container — polling is needed for HMR to detect changes.
-      WATCHPACK_POLLING: "true"
-      CHOKIDAR_USEPOLLING: "true"
-      CHOKIDAR_INTERVAL: "500"
+      WATCHPACK_POLLING: "false"
+      CHOKIDAR_USEPOLLING: "false"
+      NODE_OPTIONS: "--max-old-space-size=1024 --disable-warning=UnhandledPromiseRejection"
+      NEXT_TELEMETRY_DISABLED: "1"
     volumes:
-      # Mount source code for hot reload
       - ./frontend:/app
-      # Use anonymous volume to prevent node_modules from being overwritten by host
       - /app/node_modules
+      - /app/.next
+      - /app/.turbo
     depends_on:
       - backend
     networks:
@@ -58,7 +60,7 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
-    command: npx next dev -H 0.0.0.0 --webpack
+    command: npx next dev -H 0.0.0.0
 
 networks:
   easycheck-network:

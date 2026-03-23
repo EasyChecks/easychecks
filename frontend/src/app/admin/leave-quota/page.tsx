@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,27 +8,32 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { DEFAULT_LEAVE_QUOTA, LEAVE_TYPE_DESCRIPTIONS, LeaveQuotaMap, LeaveQuotaSettings, LeaveType } from '@/types/leave';
 import { User } from '@/types/user';
+import { userService } from '@/services/user';
 
 // Lazy load heavy modals
 const EditModal = lazy(() => import('@/components/admin/LeaveQuotaEditModal'));
 const SuccessDialog = lazy(() => import('@/components/common/AlertDialog').then(mod => ({ default: mod.default })));
 
-// Mock users data (would come from API in real app)
-const mockUsers: User[] = [
-  { id: '1', employeeId: 'BKK001', name: 'สมชาย ใจดี', department: 'IT', provinceCode: 'BKK', role: 'user', status: 'active', email: '', username: '' },
-  { id: '2', employeeId: 'BKK002', name: 'สมหญิง รักงาน', department: 'HR', provinceCode: 'BKK', role: 'user', status: 'active', email: '', username: '' },
-  { id: '3', employeeId: 'CNX001', name: 'สมปอง ขยัน', department: 'IT', provinceCode: 'CNX', role: 'user', status: 'active', email: '', username: '' },
-];
-
 const branchNames: Record<string, string> = {
   'BKK': 'กรุงเทพมหานคร',
   'CNX': 'เชียงใหม่',
-  'PKT': 'ภูเก็ต'
+  'PKT': 'ภูเก็ต',
 };
 
 export default function LeaveQuotaManagement() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'superadmin';
+
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+
+  useEffect(() => {
+    userService.getManageUsers(user!, { limit: 500 })
+      .then(res => setAllUsers(res.users))
+      .catch(() => {})
+      .finally(() => setUsersLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Core state only
   const [activeTab, setActiveTab] = useState<'global' | 'individual'>('global');
@@ -55,40 +60,40 @@ export default function LeaveQuotaManagement() {
 
   // Derived values with useMemo
   const selectedUser = useMemo(() => 
-    selectedUserId ? mockUsers.find(u => u.id === selectedUserId) : null,
-    [selectedUserId]
+    selectedUserId ? allUsers.find(u => u.id === selectedUserId) : null,
+    [selectedUserId, allUsers]
   );
 
   const filteredUsers = useMemo(() => {
-    let result = mockUsers;
-    
+    let result = allUsers;
+
     if (isSuperAdmin && filterBranch) {
-      result = result.filter(u => u.provinceCode === filterBranch);
+      result = result.filter(u => u.provinceCode === filterBranch || u.branch === filterBranch);
     }
-    
+
     if (filterDepartment) {
       result = result.filter(u => u.department === filterDepartment);
     }
-    
+
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      result = result.filter(u => 
-        u.name.toLowerCase().includes(query) || 
+      result = result.filter(u =>
+        u.name.toLowerCase().includes(query) ||
         u.employeeId.toLowerCase().includes(query)
       );
     }
-    
-    return result;
-  }, [filterBranch, filterDepartment, searchQuery, isSuperAdmin]);
 
-  const departments = useMemo(() => 
-    [...new Set(mockUsers.map(u => u.department))].filter(Boolean),
-    []
+    return result;
+  }, [allUsers, filterBranch, filterDepartment, searchQuery, isSuperAdmin]);
+
+  const departments = useMemo(() =>
+    [...new Set(allUsers.map(u => u.department))].filter(Boolean),
+    [allUsers]
   );
 
-  const branches = useMemo(() => 
-    [...new Set(mockUsers.map(u => u.provinceCode))].filter(Boolean).sort(),
-    []
+  const branches = useMemo(() =>
+    [...new Set(allUsers.map(u => u.provinceCode || u.branch))].filter(Boolean).sort(),
+    [allUsers]
   );
 
   // Optimized handlers
@@ -148,7 +153,7 @@ export default function LeaveQuotaManagement() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <Card className="p-6 bg-gradient-to-r from-orange-500 to-orange-600 text-white border-none shadow-lg">
+      <Card className="p-6 bg-linear-to-r from-orange-500 to-orange-600 text-white border-none shadow-lg">
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center shadow-lg">
             <svg xmlns="http://www.w3.org/2000/svg" height="32px" viewBox="0 -960 960 960" width="32px" fill="white">
@@ -208,7 +213,7 @@ export default function LeaveQuotaManagement() {
                   >
                     <option value="">สาขา: ทั้งหมด</option>
                     {branches.map(branch => (
-                      <option key={branch} value={branch}>{branch} ({branchNames[branch]})</option>
+                      <option key={branch} value={branch}>{branch} ({branchNames[branch as keyof typeof branchNames] || branch})</option>
                     ))}
                   </select>
                 )}
@@ -271,13 +276,13 @@ export default function LeaveQuotaManagement() {
                   </div>
                 )}
 
-                <div className="p-4 border-b-2 border-gray-100 bg-gradient-to-br from-gray-50 to-white">
+                <div className="p-4 border-b-2 border-gray-100 bg-linear-to-br from-gray-50 to-white">
                   <h3 className="text-lg font-bold text-gray-800 mb-1">{leaveType}</h3>
                   <p className="text-xs text-gray-600 line-clamp-2">{LEAVE_TYPE_DESCRIPTIONS[leaveType]}</p>
                 </div>
 
                 <div className="p-4 space-y-3">
-                  <div className="bg-gradient-to-r from-orange-50 to-orange-100 rounded-lg p-3 border border-orange-200">
+                  <div className="bg-linear-to-r from-orange-50 to-orange-100 rounded-lg p-3 border border-orange-200">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-gray-700">วันลาต่อปี</span>
                       <span className="text-2xl font-bold text-orange-600">{quota.totalDays}</span>

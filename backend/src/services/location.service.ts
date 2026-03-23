@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma.js';
-import type { Location, LocationType } from '@prisma/client';
+import type { Location, LocationType, Prisma } from '@prisma/client';
 import { createAuditLog, AuditAction } from './audit.service.js';
 
 /**
@@ -41,6 +41,7 @@ export interface SearchLocationParams {
   isActive?: boolean;
   skip?: number;
   take?: number;
+  onlyDeleted?: boolean; // แสดงเฉพาะที่ถูกลบ (soft delete)
 }
 
 // ========================================================================================
@@ -130,9 +131,9 @@ async function getAllLocations(params: SearchLocationParams): Promise<{
   active: number;
   inactive: number;
 }> {
-  const where: any = {
-    deleteReason: null,
-  };
+  const where: Prisma.LocationWhereInput = params.onlyDeleted
+    ? { deleteReason: { not: null } } // แสดงเฉพาะที่ถูก soft delete
+    : { deleteReason: null };         // ไม่แสดงที่ถูกลบ (default)
 
   if (params.search) {
     where.OR = [
@@ -247,8 +248,8 @@ async function getNearbyLocations(
   });
 
   return locationsWithDistance
-    .filter((loc) => (loc as any).distance <= radiusKm)
-    .sort((a, b) => (a as any).distance - (b as any).distance);
+    .filter((loc) => (loc.distance as number) <= radiusKm)
+    .sort((a, b) => (a.distance as number) - (b.distance as number));
 }
 
 /**

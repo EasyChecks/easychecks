@@ -1,12 +1,46 @@
 import { prisma } from '../lib/prisma.js';
-import type { LateRequest, ApprovalStatus, Gender, ApprovalActionType } from '@prisma/client';
+import type { LateRequest, ApprovalStatus, Gender, ApprovalActionType, Role } from '@prisma/client';
 import { differenceInMinutes, parse, format } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
+import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
 
 /**
  * Late Request Service - จัดการการขอมาสาย
  * ใช้ date-fns สำหรับจัดการเวลา
  */
+
+// ========================================================================================
+// ROLE HIERARCHY VALIDATION
+// ========================================================================================
+
+/**
+ * 🔐 ตรวจสอบว่า approver มีสิทธิ์อนุมัติผู้ขอได้หรือไม่
+ * 
+ * ลำดับ role hierarchy (สูง → ต่ำ):
+ * 1. SUPERADMIN - อนุมัติได้ทั้งตัวเองและคนต่ำกว่า
+ * 2. ADMIN - อนุมัติได้แต่คนต่ำกว่า (MANAGER, USER)
+ * 3. MANAGER - อนุมัติได้แต่คนต่ำกว่า (USER)
+ * 4. USER - ไม่สามารถอนุมัติใครได้
+ */
+function canApprove(approverRole: Role, requesterRole: Role): boolean {
+  const roleHierarchy: Record<Role, number> = {
+    SUPERADMIN: 4,
+    ADMIN: 3,
+    MANAGER: 2,
+    USER: 1,
+  };
+
+  const approverLevel = roleHierarchy[approverRole];
+  const requesterLevel = roleHierarchy[requesterRole];
+
+  // SUPERADMIN สามารถอนุมัติตัวเอง + ทุกคนต่ำกว่า
+  if (approverRole === 'SUPERADMIN') {
+    return requesterLevel <= approverLevel;
+  }
+
+  // Role อื่นอนุมัติได้แต่คนต่ำกว่า (ไม่สามารถอนุมัติเท่าเดิมหรือสูงกว่า)
+  return requesterLevel < approverLevel;
+}
 
 export interface CreateLateRequestDTO {
   userId: number;
@@ -110,6 +144,26 @@ async function getLatestLateApprovalMap(lateRequestIds: number[]): Promise<Map<n
   return latestMap;
 }
 
+function mapLateRequestForFrontend(request: LateRequest & { approver?: any; adminComment?: any; rejectionReason?: any; approvedByUserId?: any }): any {
+  return {
+    id: request.lateRequestId,
+    userId: request.userId,
+    attendanceId: request.attendanceId,
+    requestDate: request.requestDate,
+    scheduledTime: request.scheduledTime,
+    actualTime: request.actualTime,
+    lateMinutes: request.lateMinutes,
+    reason: request.reason,
+    status: request.status,
+    attachmentUrl: request.attachmentUrl,
+    adminComment: request.adminComment,
+    rejectionReason: request.rejectionReason,
+    approvedByUserId: request.approvedByUserId,
+    user: request.user,
+    approver: request.approver,
+  };
+}
+
 function attachLateApprover<T extends LateRequest>(
   requests: T[],
   latestMap: Map<number, LateApprovalActionRow>
@@ -203,14 +257,13 @@ async function createLateRequest(
   // 🚫 ตรวจสอบคำขอซ้ำในวันเดียวกัน
   // เพื่อป้องกันการขอมาสายหลายครั้งในวันเดียวกัน
   // ยกเว้น status = REJECTED เพราะสามารถขอใหม่ได้ถ้าถูกปฏิเสธ
-  // SQL: SELECT * FROM LateRequest 
-  //      WHERE userId = ? AND requestDate = ? AND status != 'REJECTED'
-  //      LIMIT 1
+  // ⚠️ ต้อง filter deletedAt = null เพRAะเป็น soft delete เท่านั้น
   const existingRequest = await prisma.lateRequest.findFirst({
     where: {
       userId: data.userId,
       requestDate: new Date(data.requestDate),
       status: { not: 'REJECTED' },
+      deletedAt: null, // Filter out soft-deleted records
     },
   });
 
@@ -243,7 +296,7 @@ async function createLateRequest(
 
   const latestMap = await getLatestLateApprovalMap([newLateRequest.lateRequestId]);
   const [enriched] = attachLateApprover([newLateRequest], latestMap);
-  return enriched;
+  return mapLateRequestForFrontend(enriched);
 }
 
 /**
@@ -255,7 +308,10 @@ async function getLateRequestsByUser(
   skip?: number,
   take?: number
 ): Promise<{ data: LateRequestWithApprover[]; total: number }> {
-  const where: any = { userId };
+  const where: any = { 
+    userId,
+    deletedAt: null,
+  };
 
   if (status) {
     where.status = status;
@@ -282,7 +338,8 @@ async function getLateRequestsByUser(
   ]);
 
   const latestMap = await getLatestLateApprovalMap(data.map((request) => request.lateRequestId));
-  return { data: attachLateApprover(data, latestMap), total };
+  const enriched = attachLateApprover(data, latestMap);
+  return { data: enriched.map(mapLateRequestForFrontend), total };
 }
 
 /**
@@ -291,8 +348,11 @@ async function getLateRequestsByUser(
 async function getLateRequestById(
   lateRequestId: number
 ): Promise<LateRequestWithApprover | null> {
-  const lateRequest = await prisma.lateRequest.findUnique({
-    where: { lateRequestId },
+  const lateRequest = await prisma.lateRequest.findFirst({
+    where: { 
+      lateRequestId,
+      deletedAt: null,
+    },
     include: {
       user: {
         select: {
@@ -313,7 +373,7 @@ async function getLateRequestById(
 
   const latestMap = await getLatestLateApprovalMap([lateRequestId]);
   const [enriched] = attachLateApprover([lateRequest], latestMap);
-  return enriched;
+  return enriched ? mapLateRequestForFrontend(enriched) : null;
 }
 
 /**
@@ -379,7 +439,7 @@ async function updateLateRequest(
 
   const latestMap = await getLatestLateApprovalMap([updatedLateRequest.lateRequestId]);
   const [enriched] = attachLateApprover([updatedLateRequest], latestMap);
-  return enriched;
+  return mapLateRequestForFrontend(enriched);
 }
 
 /**
@@ -398,8 +458,12 @@ async function deleteLateRequest(lateRequestId: number): Promise<LateRequest> {
     throw new Error('สามารถลบได้เฉพาะคำขอที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
 
-  const deletedLateRequest = await prisma.lateRequest.delete({
+  // Soft delete: set deletedAt instead of hard delete
+  const deletedLateRequest = await prisma.lateRequest.update({
     where: { lateRequestId },
+    data: {
+      deletedAt: new Date(),
+    },
   });
 
   await createAuditLog({
@@ -461,13 +525,46 @@ async function getLateStatistics(userId: number): Promise<{
 async function getAllLateRequests(
   status?: ApprovalStatus,
   skip?: number,
-  take?: number
+  take?: number,
+  userRole?: string, // Current user's role for approval hierarchy filtering
+  currentUserId?: number // Current user's ID to include self-requests
 ): Promise<{ data: LateRequestWithApprover[]; total: number }> {
-  const where: any = {};
+  console.log('[getAllLateRequests] Called with:', { status, skip, take, userRole, currentUserId });
+  
+  const where: any = { 
+    deletedAt: null,
+    // Default to PENDING if not specified (for approval workflow)
+    status: status || 'PENDING',
+  };
 
-  if (status) {
-    where.status = status;
+  // Normalize role to uppercase for comparison
+  const normalizedRole = userRole?.toUpperCase();
+
+  // Filter by approval hierarchy - who can approve whom
+  // Also include self-requests (where userId = current user)
+  if (normalizedRole === 'ADMIN') {
+    // ADMIN can only approve MANAGER and USER requests, OR their own requests
+    const orConditions: any[] = [
+      { user: { role: { in: ['MANAGER', 'USER'] } } },
+    ];
+    if (currentUserId) {
+      orConditions.push({ userId: currentUserId });
+    }
+    where.OR = orConditions;
+  } else if (normalizedRole === 'MANAGER') {
+    // MANAGER can only approve USER requests, OR their own requests
+    const orConditions: any[] = [
+      { user: { role: { in: ['USER'] } } },
+    ];
+    if (currentUserId) {
+      orConditions.push({ userId: currentUserId });
+    }
+    where.OR = orConditions;
+  } else if (normalizedRole === 'SUPERADMIN') {
+    // SUPERADMIN: can approve all, including self
+    // No additional filter needed - can see/approve all roles + self
   }
+  // For other roles, they can at least see their own requests
 
   const [data, total] = await Promise.all([
     prisma.lateRequest.findMany({
@@ -491,8 +588,16 @@ async function getAllLateRequests(
     prisma.lateRequest.count({ where }),
   ]);
 
+  console.log('[getAllLateRequests] Found', data.length, 'records. Total:', total);
+  console.log('[getAllLateRequests] Where clause:', JSON.stringify(where, null, 2));
+
   const latestMap = await getLatestLateApprovalMap(data.map((request) => request.lateRequestId));
-  return { data: attachLateApprover(data, latestMap), total };
+  const enriched = attachLateApprover(data, latestMap);
+  const mapped = enriched.map(mapLateRequestForFrontend);
+  
+  console.log('[getAllLateRequests] Final response data:', JSON.stringify(mapped.slice(0, 1), null, 2));
+  
+  return { data: mapped, total };
 }
 
 /**
@@ -504,14 +609,36 @@ async function approveLateRequest(
 ): Promise<LateRequestWithApprover> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
+    include: {
+      user: {
+        select: { role: true },
+      },
+    },
   });
 
   if (!lateRequest) {
-    throw new Error('ไม่พบคำขอมาสาย');
+    throw new NotFoundError('ไม่พบคำขอมาสาย');
   }
 
   if (lateRequest.status !== 'PENDING') {
-    throw new Error('ไม่สามารถอนุมัติคำขอที่มีสถานะอื่นได้');
+    throw new ConflictError('ไม่สามารถอนุมัติคำขอที่มีสถานะอื่นได้');
+  }
+
+  // 🔐 ตรวจสอบ role hierarchy - Approver ต้องมี role ที่พอเพียง
+  const approverUser = await prisma.user.findUnique({
+    where: { userId: data.approvedByUserId },
+    select: { role: true },
+  });
+
+  if (!approverUser) {
+    throw new NotFoundError('ไม่พบผู้อนุมัติ');
+  }
+
+  const requesterRole = lateRequest.user.role;
+  if (!canApprove(approverUser.role, requesterRole)) {
+    throw new ForbiddenError(
+      `${approverUser.role} ไม่สามารถอนุมัติคำขอของ ${requesterRole} ได้`
+    );
   }
 
   const approvedRequest = await prisma.$transaction(async (tx) => {
@@ -548,7 +675,7 @@ async function approveLateRequest(
     newValues: { status: 'APPROVED', adminComment: data.adminComment },
   });
 
-  return enriched;
+  return mapLateRequestForFrontend(enriched);
 }
 
 /**
@@ -560,14 +687,36 @@ async function rejectLateRequest(
 ): Promise<LateRequestWithApprover> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
+    include: {
+      user: {
+        select: { role: true },
+      },
+    },
   });
 
   if (!lateRequest) {
-    throw new Error('ไม่พบคำขอมาสาย');
+    throw new NotFoundError('ไม่พบคำขอมาสาย');
   }
 
   if (lateRequest.status !== 'PENDING') {
-    throw new Error('ไม่สามารถปฏิเสธคำขอที่มีสถานะอื่นได้');
+    throw new ConflictError('ไม่สามารถปฏิเสธคำขอที่มีสถานะอื่นได้');
+  }
+
+  // 🔐 ตรวจสอบ role hierarchy - Approver ต้องมี role ที่พอเพียง
+  const approverUser = await prisma.user.findUnique({
+    where: { userId: data.approvedByUserId },
+    select: { role: true },
+  });
+
+  if (!approverUser) {
+    throw new NotFoundError('ไม่พบผู้อนุมัติ');
+  }
+
+  const requesterRole = lateRequest.user.role;
+  if (!canApprove(approverUser.role, requesterRole)) {
+    throw new ForbiddenError(
+      `${approverUser.role} ไม่สามารถปฏิเสธคำขอของ ${requesterRole} ได้`
+    );
   }
 
   const rejectedRequest = await prisma.$transaction(async (tx) => {
@@ -603,7 +752,7 @@ async function rejectLateRequest(
     newValues: { status: 'REJECTED', rejectionReason: data.rejectionReason },
   });
 
-  return enriched;
+  return mapLateRequestForFrontend(enriched);
 }
 
 // ========================================================================================

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import UserLayout from './UserLayout';
 
 interface SuperAdminLayoutProps {
   children: ReactNode;
@@ -15,6 +16,11 @@ export default function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
   const router = useRouter();
   const { user, logout } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Keep user-facing pages in the mobile shell (header + bottom navigation) for superadmin.
+  if (pathname.startsWith('/superadmin/leave-request') || pathname.startsWith('/superadmin/events') || pathname.startsWith('/superadmin/settings')) {
+    return <UserLayout>{children}</UserLayout>;
+  }
 
   const handleLogout = () => {
     logout();

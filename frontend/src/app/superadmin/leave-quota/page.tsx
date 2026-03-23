@@ -15,9 +15,9 @@ const SuccessDialog = lazy(() => import('@/components/common/AlertDialog').then(
 
 // Mock users data (would come from API in real app)
 const mockUsers: User[] = [
-  { id: '1', employeeId: 'BKK001', name: 'สมชาย ใจดี', department: 'IT', provinceCode: 'BKK', role: 'user', status: 'active', email: '', username: '' },
-  { id: '2', employeeId: 'BKK002', name: 'สมหญิง รักงาน', department: 'HR', provinceCode: 'BKK', role: 'user', status: 'active', email: '', username: '' },
-  { id: '3', employeeId: 'CNX001', name: 'สมปอง ขยัน', department: 'IT', provinceCode: 'CNX', role: 'user', status: 'active', email: '', username: '' },
+  { id: '1', employeeId: 'BKK001', name: 'สมชาย ใจดี', department: 'IT', provinceCode: 'BKK', role: 'user', status: 'active', email: '', username: '', phone: '', password: '', position: '' },
+  { id: '2', employeeId: 'BKK002', name: 'สมหญิง รักงาน', department: 'HR', provinceCode: 'BKK', role: 'user', status: 'active', email: '', username: '', phone: '', password: '', position: '' },
+  { id: '3', employeeId: 'CNX001', name: 'สมปอง ขยัน', department: 'IT', provinceCode: 'CNX', role: 'user', status: 'active', email: '', username: '', phone: '', password: '', position: '' },
 ];
 
 const branchNames: Record<string, string> = {
@@ -208,7 +208,7 @@ export default function LeaveQuotaManagement() {
                   >
                     <option value="">สาขา: ทั้งหมด</option>
                     {branches.map(branch => (
-                      <option key={branch} value={branch}>{branch} ({branchNames[branch]})</option>
+                      <option key={branch} value={branch}>{branch} ({branchNames[branch as keyof typeof branchNames] || branch})</option>
                     ))}
                   </select>
                 )}

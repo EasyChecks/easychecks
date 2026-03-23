@@ -1,0 +1,2 @@
+-- Add PATERNITY to LeaveType enum
+ALTER TYPE "LeaveType" ADD VALUE 'PATERNITY' AFTER 'ORDINATION';

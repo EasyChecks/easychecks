@@ -18,6 +18,14 @@ const router = Router();
  */
 
 /**
+ * @route   POST /api/leave-requests/upload-attachment
+ * @desc    อัปโหลดไฟล์แนบ (PDF/JPG/PNG)
+ * @access  Authenticated
+ * @body    base64, mimeType, filename?
+ */
+router.post('/upload-attachment', authenticate, leaveRequestController.uploadAttachment);
+
+/**
  * @route   POST /api/leave-requests
  * @desc    สร้างใบลาใหม่
  * @access  Authenticated (ทุก Role)
@@ -85,6 +93,13 @@ router.post('/:id/approve', authenticate, authorizeRole('ADMIN', 'SUPERADMIN', '
  * @body    rejectionReason (required)
  */
 router.post('/:id/reject', authenticate, authorizeRole('ADMIN', 'SUPERADMIN', 'MANAGER'), leaveRequestController.rejectLeaveRequest);
+
+/**
+ * @route   GET /api/leave-requests/types/metadata
+ * @desc    ดึงข้อมูลประเภทการลาทั้งหมด (ชื่อ, icon, กฎ)
+ * @access  Public
+ */
+router.get('/types/metadata', leaveRequestController.getLeaveTypeMetadata);
 
 /**
  * @route   DELETE /api/leave-requests/:id

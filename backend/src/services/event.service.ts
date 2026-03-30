@@ -82,6 +82,7 @@ async function createEvent(data: CreateEventDTO): Promise<Event> {
   // 🔍 ตรวจสอบสถานที่เฉพาะ Mode A (locationId) เท่านั้น
   // Mode B (custom venue) ไม่มี locationId จึงข้ามส่วนนี้ไป
   if (data.locationId) {
+    // 📍 SQL เบื้องหลัง: SELECT * FROM locations WHERE location_id = $1 LIMIT 1
     const location = await prisma.location.findUnique({
       where: { locationId: data.locationId },
     });
@@ -107,12 +108,10 @@ async function createEvent(data: CreateEventDTO): Promise<Event> {
 
   // 📝 สร้างกิจกรรมพร้อม JOIN กับ location และ creator
   // include location และ creator เพื่อให้ client ไม่ต้อง query แยกอีกครั้ง (ลด round trip)
-  // SQL: 
-  // INSERT INTO Event (eventName, description, locationId, startDateTime, endDateTime, participantType, createdByUserId)
-  // VALUES (?, ?, ?, ?, ?, ?, ?)
-  // RETURNING * 
-  // JOIN Location ON Event.locationId = Location.locationId
-  // JOIN User creator ON Event.createdByUserId = creator.userId
+  // 📍 SQL เบื้องหลัง:
+  // INSERT INTO events (event_name, description, location_id, venue_name, venue_latitude, venue_longitude, start_date_time, end_date_time, participant_type, created_by_user_id)
+  // VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+  // RETURNING *
   const event = await prisma.event.create({
     data: {
       eventName: data.eventName,
@@ -181,7 +180,7 @@ async function addEventParticipants(
 
   if (participantType === 'INDIVIDUAL' && participants.userIds) {
     // 🔍 ตรวจสอบว่า users ทั้งหมดมีอยู่จริงในระบบเพื่อป้องกัน invalid data
-    // SQL: SELECT * FROM User WHERE userId IN (?, ?, ...)
+    // 📍 SQL เบื้องหลัง: SELECT * FROM users WHERE user_id IN ($1, $2, ...)
     const users = await prisma.user.findMany({
       where: { userId: { in: participants.userIds } },
     });
@@ -202,7 +201,7 @@ async function addEventParticipants(
 
   if (participantType === 'BRANCH' && participants.branchIds) {
     // 🔍 ตรวจสอบว่า branches ทั้งหมดมีอยู่จริงในระบบ
-    // SQL: SELECT * FROM Branch WHERE branchId IN (?, ?, ...)
+    // 📍 SQL เบื้องหลัง: SELECT * FROM branches WHERE branch_id IN ($1, $2, ...)
     const branches = await prisma.branch.findMany({
       where: { branchId: { in: participants.branchIds } },
     });
@@ -231,7 +230,7 @@ async function addEventParticipants(
 
   // 📝 สร้างรายชื่อผู้เข้าร่วมทั้งหมดในครั้งเดียว (bulk insert)
   // ใช้ createMany เพื่อเพิ่มประสิทธิภาพแทนที่จะ loop create ทีละรายการ
-  // SQL: INSERT INTO EventParticipant (eventId, userId/branchId/role) VALUES (?, ?), (?, ?), ...
+  // 📍 SQL เบื้องหลัง: INSERT INTO event_participants (event_id, user_id, branch_id, role) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8), ...
   if (participantsToCreate.length > 0) {
     await prisma.eventParticipant.createMany({
       data: participantsToCreate,
@@ -266,7 +265,7 @@ async function getAllEvents(params: SearchEventParams): Promise<{
 
   // 🔍 เพิ่มเงื่อนไขค้นหาแบบ OR เพื่อค้นหาจากหลายฟิลด์
   // ใช้ mode: 'insensitive' เพื่อให้ไม่สนใจตัวพิมพ์เล็ก-ใหญ่
-  // SQL: WHERE (eventName ILIKE '%search%' OR description ILIKE '%search%')
+  // 📍 SQL เบื้องหลัง: WHERE (event_name ILIKE '%search%' OR description ILIKE '%search%')
   if (params.search) {
     where.OR = [
       { eventName: { contains: params.search, mode: 'insensitive' } },
@@ -310,11 +309,18 @@ async function getAllEvents(params: SearchEventParams): Promise<{
 
   // ⚡ ใช้ Promise.all เพื่อ query ข้อมูลและนับสถิติแบบ parallel
   // ทำพร้อมกันเพื่อลดเวลารอ (ถ้าทำทีละอันจะช้ากว่า)
-  // SQL: ทำ 4 queries พร้อมกัน:
-  //   1. SELECT * FROM Event ... (main query with pagination and joins)
-  //   2. SELECT COUNT(*) FROM Event ... (total count)
-  //   3. SELECT COUNT(*) FROM Event WHERE isActive = true (active count)
-  //   4. SELECT COUNT(*) FROM Event WHERE isActive = false (inactive count)
+  // 📍 SQL เบื้องหลัง (Query 1 — ดึงข้อมูลพร้อม pagination):
+  //   SELECT e.*, l.location_id, l.location_name, l.address, l.latitude, l.longitude, l.radius,
+  //          u.user_id, u.first_name, u.last_name, u.branch_id
+  //   FROM events e
+  //   LEFT JOIN locations l ON e.location_id = l.location_id
+  //   LEFT JOIN users u ON e.created_by_user_id = u.user_id
+  //   WHERE e.delete_reason IS NULL AND (e.event_name ILIKE '%search%' OR e.description ILIKE '%search%')
+  //   ORDER BY e.start_date_time DESC
+  //   LIMIT 20 OFFSET 0
+  // 📍 SQL เบื้องหลัง (Query 2): SELECT COUNT(*) FROM events WHERE ...
+  // 📍 SQL เบื้องหลัง (Query 3): SELECT COUNT(*) FROM events WHERE ... AND is_active = true
+  // 📍 SQL เบื้องหลัง (Query 4): SELECT COUNT(*) FROM events WHERE ... AND is_active = false
   const [data, total, active, inactive] = await Promise.all([
     prisma.event.findMany({
       where,
@@ -365,6 +371,17 @@ async function getAllEvents(params: SearchEventParams): Promise<{
  * ดึงกิจกรรมด้วย ID พร้อมรายชื่อผู้เข้าร่วม
  */
 async function getEventById(eventId: number): Promise<Event | null> {
+  // 📍 SQL เบื้องหลัง:
+  // SELECT e.*, l.*, u.user_id, u.first_name, u.last_name, u.email, u.role,
+  //        ep.*, eu.user_id, eu.first_name, eu.last_name, eu.email,
+  //        eb.branch_id, eb.name, eb.code
+  // FROM events e
+  // LEFT JOIN locations l ON e.location_id = l.location_id
+  // LEFT JOIN users u ON e.created_by_user_id = u.user_id
+  // LEFT JOIN event_participants ep ON e.event_id = ep.event_id
+  // LEFT JOIN users eu ON ep.user_id = eu.user_id
+  // LEFT JOIN branches eb ON ep.branch_id = eb.branch_id
+  // WHERE e.event_id = $1
   const event = await prisma.event.findUnique({
     where: { eventId },
     include: {
@@ -415,6 +432,7 @@ async function updateEvent(
   eventId: number,
   data: UpdateEventDTO
 ): Promise<Event> {
+  // 📍 SQL เบื้องหลัง: SELECT * FROM events WHERE event_id = $1 LIMIT 1
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -446,6 +464,7 @@ async function updateEvent(
     const newParticipantType = data.participantType || event.participantType;
 
     // ลบผู้เข้าร่วมเดิม
+    // 📍 SQL เบื้องหลัง: DELETE FROM event_participants WHERE event_id = $1
     await prisma.eventParticipant.deleteMany({
       where: { eventId },
     });
@@ -456,6 +475,13 @@ async function updateEvent(
     }
   }
 
+  // 📍 SQL เบื้องหลัง:
+  // UPDATE events
+  // SET event_name = $1, description = $2, location_id = $3, venue_name = $4,
+  //     venue_latitude = $5, venue_longitude = $6, start_date_time = $7,
+  //     end_date_time = $8, participant_type = $9, is_active = $10
+  // WHERE event_id = $11
+  // RETURNING *
   const updatedEvent = await prisma.event.update({
     where: { eventId },
     data: {
@@ -501,6 +527,7 @@ async function deleteEvent(
   eventId: number,
   data: DeleteEventDTO
 ): Promise<Event> {
+  // 📍 SQL เบื้องหลัง: SELECT * FROM events WHERE event_id = $1 LIMIT 1
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -519,6 +546,8 @@ async function deleteEvent(
     throw new Error('ไม่สามารถลบกิจกรรมที่กำลังดำเนินการอยู่');
   }
 
+  // 📍 SQL เบื้องหลัง:
+  // UPDATE events SET delete_reason = $1, is_active = false WHERE event_id = $2 RETURNING *
   const deletedEvent = await prisma.event.update({
     where: { eventId },
     data: {
@@ -553,6 +582,7 @@ async function deleteEvent(
  * กู้คืนกิจกรรมที่ถูกลบ
  */
 async function restoreEvent(eventId: number, restoredByUserId?: number): Promise<Event> {
+  // 📍 SQL เบื้องหลัง: SELECT * FROM events WHERE event_id = $1 LIMIT 1
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -565,6 +595,8 @@ async function restoreEvent(eventId: number, restoredByUserId?: number): Promise
     throw new Error('กิจกรรมนี้ยังไม่ถูกลบ');
   }
 
+  // 📍 SQL เบื้องหลัง:
+  // UPDATE events SET delete_reason = NULL, is_active = true WHERE event_id = $1 RETURNING *
   const restoredEvent = await prisma.event.update({
     where: { eventId },
     data: {
@@ -596,6 +628,57 @@ async function restoreEvent(eventId: number, restoredByUserId?: number): Promise
 }
 
 /**
+ * 🗑️ Hard Delete — ลบกิจกรรมออกจากฐานข้อมูลถาวร
+ *
+ * ใช้สำหรับลบกิจกรรมที่ผ่าน Soft Delete แล้ว ออกจากตารางจริง
+ * ข้อมูลจะถูกลบถาวรไม่สามารถกู้คืนได้
+ */
+async function purgeDeletedEvent(eventId: number, purgedByUserId?: number): Promise<Event> {
+  // 📍 SQL เบื้องหลัง: SELECT * FROM events WHERE event_id = $1 LIMIT 1
+  const event = await prisma.event.findUnique({
+    where: { eventId },
+  });
+
+  if (!event) {
+    throw new Error('ไม่พบกิจกรรม');
+  }
+
+  // ต้องผ่าน Soft Delete ก่อนเท่านั้น จึงจะลบถาวรได้
+  if (!event.deleteReason) {
+    throw new Error('ต้อง Soft Delete ก่อนจึงจะลบถาวรได้');
+  }
+
+  // ลบผู้เข้าร่วมทั้งหมดของกิจกรรมก่อน (เพราะเป็น FK)
+  // 📍 SQL เบื้องหลัง: DELETE FROM event_participants WHERE event_id = $1
+  await prisma.eventParticipant.deleteMany({
+    where: { eventId },
+  });
+
+  // ลบ attendance records ที่เกี่ยวข้อง
+  // 📍 SQL เบื้องหลัง: DELETE FROM attendance WHERE event_id = $1
+  await prisma.attendance.deleteMany({
+    where: { eventId },
+  });
+
+  // ลบกิจกรรมออกจากตารางจริง
+  // 📍 SQL เบื้องหลัง: DELETE FROM events WHERE event_id = $1 RETURNING *
+  const purgedEvent = await prisma.event.delete({
+    where: { eventId },
+  });
+
+  await createAuditLog({
+    userId: purgedByUserId,
+    action: AuditAction.DELETE_EVENT,
+    targetTable: 'events',
+    targetId: eventId,
+    oldValues: { eventName: event.eventName, hardDelete: true },
+    newValues: { purged: true },
+  });
+
+  return purgedEvent;
+}
+
+/**
  * ✨ ฟังก์ชันดึงกิจกรรมที่ผู้ใช้เข้าร่วมได้
  * 
  * 🎯 เป้าหมาย: แสดงเฉพาะกิจกรรมที่เกี่ยวข้องกับผู้ใช้ตาม participantType
@@ -607,7 +690,7 @@ async function restoreEvent(eventId: number, restoredByUserId?: number): Promise
 async function getMyEvents(userId: number): Promise<Event[]> {
   // 🔎 ดึงข้อมูล branch และ role ของผู้ใช้ก่อนเพื่อสร้าง where condition
   // จำเป็นเพราะใช้ในการกรอง participantType BRANCH และ ROLE
-  // SQL: SELECT branchId, role FROM User WHERE userId = ?
+  // 📍 SQL เบื้องหลัง: SELECT branch_id, role FROM users WHERE user_id = $1
   const user = await prisma.user.findUnique({
     where: { userId },
     select: { branchId: true, role: true },
@@ -625,15 +708,18 @@ async function getMyEvents(userId: number): Promise<Event[]> {
   //    2. participantType = INDIVIDUAL: ตรวจว่ามี userId ใน EventParticipant
   //    3. participantType = BRANCH: ตรวจว่ามี branchId ตรงกัน
   //    4. participantType = ROLE: ตรวจว่ามี role ตรงกัน
-  // SQL: 
-  // SELECT e.* FROM Event e
-  // WHERE e.deletedAt IS NULL AND e.isActive = true AND e.endDateTime >= NOW()
+  // 📍 SQL เบื้องหลัง:
+  // SELECT e.*, l.location_id, l.location_name, l.address, l.latitude, l.longitude, l.radius
+  // FROM events e
+  // LEFT JOIN locations l ON e.location_id = l.location_id
+  // WHERE e.delete_reason IS NULL AND e.is_active = true AND e.end_date_time >= NOW()
   // AND (
-  //   e.participantType = 'ALL'
-  //   OR (e.participantType = 'INDIVIDUAL' AND EXISTS (SELECT 1 FROM EventParticipant WHERE eventId = e.eventId AND userId = ?))
-  //   OR (e.participantType = 'BRANCH' AND EXISTS (SELECT 1 FROM EventParticipant WHERE eventId = e.eventId AND branchId = ?))
-  //   OR (e.participantType = 'ROLE' AND EXISTS (SELECT 1 FROM EventParticipant WHERE eventId = e.eventId AND role = ?))
+  //   e.participant_type = 'ALL'
+  //   OR (e.participant_type = 'INDIVIDUAL' AND EXISTS (SELECT 1 FROM event_participants WHERE event_id = e.event_id AND user_id = $1))
+  //   OR (e.participant_type = 'BRANCH' AND EXISTS (SELECT 1 FROM event_participants WHERE event_id = e.event_id AND branch_id = $2))
+  //   OR (e.participant_type = 'ROLE' AND EXISTS (SELECT 1 FROM event_participants WHERE event_id = e.event_id AND role = $3))
   // )
+  // ORDER BY e.start_date_time ASC
   const events = await prisma.event.findMany({
     where: {
       deleteReason: null,
@@ -707,15 +793,15 @@ async function getEventStatistics(): Promise<{
 }> {
   const now = new Date();
 
-  // ⚡ Query สถิติแบบ parallel เพื่อลดเวลาresponse
-  // SQL: ทำ 7 queries พร้อมกัน:
-  //   1. SELECT COUNT(*) FROM Event WHERE deleteReason IS NULL
-  //   2. SELECT COUNT(*) FROM Event WHERE deleteReason IS NULL AND isActive = true
-  //   3. SELECT COUNT(*) FROM Event WHERE ... AND startDateTime > NOW() (กิจกรรมที่ยังไม่เริ่ม)
-  //   4. SELECT COUNT(*) FROM Event WHERE ... AND startDateTime <= NOW() AND endDateTime >= NOW() (กำลังดำเนินการ)
-  //   5. SELECT COUNT(*) FROM Event WHERE ... AND endDateTime < NOW() (ผ่านไปแล้ว)
-  //   6. SELECT COUNT(*) FROM Event WHERE deleteReason IS NOT NULL (ถูกลบ)
-  //   7. SELECT participantType, COUNT(*) FROM Event WHERE deleteReason IS NULL GROUP BY participantType
+  // ⚡ Query สถิติแบบ parallel เพื่อลดเวลา response
+  // 📍 SQL เบื้องหลัง (7 queries พร้อมกัน):
+  //   1. SELECT COUNT(*) FROM events WHERE delete_reason IS NULL
+  //   2. SELECT COUNT(*) FROM events WHERE delete_reason IS NULL AND is_active = true
+  //   3. SELECT COUNT(*) FROM events WHERE delete_reason IS NULL AND is_active = true AND start_date_time > NOW()
+  //   4. SELECT COUNT(*) FROM events WHERE delete_reason IS NULL AND is_active = true AND start_date_time <= NOW() AND end_date_time >= NOW()
+  //   5. SELECT COUNT(*) FROM events WHERE delete_reason IS NULL AND end_date_time < NOW()
+  //   6. SELECT COUNT(*) FROM events WHERE delete_reason IS NOT NULL
+  //   7. SELECT participant_type, COUNT(*) FROM events WHERE delete_reason IS NULL GROUP BY participant_type
   const [
     totalEvents,
     activeEvents,
@@ -791,12 +877,14 @@ export interface EventCheckOutDTO {
  * ตรวจสอบว่า user เป็นผู้เข้าร่วมกิจกรรมที่ eligible หรือไม่
  */
 async function isEligibleParticipant(userId: number, eventId: number): Promise<boolean> {
+  // 📍 SQL เบื้องหลัง: SELECT branch_id, role FROM users WHERE user_id = $1 LIMIT 1
   const user = await prisma.user.findUnique({
     where: { userId },
     select: { branchId: true, role: true },
   });
   if (!user) return false;
 
+  // 📍 SQL เบื้องหลัง: SELECT participant_type FROM events WHERE event_id = $1 LIMIT 1
   const event = await prisma.event.findUnique({
     where: { eventId },
     select: { participantType: true },
@@ -806,6 +894,7 @@ async function isEligibleParticipant(userId: number, eventId: number): Promise<b
   if (event.participantType === 'ALL') return true;
 
   if (event.participantType === 'INDIVIDUAL') {
+    // 📍 SQL เบื้องหลัง: SELECT * FROM event_participants WHERE event_id = $1 AND user_id = $2 LIMIT 1
     const participant = await prisma.eventParticipant.findFirst({
       where: { eventId, userId },
     });
@@ -813,6 +902,7 @@ async function isEligibleParticipant(userId: number, eventId: number): Promise<b
   }
 
   if (event.participantType === 'BRANCH') {
+    // 📍 SQL เบื้องหลัง: SELECT * FROM event_participants WHERE event_id = $1 AND branch_id = $2 LIMIT 1
     const participant = await prisma.eventParticipant.findFirst({
       where: { eventId, branchId: user.branchId },
     });
@@ -820,6 +910,7 @@ async function isEligibleParticipant(userId: number, eventId: number): Promise<b
   }
 
   if (event.participantType === 'ROLE') {
+    // 📍 SQL เบื้องหลัง: SELECT * FROM event_participants WHERE event_id = $1 AND role = $2 LIMIT 1
     const participant = await prisma.eventParticipant.findFirst({
       where: { eventId, role: user.role },
     });
@@ -843,6 +934,10 @@ async function eventCheckIn(data: EventCheckInDTO) {
   const { userId, eventId, photo, latitude, longitude, address } = data;
 
   // 1. ตรวจสอบกิจกรรม
+  // 📍 SQL เบื้องหลัง:
+  // SELECT e.*, l.* FROM events e
+  // LEFT JOIN locations l ON e.location_id = l.location_id
+  // WHERE e.event_id = $1 LIMIT 1
   const event = await prisma.event.findUnique({
     where: { eventId },
     include: { location: true },
@@ -861,6 +956,7 @@ async function eventCheckIn(data: EventCheckInDTO) {
   if (!eligible) throw new Error('คุณไม่ได้รับมอบหมายให้เข้าร่วมกิจกรรมนี้');
 
   // 3. ตรวจสอบ check-in ซ้ำ
+  // 📍 SQL เบื้องหลัง: SELECT * FROM attendance WHERE user_id = $1 AND event_id = $2 LIMIT 1
   const existingAttendance = await prisma.attendance.findFirst({
     where: { userId, eventId },
   });
@@ -897,6 +993,10 @@ async function eventCheckIn(data: EventCheckInDTO) {
   }
 
   // 5. สร้าง Attendance record
+  // 📍 SQL เบื้องหลัง:
+  // INSERT INTO attendance (user_id, event_id, location_id, shift_id, check_in_photo, check_in_lat, check_in_lng, check_in_address, check_in_distance, status, late_minutes, note)
+  // VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, 'ON_TIME', 0, $9)
+  // RETURNING *
   const attendance = await prisma.attendance.create({
     data: {
       userId,
@@ -937,6 +1037,12 @@ async function eventCheckOut(data: EventCheckOutDTO) {
   const { userId, eventId, photo, latitude, longitude, address } = data;
 
   // หา check-in record ที่ยังไม่ได้ check-out
+  // 📍 SQL เบื้องหลัง:
+  // SELECT a.*, l.*, e.* FROM attendance a
+  // LEFT JOIN locations l ON a.location_id = l.location_id
+  // LEFT JOIN events e ON a.event_id = e.event_id
+  // WHERE a.user_id = $1 AND a.event_id = $2 AND a.check_out IS NULL
+  // LIMIT 1
   const attendance = await prisma.attendance.findFirst({
     where: { userId, eventId, checkOut: null },
     include: { location: true, event: true },
@@ -958,6 +1064,11 @@ async function eventCheckOut(data: EventCheckOutDTO) {
     }
   }
 
+  // 📍 SQL เบื้องหลัง:
+  // UPDATE attendance
+  // SET check_out = NOW(), check_out_photo = $1, check_out_lat = $2, check_out_lng = $3, check_out_address = $4, check_out_distance = $5
+  // WHERE attendance_id = $6
+  // RETURNING *
   const updatedAttendance = await prisma.attendance.update({
     where: { attendanceId: attendance.attendanceId },
     data: {
@@ -990,6 +1101,11 @@ async function eventCheckOut(data: EventCheckOutDTO) {
  * 📋 ดึงสถานะการเข้าร่วมกิจกรรมของ user
  */
 async function getMyEventAttendance(userId: number, eventId: number) {
+  // 📍 SQL เบื้องหลัง:
+  // SELECT a.*, l.* FROM attendance a
+  // LEFT JOIN locations l ON a.location_id = l.location_id
+  // WHERE a.user_id = $1 AND a.event_id = $2
+  // LIMIT 1
   const attendance = await prisma.attendance.findFirst({
     where: { userId, eventId },
     include: {
@@ -1039,5 +1155,6 @@ export const EventAdminActions = {
   updateEvent,
   deleteEvent,
   restoreEvent,
+  purgeDeletedEvent,
   getEventStatistics,
 };

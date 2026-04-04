@@ -7,7 +7,6 @@ import {
   getEventById,
   updateEvent,
   deleteEvent,
-  restoreEvent,
   eventCheckIn,
   eventCheckOut,
   getMyEventAttendance,
@@ -70,15 +69,9 @@ router.put('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), updateEve
 
 /**
  * DELETE /api/events/:id
- * ลบกิจกรรม (Soft Delete) (Admin/SuperAdmin only)
+ * ลบกิจกรรม (Hard Delete) (Admin/SuperAdmin only)
  */
 router.delete('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), deleteEvent);
-
-/**
- * POST /api/events/:id/restore
- * กู้คืนกิจกรรมที่ถูกลบ (Admin/SuperAdmin only)
- */
-router.post('/:id/restore', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), restoreEvent);
 
 /**
  * POST /api/events/:id/checkin

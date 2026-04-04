@@ -62,8 +62,6 @@ export interface SearchEventParams {
   skip?: number;
   take?: number;
   branchId?: number; // กรองกิจกรรมตามสาขา (ALL หรือ BRANCH ที่มี branchId นี้)
-  includeDeleted?: boolean; // รวมกิจกรรมที่ถูกลบ (soft delete) ด้วย
-  onlyDeleted?: boolean; // แสดงเฉพาะกิจกรรมที่ถูกลบ
 }
 
 // ========================================================================================
@@ -256,12 +254,8 @@ async function getAllEvents(params: SearchEventParams): Promise<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {};
 
-  // กรอง deleted events ตาม parameter
-  if (params.onlyDeleted) {
-    where.deleteReason = { not: null }; // แสดงเฉพาะที่ถูกลบ
-  } else if (!params.includeDeleted) {
-    where.deleteReason = null;
-  }
+  // ซ่อน legacy soft-deleted records (ถ้ามีในระบบเดิม)
+  where.deleteReason = null;
 
   // 🔍 เพิ่มเงื่อนไขค้นหาแบบ OR เพื่อค้นหาจากหลายฟิลด์
   // ใช้ mode: 'insensitive' เพื่อให้ไม่สนใจตัวพิมพ์เล็ก-ใหญ่
@@ -527,7 +521,6 @@ async function deleteEvent(
   eventId: number,
   data: DeleteEventDTO
 ): Promise<Event> {
-  // 📍 SQL เบื้องหลัง: SELECT * FROM events WHERE event_id = $1 LIMIT 1
   const event = await prisma.event.findUnique({
     where: { eventId },
   });
@@ -536,34 +529,19 @@ async function deleteEvent(
     throw new Error('ไม่พบกิจกรรม');
   }
 
-  if (event.deleteReason) {
-    throw new Error('กิจกรรมนี้ถูกลบไปแล้ว');
-  }
-
-  // ตรวจสอบว่ากิจกรรมเริ่มแล้วหรือยัง
-  const now = new Date();
-  if (event.startDateTime <= now && event.endDateTime >= now) {
-    throw new Error('ไม่สามารถลบกิจกรรมที่กำลังดำเนินการอยู่');
-  }
-
-  // 📍 SQL เบื้องหลัง:
-  // UPDATE events SET delete_reason = $1, is_active = false WHERE event_id = $2 RETURNING *
-  const deletedEvent = await prisma.event.update({
+  // ลบผู้เข้าร่วมทั้งหมดก่อน (FK constraint)
+  await prisma.eventParticipant.deleteMany({
     where: { eventId },
-    data: {
-      deleteReason: data.deleteReason,
-      isActive: false, // ปิดการใช้งานทันที
-    },
-    include: {
-      location: true,
-      creator: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
+  });
+
+  // ลบ attendance records ที่เกี่ยวข้อง
+  await prisma.attendance.deleteMany({
+    where: { eventId },
+  });
+
+  // ลบกิจกรรมออกจาก DB จริง
+  const deletedEvent = await prisma.event.delete({
+    where: { eventId },
   });
 
   await createAuditLog({
@@ -571,111 +549,11 @@ async function deleteEvent(
     action: AuditAction.DELETE_EVENT,
     targetTable: 'events',
     targetId: eventId,
-    oldValues: { eventName: event.eventName, isActive: event.isActive },
-    newValues: { deleted: true, deleteReason: data.deleteReason },
+    oldValues: { eventName: event.eventName },
+    newValues: { deleted: true },
   });
 
   return deletedEvent;
-}
-
-/**
- * กู้คืนกิจกรรมที่ถูกลบ
- */
-async function restoreEvent(eventId: number, restoredByUserId?: number): Promise<Event> {
-  // 📍 SQL เบื้องหลัง: SELECT * FROM events WHERE event_id = $1 LIMIT 1
-  const event = await prisma.event.findUnique({
-    where: { eventId },
-  });
-
-  if (!event) {
-    throw new Error('ไม่พบกิจกรรม');
-  }
-
-  if (!event.deleteReason) {
-    throw new Error('กิจกรรมนี้ยังไม่ถูกลบ');
-  }
-
-  // 📍 SQL เบื้องหลัง:
-  // UPDATE events SET delete_reason = NULL, is_active = true WHERE event_id = $1 RETURNING *
-  const restoredEvent = await prisma.event.update({
-    where: { eventId },
-    data: {
-      deleteReason: null,
-      isActive: true,
-    },
-    include: {
-      location: true,
-      creator: {
-        select: {
-          userId: true,
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-  });
-
-  await createAuditLog({
-    userId: restoredByUserId,
-    action: AuditAction.RESTORE_EVENT,
-    targetTable: 'events',
-    targetId: eventId,
-    oldValues: { deleteReason: event.deleteReason, isActive: event.isActive },
-    newValues: { deleteReason: null, isActive: true },
-  });
-
-  return restoredEvent;
-}
-
-/**
- * 🗑️ Hard Delete — ลบกิจกรรมออกจากฐานข้อมูลถาวร
- *
- * ใช้สำหรับลบกิจกรรมที่ผ่าน Soft Delete แล้ว ออกจากตารางจริง
- * ข้อมูลจะถูกลบถาวรไม่สามารถกู้คืนได้
- */
-async function purgeDeletedEvent(eventId: number, purgedByUserId?: number): Promise<Event> {
-  // 📍 SQL เบื้องหลัง: SELECT * FROM events WHERE event_id = $1 LIMIT 1
-  const event = await prisma.event.findUnique({
-    where: { eventId },
-  });
-
-  if (!event) {
-    throw new Error('ไม่พบกิจกรรม');
-  }
-
-  // ต้องผ่าน Soft Delete ก่อนเท่านั้น จึงจะลบถาวรได้
-  if (!event.deleteReason) {
-    throw new Error('ต้อง Soft Delete ก่อนจึงจะลบถาวรได้');
-  }
-
-  // ลบผู้เข้าร่วมทั้งหมดของกิจกรรมก่อน (เพราะเป็น FK)
-  // 📍 SQL เบื้องหลัง: DELETE FROM event_participants WHERE event_id = $1
-  await prisma.eventParticipant.deleteMany({
-    where: { eventId },
-  });
-
-  // ลบ attendance records ที่เกี่ยวข้อง
-  // 📍 SQL เบื้องหลัง: DELETE FROM attendance WHERE event_id = $1
-  await prisma.attendance.deleteMany({
-    where: { eventId },
-  });
-
-  // ลบกิจกรรมออกจากตารางจริง
-  // 📍 SQL เบื้องหลัง: DELETE FROM events WHERE event_id = $1 RETURNING *
-  const purgedEvent = await prisma.event.delete({
-    where: { eventId },
-  });
-
-  await createAuditLog({
-    userId: purgedByUserId,
-    action: AuditAction.DELETE_EVENT,
-    targetTable: 'events',
-    targetId: eventId,
-    oldValues: { eventName: event.eventName, hardDelete: true },
-    newValues: { purged: true },
-  });
-
-  return purgedEvent;
 }
 
 /**
@@ -1154,7 +1032,5 @@ export const EventAdminActions = {
   createEvent,
   updateEvent,
   deleteEvent,
-  restoreEvent,
-  purgeDeletedEvent,
   getEventStatistics,
 };

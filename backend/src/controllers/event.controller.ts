@@ -224,13 +224,12 @@ export const updateEvent = asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * DELETE /api/events/:id
- * ลบกิจกรรม (Admin only - Soft Delete)
+ * ลบกิจกรรม (Admin only - Hard Delete)
  */
 export const deleteEvent = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
   const { id } = req.params;
   const eventId = parseInt(Array.isArray(id) ? id[0] : id);
-  const { deleteReason } = req.body;
 
   if (!userId) {
     throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
@@ -248,34 +247,9 @@ export const deleteEvent = asyncHandler(async (req: Request, res: Response) => {
 
   const deletedEvent = await EventAdminActions.deleteEvent(eventId, {
     deletedByUserId: userId,
-    deleteReason,
   });
 
   sendSuccess(res, deletedEvent, 'ลบกิจกรรมเรียบร้อยแล้ว');
-});
-
-/**
- * POST /api/events/:id/restore
- * กู้คืนกิจกรรมที่ถูกลบ (Admin only)
- */
-export const restoreEvent = asyncHandler(async (req: Request, res: Response) => {
-  const userId = req.user?.userId;
-  const { id } = req.params;
-  const eventId = parseInt(Array.isArray(id) ? id[0] : id);
-
-  if (!eventId) {
-    throw new BadRequestError('ID กิจกรรมไม่ถูกต้อง');
-  }
-
-  const event = await EventUserActions.getEventById(eventId);
-
-  if (!event) {
-    throw new NotFoundError('ไม่พบกิจกรรม');
-  }
-
-  const restoredEvent = await EventAdminActions.restoreEvent(eventId, userId);
-
-  sendSuccess(res, restoredEvent, 'กู้คืนกิจกรรมเรียบร้อยแล้ว');
 });
 
 /**

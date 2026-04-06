@@ -47,6 +47,9 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
   const [editingLocationId, setEditingLocationId] = useState<number | null>(null);
   const [pendingPosition, setPendingPosition] = useState<{ lat: number; lng: number } | null>(null);
   const [locPage, setLocPage] = useState(1);
+  const [deletedLocations, setDeletedLocations] = useState<LocationItem[]>([]);
+  const [loadingDeleted, setLoadingDeleted] = useState(false);
+  const [showDeletedSection, setShowDeletedSection] = useState(false);
   const [mapFlyTo, setMapFlyTo] = useState<{ lat: number; lng: number; zoom?: number; seq: number } | undefined>();
   const mapFlySeq = useRef(0);
 
@@ -89,7 +92,19 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
     } catch { /* ignore background sync errors */ }
   }, []);
 
+  const fetchDeletedLocations = useCallback(async () => {
+    setLoadingDeleted(true);
+    try {
+      const res = await locationService.getAll({ onlyDeleted: true, take: 200 });
+      const data = Array.isArray(res.data) ? res.data : [];
+      setDeletedLocations(data.filter(loc => !!loc.deletedAt));
+    } catch { /* ignore */ } finally {
+      setLoadingDeleted(false);
+    }
+  }, []);
+
   useEffect(() => { fetchLocations(); }, [fetchLocations]);
+  useEffect(() => { fetchDeletedLocations(); }, [fetchDeletedLocations]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -248,6 +263,7 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
           await locationService.delete(location.locationId);
           setAlertDialog({ isOpen: true, type: 'success', title: 'ลบสำเร็จ', message: 'ลบสถานที่เรียบร้อยแล้ว' });
           silentRefresh(); // confirm sync in background
+          fetchDeletedLocations();
           onLocationsChanged?.();
         } catch (err) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -267,6 +283,30 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
   );
   const locTotalPages = Math.max(1, Math.ceil(locations.length / LOC_PER_PAGE));
   const safeLocPage = Math.min(locPage, locTotalPages);
+
+  const handleRestoreLocation = (location: LocationItem) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'ยืนยันการกู้คืน',
+      message: `คุณแน่ใจหรือไม่ที่จะกู้คืนสถานที่ "${location.locationName}"?`,
+      onConfirm: async () => {
+        setConfirmDialog({ isOpen: false });
+        try {
+          await locationService.restore(location.locationId);
+          setAlertDialog({ isOpen: true, type: 'success', title: 'กู้คืนสำเร็จ', message: 'กู้คืนสถานที่เรียบร้อยแล้ว' });
+          silentRefresh();
+          fetchDeletedLocations();
+          onLocationsChanged?.();
+        } catch (err) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const msg = (err as any)?.response?.data?.error || 'ไม่สามารถกู้คืนได้';
+          setAlertDialog({ isOpen: true, type: 'error', title: 'ผิดพลาด', message: msg });
+        }
+      },
+      onCancel: () => setConfirmDialog({ isOpen: false })
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Map + Add-form overlay */}
@@ -536,6 +576,65 @@ export default function LocationManagement({ onLocationsChanged }: LocationManag
           </>
         )}
       </div>
+
+      {/* ── Deleted Locations Section ── */}
+      {deletedLocations.length > 0 && (
+        <div className="border border-red-200 rounded-2xl overflow-hidden">
+          <button
+            onClick={() => setShowDeletedSection(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3.5 bg-red-50 hover:bg-red-100 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-red-700 font-semibold text-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              รายการที่ถูกลบ
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-600 text-white text-xs font-bold">{deletedLocations.length}</span>
+            </div>
+            <svg className={`w-4 h-4 text-red-500 transition-transform ${showDeletedSection ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showDeletedSection && (
+            <div className="p-4">
+              {loadingDeleted ? (
+                <div className="flex justify-center py-8">
+                  <div className="w-6 h-6 border-b-2 border-red-400 rounded-full animate-spin" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {deletedLocations.map(loc => (
+                    <div key={loc.locationId} className="flex flex-col gap-2 p-3.5 rounded-xl border border-red-100 bg-white">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm text-gray-700 truncate">{loc.locationName}</p>
+                          {loc.address && <p className="text-xs text-gray-400 truncate mt-0.5">{loc.address}</p>}
+                        </div>
+                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-medium">ถูกลบ</span>
+                      </div>
+                      {loc.deleteReason && (
+                        <p className="text-xs text-gray-500 italic">เหตุผล: {loc.deleteReason}</p>
+                      )}
+                      {loc.deletedAt && (
+                        <p className="text-xs text-gray-400">ลบเมื่อ: {new Date(loc.deletedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                      )}
+                      <button
+                        onClick={() => handleRestoreLocation(loc)}
+                        className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-xs font-medium hover:bg-green-100 transition-colors"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        กู้คืนสถานที่
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <AlertDialog
         isOpen={alertDialog.isOpen}

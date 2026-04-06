@@ -1,15 +1,33 @@
 import type { Request, Response } from 'express';
 import { 
   LeaveRequestUserActions, 
-  LeaveRequestAdminActions 
+  LeaveRequestAdminActions,
+  LEAVE_RULES,
+  getLeaveTypeDisplay,
+  getLeaveTypeRules,
 } from '../services/leave-request.service.js';
 import { sendSuccess } from '../utils/response.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { UnauthorizedError, BadRequestError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
+import { uploadAttachmentToSupabase } from '../utils/supabase-storage.js';
 
 /**
  * Leave Request Controller - จัดการ API ใบลา
  */
+
+/**
+ * POST /api/leave-requests/upload-attachment - อัปโหลดไฟล์แนบ
+ */
+export const uploadAttachment = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
+
+  const { base64, mimeType, filename } = req.body;
+  if (!base64 || !mimeType) throw new BadRequestError('กรุณาส่ง base64 และ mimeType');
+
+  const url = await uploadAttachmentToSupabase(base64, mimeType, userId, filename);
+  sendSuccess(res, { url }, 'อัปโหลดไฟล์สำเร็จ');
+});
 
 /**
  * POST /api/leave-requests - สร้างใบลาใหม่
@@ -43,7 +61,7 @@ export const createLeaveRequest = asyncHandler(async (req: Request, res: Respons
     throw new BadRequestError('กรุณาระบุ leaveType, startDate, endDate');
   }
 
-  const validLeaveTypes = ['SICK', 'PERSONAL', 'VACATION', 'MILITARY', 'TRAINING', 'MATERNITY', 'STERILIZATION', 'ORDINATION'];
+  const validLeaveTypes = ['SICK', 'PERSONAL', 'VACATION', 'MILITARY', 'TRAINING', 'MATERNITY', 'STERILIZATION', 'ORDINATION', 'PATERNITY'];
   if (!validLeaveTypes.includes(leaveType)) {
     throw new BadRequestError(`leaveType ต้องเป็น ${validLeaveTypes.join(', ')}`);
   }
@@ -130,8 +148,10 @@ export const getAllLeaveRequests = asyncHandler(async (req: Request, res: Respon
   const status = req.query.status as 'PENDING' | 'APPROVED' | 'REJECTED' | undefined;
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 10;
+  const userRole = (req as any).user?.role; // Get current user's role for approval hierarchy filtering
+  const currentUserId = (req as any).user?.userId; // Get current user's ID for self-request inclusion
 
-  const result = await LeaveRequestAdminActions.getAllLeaveRequests(status, skip, take);
+  const result = await LeaveRequestAdminActions.getAllLeaveRequests(status, skip, take, userRole, currentUserId);
 
   sendSuccess(res, result, 'ดึงใบลาสำเร็จ');
 });
@@ -283,8 +303,31 @@ export const rejectLeaveRequest = asyncHandler(async (req: Request, res: Respons
 });
 
 /**
+ * GET /api/leave-requests/types/metadata
+ * ดึงข้อมูลประเภทการลาทั้งหมด (ชื่อ, icon, กฎ)
+ */
+export const getLeaveTypeMetadata = asyncHandler(async (req: Request, res: Response) => {
+  const leaveTypes = Object.keys(LEAVE_RULES).map((leaveType: any) => {
+    const display = getLeaveTypeDisplay(leaveType);
+    const rules = getLeaveTypeRules(leaveType);
+    return {
+      ...display,
+      rules: {
+        maxPaidDaysPerYear: (rules as any).maxPaidDaysPerYear ?? null,
+        maxDaysTotal: (rules as any).maxDaysTotal ?? null,
+        paid: (rules as any).paid,
+        requireMedicalCert: (rules as any).requireMedicalCert || false,
+        genderRestriction: (rules as any).genderRestriction || null,
+      },
+    };
+  });
+
+  sendSuccess(res, leaveTypes, 'ดึงข้อมูลประเภทการลาเรียบร้อยแล้ว');
+});
+
+/**
  * DELETE /api/leave-requests/:id
- * ลบใบลา (เฉพาะ PENDING)
+ * ยกเลิกใบลา (soft delete) - ผู้ใช้เองสามารถยกเลิกใบลา PENDING ได้
  */
 export const deleteLeaveRequest = asyncHandler(async (req: Request, res: Response) => {
   const userId = req.user?.userId;
@@ -305,12 +348,12 @@ export const deleteLeaveRequest = asyncHandler(async (req: Request, res: Respons
     throw new NotFoundError('ไม่พบใบลา');
   }
 
-  // ตรวจสอบว่าเป็นเจ้าของหรือ Admin
+  // Allow user to cancel their own pending leave requests (or admin/superadmin)
   if (leaveRequest.userId !== userId && req.user?.role !== 'ADMIN' && req.user?.role !== 'SUPERADMIN') {
-    throw new ForbiddenError('คุณไม่มีสิทธิ์ลบใบลานี้');
+    throw new ForbiddenError('คุณไม่มีสิทธิ์ยกเลิกใบลานี้');
   }
 
   await LeaveRequestUserActions.deleteLeaveRequest(leaveId);
 
-  sendSuccess(res, null, 'ลบใบลาเรียบร้อยแล้ว');
+  sendSuccess(res, null, 'ยกเลิกใบลาเรียบร้อยแล้ว');
 });

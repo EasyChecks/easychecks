@@ -136,8 +136,6 @@ export interface EventListParams {
   skip?: number;
   take?: number;
   branchId?: number;
-  includeDeleted?: boolean;
-  onlyDeleted?: boolean;
 }
 
 export interface EventAttendanceStatus {
@@ -205,18 +203,10 @@ export const eventService = {
   },
 
   /**
-   * DELETE /api/events/:id - ลบกิจกรรม Soft Delete (Admin/SuperAdmin)
+   * DELETE /api/events/:id - ลบกิจกรรม (Admin/SuperAdmin)
    */
-  async delete(id: number, deleteReason: string): Promise<EventItem> {
-    const res = await api.delete(`/events/${id}`, { data: { deleteReason } });
-    return res.data.data;
-  },
-
-  /**
-   * POST /api/events/:id/restore - กู้คืนกิจกรรม (Admin/SuperAdmin)
-   */
-  async restore(id: number): Promise<EventItem> {
-    const res = await api.post(`/events/${id}/restore`);
+  async delete(id: number): Promise<EventItem> {
+    const res = await api.delete(`/events/${id}`);
     return res.data.data;
   },
 

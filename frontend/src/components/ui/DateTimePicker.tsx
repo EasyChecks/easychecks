@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { DayPicker } from 'react-day-picker';
+import { DayPicker, type Matcher } from 'react-day-picker';
 import { th } from 'date-fns/locale';
 import { format, parse, isValid } from 'date-fns';
 import { CalendarIcon, ClockIcon } from 'lucide-react';
@@ -129,6 +129,7 @@ export function DateTimePicker({
                 day: 'flex-1 flex items-center justify-center',
                 day_button: cn(
                   'h-8 w-8 rounded-full text-[13px] font-medium transition-all cursor-pointer hover:bg-gray-100',
+                  'aria-disabled:text-gray-300 aria-disabled:line-through aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent',
                   isOrange
                     ? 'aria-selected:bg-orange-600 aria-selected:text-white aria-selected:hover:bg-orange-700'
                     : 'aria-selected:bg-green-600 aria-selected:text-white aria-selected:hover:bg-green-700',
@@ -136,6 +137,7 @@ export function DateTimePicker({
                 today: isOrange ? 'text-orange-600 font-bold' : 'text-green-600 font-bold',
                 outside: 'opacity-30',
                 hidden: 'invisible',
+                disabled: 'text-gray-300 line-through cursor-not-allowed',
               }}
             />
           </div>
@@ -241,5 +243,118 @@ export function DateTimePicker({
         </PopoverContent>
       </Popover>
     </div>
+  );
+}
+
+// ─────────────────────────────────── Date-only Picker ──────────────────────────────────────
+export interface DatePickerProps {
+  /** YYYY-MM-DD */
+  value: string;
+  onChange: (v: string) => void;
+  /** YYYY-MM-DD — disables dates after this */
+  max?: string;
+  /** YYYY-MM-DD — disables dates before this */
+  min?: string;
+  accent?: 'orange' | 'green';
+  disabled?: boolean;
+  placeholder?: string;
+  /** Only allow Monday–Friday */
+  weekdaysOnly?: boolean;
+}
+
+export function DatePicker({
+  value,
+  onChange,
+  max,
+  min,
+  accent = 'orange',
+  disabled,
+  placeholder = 'วันที่',
+  weekdaysOnly = false,
+}: DatePickerProps) {
+  const [open, setOpen] = useState(false);
+
+  const selectedDate = value ? parse(value, 'yyyy-MM-dd', new Date()) : undefined;
+  const validDate = selectedDate && isValid(selectedDate) ? selectedDate : undefined;
+
+  const thaiDisplay = toThaiDisplay(value);
+  const isOrange = accent === 'orange';
+
+  const triggerRing = isOrange
+    ? 'hover:border-orange-300 focus-visible:ring-orange-200 focus-visible:border-orange-400 data-[state=open]:border-orange-500 data-[state=open]:ring-2 data-[state=open]:ring-orange-200'
+    : 'hover:border-green-300 focus-visible:ring-green-200 focus-visible:border-green-400 data-[state=open]:border-green-500 data-[state=open]:ring-2 data-[state=open]:ring-green-200';
+
+  const maxDate = max ? parse(max, 'yyyy-MM-dd', new Date()) : undefined;
+  const minDate = min ? parse(min, 'yyyy-MM-dd', new Date()) : undefined;
+  const disabledMatcher: Matcher[] = [
+    ...(maxDate && isValid(maxDate) ? [{ after: maxDate }] : []),
+    ...(minDate && isValid(minDate) ? [{ before: minDate }] : []),
+    ...(weekdaysOnly ? [{ dayOfWeek: [0, 6] as 0[] }] : []),
+  ];
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          data-state={open ? 'open' : 'closed'}
+          className={cn(
+            'w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 border-gray-200 bg-white text-[14px] transition-all focus-visible:outline-none focus-visible:ring-2',
+            thaiDisplay ? 'text-gray-900 font-semibold' : 'text-gray-400',
+            triggerRing,
+          )}
+        >
+          <CalendarIcon className={cn('w-4 h-4 shrink-0', thaiDisplay ? (isOrange ? 'text-orange-500' : 'text-green-500') : 'text-gray-400')} />
+          <span className="truncate tabular-nums">{thaiDisplay ?? placeholder}</span>
+        </button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        className="z-10000 p-0 overflow-hidden shadow-2xl rounded-xl border border-gray-200 bg-white w-auto"
+        align="start"
+        sideOffset={6}
+      >
+        <div className="px-2 pt-2 pb-2">
+          <DayPicker
+            mode="single"
+            selected={validDate}
+            onSelect={(day) => { if (day) { onChange(format(day, 'yyyy-MM-dd')); setOpen(false); } }}
+            locale={th}
+            weekStartsOn={0}
+            showOutsideDays
+            disabled={disabledMatcher.length > 0 ? disabledMatcher : undefined}
+            formatters={{
+              formatCaption: (date) =>
+                `${date.toLocaleString('th-TH', { month: 'long' })} ${date.getFullYear() + 543}`,
+            }}
+            classNames={{
+              root: 'text-sm select-none',
+              months: 'flex',
+              month: 'w-full',
+              nav: 'absolute inset-x-0 top-8 flex items-center justify-between px-1',
+              button_previous: 'h-7 w-7 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 transition-colors',
+              button_next: 'h-7 w-7 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 transition-colors',
+              month_caption: 'relative flex justify-center items-center h-9 mb-1 text-sm font-semibold text-gray-800',
+              table: 'w-full border-collapse',
+              weekdays: 'flex',
+              weekday: 'flex-1 text-center text-[11px] font-medium text-gray-400 py-1',
+              week: 'flex mt-1',
+              day: 'flex-1 flex items-center justify-center',
+              day_button: cn(
+                'h-8 w-8 rounded-full text-[13px] font-medium transition-all cursor-pointer hover:bg-gray-100',
+                isOrange
+                  ? 'aria-selected:bg-orange-600 aria-selected:text-white aria-selected:hover:bg-orange-700'
+                  : 'aria-selected:bg-green-600 aria-selected:text-white aria-selected:hover:bg-green-700',
+              ),
+              today: isOrange ? 'text-orange-600 font-bold' : 'text-green-600 font-bold',
+              outside: 'opacity-30',
+              hidden: 'invisible',
+              disabled: 'text-gray-300 cursor-not-allowed',
+            }}
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -30,17 +30,23 @@ export default function ProtectedRoute({
       return;
     }
 
-    // Check role-based access — use dashboardMode if set (admin logging in as user, etc.)
-    const effectiveRole = user?.dashboardMode ?? user?.role;
-    if (requireAuth && user && allowedRoles && !allowedRoles.includes(effectiveRole)) {
-      // Redirect to appropriate dashboard based on effective role
-      if (effectiveRole === 'user') {
+    // Check role-based access
+    // Allow access if:
+    // 1. User's actual role is in allowedRoles, OR
+    // 2. User is admin/manager/superadmin and route allows 'user' (frontend pages)
+    const userActualRole = user?.role;
+    const hasAccess = allowedRoles && userActualRole && (allowedRoles.includes(userActualRole) || 
+                      (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole)));
+    
+    if (requireAuth && user && allowedRoles && userActualRole && !hasAccess) {
+      // Redirect to appropriate dashboard based on actual role
+      if (userActualRole === 'user') {
         router.push('/user/dashboard');
-      } else if (effectiveRole === 'manager') {
+      } else if (userActualRole === 'manager') {
         router.push('/manager/dashboard');
-      } else if (effectiveRole === 'superadmin') {
+      } else if (userActualRole === 'superadmin') {
         router.push('/superadmin/dashboard');
-      } else if (effectiveRole === 'admin') {
+      } else if (userActualRole === 'admin') {
         router.push('/admin/dashboard');
       }
     }
@@ -74,9 +80,15 @@ export default function ProtectedRoute({
     return null; // Will redirect in useEffect
   }
 
-  // Check role-based access — use dashboardMode if set (admin logging in as user, etc.)
-  const effectiveRoleRender = user?.dashboardMode ?? user?.role;
-  if (requireAuth && user && allowedRoles && !allowedRoles.includes(effectiveRoleRender)) {
+  // Check role-based access
+  // Allow access if:
+  // 1. User's actual role is in allowedRoles, OR
+  // 2. User is admin/manager/superadmin and route allows 'user' (frontend pages)
+  const userActualRole = user?.role;
+  const hasAccess = allowedRoles.includes(userActualRole) || 
+                    (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole));
+  
+  if (requireAuth && user && allowedRoles && userActualRole && !hasAccess) {
     return null; // Will redirect in useEffect
   }
 

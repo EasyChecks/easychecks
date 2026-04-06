@@ -31,6 +31,8 @@ export interface LocationItem {
   createdAt?: string;
   updatedAt?: string | null;
   deletedAt?: string | null;
+  deleteReason?: string | null;
+  deletedBy?: { userId: number; firstName: string; lastName: string } | null;
 }
 
 export interface LocationListResponse {
@@ -57,6 +59,7 @@ export interface LocationListParams {
   isActive?: boolean;
   skip?: number;
   take?: number;
+  onlyDeleted?: boolean;
 }
 
 // ── Service Methods ──

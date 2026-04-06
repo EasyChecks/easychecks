@@ -3,13 +3,28 @@ import {
   LateRequestUserActions, 
   LateRequestAdminActions 
 } from '../services/late-request.service.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess } from '../utils/response.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { UnauthorizedError, BadRequestError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
+import { uploadAttachmentToSupabase } from '../utils/supabase-storage.js';
 
 /**
  * Late Request Controller - จัดการ API การขอมาสาย
  */
+
+/**
+ * POST /api/late-requests/upload-attachment - อัปโหลดไฟล์แนบ
+ */
+export const uploadAttachment = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) throw new UnauthorizedError('ไม่พบข้อมูลผู้ใช้');
+
+  const { base64, mimeType, filename } = req.body;
+  if (!base64 || !mimeType) throw new BadRequestError('กรุณาส่ง base64 และ mimeType');
+
+  const url = await uploadAttachmentToSupabase(base64, mimeType, userId, filename);
+  sendSuccess(res, { url }, 'อัปโหลดไฟล์สำเร็จ');
+});
 
 /**
  * POST /api/late-requests - สร้างคำขอมาสายใหม่
@@ -60,14 +75,20 @@ export const getMyLateRequests = asyncHandler(async (req: Request, res: Response
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 10;
 
-  const result = await LateRequestUserActions.getLateRequestsByUser(
-    userId,
-    status,
-    skip,
-    take
-  );
+  console.log(`[getLateRequest] userId=${userId}, status=${status}, skip=${skip}, take=${take}`);
 
-  sendSuccess(res, result, 'ดึงคำขอมาสายสำเร็จ');
+  try {
+    const result = await LateRequestUserActions.getLateRequestsByUser(
+      userId,
+      status,
+      skip,
+      take
+    );
+    sendSuccess(res, result, 'ดึงคำขอมาสายสำเร็จ');
+  } catch (error) {
+    console.error('[getLateRequest] Error:', error);
+    throw error;
+  }
 });
 
 /**
@@ -94,8 +115,10 @@ export const getAllLateRequests = asyncHandler(async (req: Request, res: Respons
   const status = req.query.status as 'PENDING' | 'APPROVED' | 'REJECTED' | undefined;
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 10;
+  const userRole = (req.user?.role as string | undefined); // Get current user's role for approval hierarchy filtering
+  const currentUserId = req.user?.userId; // Get current user's ID for self-request inclusion
 
-  const result = await LateRequestAdminActions.getAllLateRequests(status, skip, take);
+  const result = await LateRequestAdminActions.getAllLateRequests(status, skip, take, userRole, currentUserId);
 
   sendSuccess(res, result, 'ดึงคำขอมาสายสำเร็จ');
 });
@@ -253,12 +276,12 @@ export const deleteLateRequest = asyncHandler(async (req: Request, res: Response
     throw new NotFoundError('ไม่พบคำขอมาสาย');
   }
 
-  // ตรวจสอบว่าเป็นเจ้าของหรือ Admin
+  // Allow user to cancel their own pending requests (or admin/superadmin)
   if (lateRequest.userId !== userId && req.user?.role !== 'ADMIN' && req.user?.role !== 'SUPERADMIN') {
-    throw new ForbiddenError('คุณไม่มีสิทธิ์ลบคำขอมาสายนี้');
+    throw new ForbiddenError('คุณไม่มีสิทธิ์ยกเลิกคำขอมาสายนี้');
   }
 
   await LateRequestUserActions.deleteLateRequest(lateRequestId);
 
-  sendSuccess(res, null, 'ลบคำขอมาสายเรียบร้อยแล้ว');
+  sendSuccess(res, null, 'ยกเลิกคำขอมาสายเรียบร้อยแล้ว');
 });

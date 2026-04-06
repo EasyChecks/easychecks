@@ -8,7 +8,6 @@ interface UserTableProps {
   currentUser: User | null;
   onSelectUser: (user: User) => void;
   getStatusBadge: (status: string) => string;
-  currentUser: User | null;
   onAttendanceEdit?: (editData: AttendanceEditData | null) => void;
   onSaveAttendanceEdit?: () => void;
   editingAttendance?: AttendanceEditData | null;

@@ -8,7 +8,7 @@ export default function AdminPagesLayout({
   children: ReactNode;
 }) {
   return (
-    <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+    <ProtectedRoute allowedRoles={['admin']}>
       <AdminLayout>
         {children}
       </AdminLayout>

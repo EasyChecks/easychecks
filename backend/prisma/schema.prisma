@@ -118,6 +118,7 @@ model LeaveRequest {
   numberOfDays                                   Int         @default(1) @map("number_of_days")
   paidDays                                       Int?        @map("paid_days") // จำนวนวันที่ได้รับค่าจ้าง (คำนวณตาม LeaveType)
   rejectionReason                                String?     @map("rejection_reason")
+  deletedAt                                      DateTime?   @map("deleted_at") // Soft delete timestamp
   approvalActions                                ApprovalAction[]
   user                                           User        @relation("Requester", fields: [userId], references: [userId], onDelete: Cascade)
 
@@ -241,6 +242,7 @@ model LateRequest {
   attachmentUrl                                String?        @map("attachment_url")
   adminComment                                 String?        @map("admin_comment")
   rejectionReason                              String?        @map("rejection_reason")
+  deletedAt                                    DateTime?      @map("deleted_at")
   approvalActions                              ApprovalAction[]
   user                                         User           @relation("late_requests_user_idTousers", fields: [userId], references: [userId], onDelete: Cascade)
 
@@ -281,13 +283,14 @@ enum AttendanceStatus {
 
 enum LeaveType {
   SICK              // ลาป่วย - ได้รับค่าจ้างไม่เกิน 30 วันต่อปี
-  PERSONAL          // ลากิจ - ตามข้อบังคับ
+  PERSONAL          // ลากิจธุระอันจำเป็น - ไม่น้อยกว่า 3 วัน, ได้รับค่าจ้างไม่เกิน 3 วันต่อปี
   VACATION          // ลาพักร้อน - 6 วันต่อปี, ได้รับค่าจ้าง, สะสมได้
-  MILITARY          // ลาเพื่อรับราชการทหาร - ได้รับค่าจ้างไม่เกิน 60 วันต่อปี (เฉพาะชาย)
-  TRAINING          // ลาเพื่อฝึกอบรม - ไม่ได้รับค่าจ้าง
-  MATERNITY         // ลาคลอด - ไม่เกิน 90 วัน, ได้รับค่าจ้างไม่เกิน 45 วัน (เฉพาะหญิง)
-  STERILIZATION     // ลาเพื่อทำหมัน - ตามที่แพทย์กำหนด, ได้รับค่าจ้าง
-  ORDINATION        // ลาบวช - ไม่เกิน 120 วัน (เฉพาะชาย)
+  MILITARY          // ลาเพื่อรับราชการทหาร - ได้รับค่าจ้างไม่เกิน 60 วันต่อปี
+  TRAINING          // ลาเพื่อฝึกอบรม - ตามข้อบังคับบริษัท, ไม่ได้รับค่าจ้าง
+  MATERNITY         // ลาคลอดบุตร - ไม่เกิน 98 วัน, ได้รับค่าจ้างจากนายจ้าง 45 วัน (เฉพาะหญิง)
+  STERILIZATION     // ลาทำหมัน - ตามระยะเวลาที่แพทย์กำหนด, ได้รับค่าจ้าง
+  ORDINATION        // ลาบวช - ไม่เกิน 120 วัน, ได้รับค่าจ้าง (เฉพาะชาย)
+  PATERNITY         // ลาเพื่อช่วยเหลือภริยาคลอดบุตร - ไม่เกิน 15 วัน, ได้รับค่าจ้าง
 }
 
 enum LeaveStatus {

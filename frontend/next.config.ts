@@ -1,12 +1,11 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  reactCompiler: true,
+  reactCompiler: false, // Disabled for dev to reduce memory usage
   output: 'standalone',
-
-  // Proxy /api-local/* → backend container (ใช้ Docker internal network)
-  // ทำให้ browser ไม่ต้องรู้จัก backend URL โดยตรง
+  productionBrowserSourceMaps: false,
+  
+  // Proxy /api-local/* → backend container
   async rewrites() {
     const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://backend:3001';
     return [
@@ -15,6 +14,11 @@ const nextConfig: NextConfig = {
         destination: `${backendUrl}/api/:path*`,
       },
     ];
+  },
+  
+  // Experimental features that can reduce memory
+  experimental: {
+    optimizePackageImports: ['@/'],
   },
 };
 

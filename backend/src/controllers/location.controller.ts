@@ -76,6 +76,7 @@ export const getAllLocations = asyncHandler(async (req: Request, res: Response) 
     req.query.isActive !== undefined
       ? req.query.isActive === 'true'
       : undefined;
+  const onlyDeleted = req.query.onlyDeleted === 'true';
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 20;
 
@@ -83,6 +84,7 @@ export const getAllLocations = asyncHandler(async (req: Request, res: Response) 
     search,
     locationType,
     isActive,
+    onlyDeleted,
     skip,
     take,
   });

@@ -91,13 +91,12 @@ export default function EventManagement() {
   
   // ── API data state ──
   const [events, setEvents] = useState<EventData[]>([]);
-  const [deletedEvents, setDeletedEvents] = useState<(EventData & { deleteReason?: string })[]>([]);
   const [eventStats, setEventStats] = useState<EventStatistics | null>(null);
   const [locations, setLocations] = useState<LocationData[]>([]);
   const [branches, setBranches] = useState<BranchMapItem[]>([]);
   const [isLoadingPage, setIsLoadingPage] = useState(true);
   const [isFiltering, setIsFiltering] = useState(false);
-  const [activeTab, setActiveTab] = useState<'events' | 'deleted' | 'stats'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'stats'>('events');
 
   // ── Search & Filter states ──
   const [searchQuery, setSearchQuery] = useState('');
@@ -147,8 +146,7 @@ export default function EventManagement() {
 
       const eventsResp = await eventService.getAll(params);
       
-      // Filter out deleted events FIRST
-      const nonDeletedEvents = eventsResp.data.filter(e => !e.deletedAt);
+      const nonDeletedEvents = eventsResp.data;
       
       // Map to EventData format
       let filteredEvents = nonDeletedEvents.map(apiEventToEventData);
@@ -205,20 +203,6 @@ export default function EventManagement() {
     fetchEvents();
   }, [fetchEvents]);
 
-  // ── Fetch deleted events ──
-  const fetchDeletedEvents = useCallback(async () => {
-    try {
-      const eventsResp = await eventService.getAll({ take: 100, onlyDeleted: true });
-      const deleted = eventsResp.data.map(e => ({
-        ...apiEventToEventData(e),
-        deleteReason: e.deleteReason || undefined,
-      }));
-      setDeletedEvents(deleted);
-    } catch (err) {
-      console.error('[EventManagement] fetch deleted error:', err);
-    }
-  }, []);
-
   // ── Fetch event statistics ──
   const fetchStats = useCallback(async () => {
     try {
@@ -229,33 +213,10 @@ export default function EventManagement() {
     }
   }, []);
 
-  // Load deleted events and stats when tab changes
+  // Load stats when tab changes
   useEffect(() => {
-    if (activeTab === 'deleted') fetchDeletedEvents();
     if (activeTab === 'stats') fetchStats();
-  }, [activeTab, fetchDeletedEvents, fetchStats]);
-
-  // ── Restore handler ──
-  const handleRestoreEvent = useCallback((event: EventData) => {
-    setConfirmDialog({
-      isOpen: true,
-      title: 'ยืนยันการกู้คืน',
-      message: `คุณแน่ใจหรือไม่ที่จะกู้คืนกิจกรรม "${event.name}"?`,
-      onConfirm: async () => {
-        try {
-          await eventService.restore(parseInt(event.id));
-          await fetchDeletedEvents();
-          await fetchEvents();
-          setAlertDialog({ isOpen: true, type: 'success', title: 'กู้คืนสำเร็จ', message: 'กู้คืนกิจกรรมเรียบร้อยแล้ว' });
-        } catch (err: unknown) {
-          const e = err as { response?: { data?: { error?: string } } };
-          setAlertDialog({ isOpen: true, type: 'error', title: 'ผิดพลาด', message: e.response?.data?.error || 'ไม่สามารถกู้คืนได้' });
-        }
-        setConfirmDialog({ isOpen: false });
-      },
-      onCancel: () => setConfirmDialog({ isOpen: false })
-    });
-  }, [fetchDeletedEvents, fetchEvents]);
+  }, [activeTab, fetchStats]);
 
   // ── WebSocket real-time updates ──
   const { lastMessage } = useEventWebSocket();
@@ -495,7 +456,7 @@ export default function EventManagement() {
       message: `คุณแน่ใจหรือไม่ที่จะลบกิจกรรม "${event.name}"?`,
       onConfirm: async () => {
         try {
-          await eventService.delete(parseInt(event.id), 'ลบโดยผู้ดูแลระบบ');
+          await eventService.delete(parseInt(event.id));
           await fetchEvents(); // Refetch to update list
           setAlertDialog({ isOpen: true, type: 'success', title: 'ลบสำเร็จ', message: 'ลบกิจกรรมเรียบร้อยแล้ว' });
         } catch (err: unknown) {
@@ -575,7 +536,6 @@ export default function EventManagement() {
         <div className="flex gap-1 mb-6 border-b border-gray-200">
           {([
             { key: 'events' as const, label: 'กิจกรรมทั้งหมด' },
-            { key: 'deleted' as const, label: `ถูกลบ${deletedEvents.length > 0 ? ` (${deletedEvents.length})` : ''}` },
             { key: 'stats' as const, label: 'สถิติ' },
           ]).map(tab => (
             <button
@@ -591,47 +551,6 @@ export default function EventManagement() {
             </button>
           ))}
         </div>
-
-        {/* ── Tab: Deleted Events ── */}
-        {activeTab === 'deleted' && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-4">กิจกรรมที่ถูกลบ</h2>
-            {deletedEvents.length === 0 ? (
-              <Card className="p-12 text-center">
-                <svg className="w-16 h-16 mx-auto text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                <p className="text-gray-500">ไม่มีกิจกรรมที่ถูกลบ</p>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {deletedEvents.map(event => (
-                  <Card key={event.id} className="p-4 border-red-200 bg-red-50/30 opacity-80">
-                    <div className="flex items-start justify-between mb-2">
-                      <h3 className="text-lg font-bold text-gray-700 line-through">{event.name}</h3>
-                      <Badge variant="destructive">ถูกลบ</Badge>
-                    </div>
-                    <p className="text-sm text-gray-500 mb-1">{formatDateDisplay(event.date)}</p>
-                    <p className="text-sm text-gray-500 mb-1">{event.locationName}</p>
-                    {event.deleteReason && (
-                      <p className="text-xs text-red-500 mb-3">เหตุผล: {event.deleteReason}</p>
-                    )}
-                    <Button
-                      size="sm"
-                      className="w-full bg-orange-600 hover:bg-orange-700"
-                      onClick={() => handleRestoreEvent(event)}
-                    >
-                      <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                      กู้คืน
-                    </Button>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* ── Tab: Statistics ── */}
         {activeTab === 'stats' && (
@@ -650,7 +569,6 @@ export default function EventManagement() {
                     { label: 'กำลังจะมาถึง', value: eventStats.upcomingEvents, bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' },
                     { label: 'กำลังดำเนินการ', value: eventStats.ongoingEvents, bg: '#ffedd5', text: '#c2410c', border: '#fdba74' },
                     { label: 'สิ้นสุดแล้ว', value: eventStats.pastEvents, bg: '#e5e7eb', text: '#374151', border: '#9ca3af' },
-                    { label: 'ถูกลบ', value: eventStats.deletedEvents, bg: '#fee2e2', text: '#b91c1c', border: '#fca5a5' },
                   ].map(stat => (
                     <Card key={stat.label} className="p-4 text-center">
                       <p className="text-2xl font-bold text-gray-900">{stat.value}</p>

@@ -543,13 +543,12 @@ export default function EventManagementTab({ locationsKey }: EventManagementTabP
     setConfirmDialog({
       isOpen: true,
       title: 'ยืนยันการลบ',
-      message: `คุณแน่ใจหรือไม่ที่จะลบกิจกรรม "${event.eventName}"?`,
+      message: `คุณแน่ใจหรือไม่ที่จะลบกิจกรรม "${event.eventName}"? การกระทำนี้ไม่สามารถย้อนกลับได้`,
       onConfirm: async () => {
-        // Optimistic: remove immediately
         setEvents(prev => prev.filter(e => e.eventId !== event.eventId));
         setConfirmDialog({ isOpen: false });
         try {
-          await eventService.delete(event.eventId, 'ลบโดย Admin');
+          await eventService.delete(event.eventId);
           setAlertDialog({ isOpen: true, type: 'success', title: 'ลบสำเร็จ', message: 'ลบกิจกรรมเรียบร้อยแล้ว' });
           silentRefresh();
         } catch (err) {
@@ -562,8 +561,6 @@ export default function EventManagementTab({ locationsKey }: EventManagementTabP
       onCancel: () => setConfirmDialog({ isOpen: false })
     });
   };
-
-
 
   const mapEvents = useMemo(
     () => events.map(toMapEvent).filter((e): e is EventData => e !== null),

@@ -50,7 +50,7 @@ export default function LoginPage() {
       // login() คืนค่า role ของผู้ใช้ที่ login สำเร็จ
       const role = await login({ username, password, rememberMe });
       
-      // redirect ตาม role
+      // redirect ตาม role - แต่ละ role ไปที่ dashboard ของตัวเอง
       if (role === 'superadmin') {
         router.push('/superadmin/dashboard');
       } else if (role === 'admin') {

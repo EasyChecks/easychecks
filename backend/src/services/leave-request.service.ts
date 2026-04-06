@@ -1,29 +1,92 @@
 import { prisma } from '../lib/prisma.js';
-import type { LeaveRequest, LeaveStatus, LeaveType, Gender, ApprovalActionType } from '@prisma/client';
-import { differenceInBusinessDays, parseISO, format, isWeekend, startOfYear, endOfYear } from 'date-fns';
+import type { LeaveRequest, LeaveStatus, LeaveType, Gender, Prisma, Role } from '@prisma/client';
+import { differenceInBusinessDays, startOfYear, endOfYear } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
-import { BadRequestError, ConflictError, NotFoundError } from '../utils/custom-errors.js';
+import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
 
 /**
  * Leave Request Service - จัดการใบลา
  * ใช้ date-fns สำหรับจัดการวันที่
  */
 
+// ========================================================================================
+// ROLE HIERARCHY VALIDATION
+// ========================================================================================
+
+/**
+ * 🔐 ตรวจสอบว่า approver มีสิทธิ์อนุมัติผู้ขอได้หรือไม่
+ * 
+ * ลำดับ role hierarchy (สูง → ต่ำ):
+ * 1. SUPERADMIN - อนุมัติได้ทั้งตัวเองและคนต่ำกว่า
+ * 2. ADMIN - อนุมัติได้แต่คนต่ำกว่า (MANAGER, USER)
+ * 3. MANAGER - อนุมัติได้แต่คนต่ำกว่า (USER)
+ * 4. USER - ไม่สามารถอนุมัติใครได้
+ */
+function canApprove(approverRole: Role, requesterRole: Role): boolean {
+  const roleHierarchy: Record<Role, number> = {
+    SUPERADMIN: 4,
+    ADMIN: 3,
+    MANAGER: 2,
+    USER: 1,
+  };
+
+  const approverLevel = roleHierarchy[approverRole];
+  const requesterLevel = roleHierarchy[requesterRole];
+
+  // SUPERADMIN สามารถอนุมัติตัวเอง + ทุกคนต่ำกว่า
+  if (approverRole === 'SUPERADMIN') {
+    return requesterLevel <= approverLevel;
+  }
+
+  // Role อื่นอนุมัติได้แต่คนต่ำกว่า (ไม่สามารถอนุมัติเท่าเดิมหรือสูงกว่า)
+  return requesterLevel < approverLevel;
+}
+
+/**
+ * Leave Request Service - จัดการใบลา
+ * ใช้ date-fns สำหรับจัดการวันที่
+ */
+
+// Type definition for leave quota item
+export interface LeaveQuotaItem {
+  leaveType: LeaveType;
+  usedDays: number;
+  usedPaidDays: number;
+  maxPaidDaysPerYear: number | null;
+  maxDaysTotal: number | null;
+  remainingPaidDays: number | null;
+  displayName: string;
+  displayNameEng: string;
+  iconName: string;
+  isPaid: boolean;
+  requireMedicalCert: boolean | number;
+  genderRestriction: Gender | null;
+}
+
 // กำหนดกฎการลาแต่ละประเภท
 export const LEAVE_RULES = {
   SICK: { 
+    displayName: 'ลาป่วย',
+    displayNameEng: 'Sick Leave',
+    iconName: 'Thermometer',
     maxPaidDaysPerYear: 30, 
     requireMedicalCert: 3, // ต้องมีใบรับรองแพทย์เมื่อลา >= 3 วัน
     paid: true,
     genderRestriction: null 
   },
   PERSONAL: { 
-    maxPaidDaysPerYear: null, // ไม่จำกัด แต่ตามข้อบังคับบริษัท
+    displayName: 'ลากิจธุระอันจำเป็น',
+    displayNameEng: 'Personal/Urgent Leave',
+    iconName: 'FileText',
+    maxPaidDaysPerYear: 3, // ลาได้ไม่น้อยกว่า 3 วัน/ปี ได้รับค่าจ้าง
     requireMedicalCert: null,
-    paid: false, // หรือตามข้อบังคับบริษัท
+    paid: true, // ได้รับค่าจ้างตามปกติ
     genderRestriction: null 
   },
   VACATION: { 
+    displayName: 'ลาพักร้อน',
+    displayNameEng: 'Vacation/Holiday Leave',
+    iconName: 'Plane',
     maxPaidDaysPerYear: 6, // 6 วันต่อปี (ทำงานครบ 1 ปี)
     requireMedicalCert: null,
     paid: true,
@@ -31,37 +94,83 @@ export const LEAVE_RULES = {
     genderRestriction: null 
   },
   MILITARY: { 
-    maxPaidDaysPerYear: 60,
+    displayName: 'ลาเพื่อรับราชการทหาร',
+    displayNameEng: 'Military Service Leave',
+    iconName: 'Shield',
+    maxPaidDaysPerYear: 60, // ได้รับค่าจ้างไม่เกิน 60 วัน/ปี
     requireMedicalCert: null,
     paid: true,
     genderRestriction: 'MALE' as Gender // เฉพาะชาย
   },
   TRAINING: { 
-    maxPaidDaysPerYear: null,
+    displayName: 'ลาฝึกอบรม',
+    displayNameEng: 'Training/Educational Leave',
+    iconName: 'BookOpen',
+    maxPaidDaysPerYear: 1, // บริษัทกำหนด 1 วัน/ปี (ไม่จ่ายค่าจ้าง)
     requireMedicalCert: null,
     paid: false, // ไม่ได้รับค่าจ้าง
     genderRestriction: null 
   },
   MATERNITY: { 
-    maxDaysTotal: 90, // ไม่เกิน 90 วัน
-    maxPaidDaysPerYear: 45, // ได้รับค่าจ้างไม่เกิน 45 วัน
+    displayName: 'ลาคลอดบุตร',
+    displayNameEng: 'Maternity Leave',
+    iconName: 'Heart',
+    maxDaysTotal: 98, // ลาได้ไม่เกิน 98 วัน (รวมวันหยุด)
+    maxPaidDaysPerYear: 45, // ได้รับค่าจ้างจากนายจ้าง 45 วัน (เหลือจากประกันสังคม 45 วัน)
     requireMedicalCert: true, // ต้องมีใบรับรองแพทย์
     paid: true,
     genderRestriction: 'FEMALE' as Gender // เฉพาะหญิง
   },
   STERILIZATION: { 
-    maxPaidDaysPerYear: null, // ตามที่แพทย์กำหนด
+    displayName: 'ลาทำหมัน',
+    displayNameEng: 'Sterilization Leave',
+    iconName: 'Stethoscope',
+    maxPaidDaysPerYear: null, // ลาได้ตามระยะเวลาที่แพทย์กำหนด ได้รับค่าจ้างตามปกติ
+    maxDaysTotal: 30, // เหมาะสมสำหรับการทำหมัน
     requireMedicalCert: true, // ต้องมีใบรับรองแพทย์
     paid: true,
     genderRestriction: null // ทั้งสองเพศ
   },
   ORDINATION: { 
+    displayName: 'ลาบวช',
+    displayNameEng: 'Ordination/Monkhood Leave',
+    iconName: 'Sparkles',
     maxDaysTotal: 120,
+    maxPaidDaysPerYear: 120, // จ่ายค่าจ้างทั้งหมด 120 วัน/ครั้ง
     requireMedicalCert: null,
-    paid: false, // ตามข้อบังคับบริษัท (เบื้องต้นไม่จ่าย)
+    paid: true, // ในไทย ลาบวชรัฐให้จ่ายค่าจ้าง
     genderRestriction: 'MALE' as Gender // เฉพาะชาย (เบื้องต้น)
   },
+  PATERNITY: { 
+    displayName: 'ลาเพื่อช่วยเหลือภริยาคลอดบุตร',
+    displayNameEng: 'Paternity/Spousal Maternity Support Leave',
+    iconName: 'Heart',
+    maxPaidDaysPerYear: 15, // ลาได้ไม่เกิน 15 วัน
+    requireMedicalCert: false,
+    paid: true, // ได้รับค่าจ้างตามปกติ (ตามกฎหมายแรงงาน)
+    genderRestriction: 'MALE' as Gender // เฉพาะชาย
+  },
 } as const;
+
+/**
+ * ให้ข้อมูลแสดงผลสำหรับแต่ละประเภทการลา
+ */
+export function getLeaveTypeDisplay(leaveType: LeaveType) {
+  const rules = LEAVE_RULES[leaveType];
+  return {
+    leaveType,
+    displayName: rules?.displayName || leaveType,
+    displayNameEng: rules?.displayNameEng || leaveType,
+    iconName: rules?.iconName || 'FileText',
+  };
+}
+
+/**
+ * ให้รายละเอียดกฎของประเภทการลา
+ */
+export function getLeaveTypeRules(leaveType: LeaveType) {
+  return LEAVE_RULES[leaveType];
+}
 
 export interface CreateLeaveRequestDTO {
   userId: number;
@@ -136,7 +245,7 @@ type LeaveRequestWithApprover = LeaveRequest & {
 type LeaveApprovalActionRow = {
   leaveId: number;
   actorUserId: number;
-  action: ApprovalActionType;
+  action: string;
   adminComment: string | null;
   rejectionReason: string | null;
   actor: {
@@ -200,22 +309,22 @@ function attachLeaveApprover<T extends LeaveRequest>(
     const latest = latestMap.get(request.leaveId);
     const approver = latest
       ? {
-          userId: latest.actor.userId,
-          firstName: latest.actor.firstName,
-          lastName: latest.actor.lastName,
-          employeeId: latest.actor.employeeId,
-          email: latest.actor.email,
-          role: latest.actor.role,
-          gender: latest.actor.gender,
-        }
+        userId: latest.actor.userId,
+        firstName: latest.actor.firstName,
+        lastName: latest.actor.lastName,
+        employeeId: latest.actor.employeeId,
+        email: latest.actor.email,
+        role: latest.actor.role,
+        gender: latest.actor.gender,
+      }
       : null;
 
     return {
       ...request,
       approvedByUserId: latest?.actorUserId ?? null,
       approver,
-      adminComment: request.adminComment ?? latest?.adminComment ?? null,
-      rejectionReason: request.rejectionReason ?? latest?.rejectionReason ?? null,
+      adminComment: (request.adminComment ?? latest?.adminComment ?? null) as string | null,
+      rejectionReason: (request.rejectionReason ?? latest?.rejectionReason ?? null) as string | null,
     };
   });
 }
@@ -228,7 +337,9 @@ function attachLeaveApprover<T extends LeaveRequest>(
  * เหตุผล: +1 เพราะวันเริ่มต้นนับด้วย (ถ้าลา 1 วันต้องนับวันเริ่มต้น)
  */
 function calculateBusinessDays(startDate: Date, endDate: Date): number {
-  const days = differenceInBusinessDays(endDate, startDate) + 1; // +1 เพราะนับวันเริ่มต้นด้วย
+  // differenceInBusinessDays returns difference between dates (not inclusive of both)
+  // Adding +1 to include both start and end dates in the count
+  const days = differenceInBusinessDays(endDate, startDate) + 1;
   return days > 0 ? days : 0;
 }
 
@@ -277,6 +388,7 @@ async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): P
       userId,
       leaveType,
       status: 'APPROVED',
+      deletedAt: null, // Exclude soft deleted
       startDate: {
         gte: yearStart,
         lte: yearEnd,
@@ -287,7 +399,7 @@ async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): P
     },
   });
 
-  return leaves.reduce((sum: number, leave: any) => sum + leave.numberOfDays, 0);
+  return leaves.reduce((sum: number, leave: { numberOfDays: number }) => sum + leave.numberOfDays, 0);
 }
 
 /**
@@ -302,6 +414,7 @@ async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType
       userId,
       leaveType,
       status: 'APPROVED',
+      deletedAt: null, // Exclude soft deleted
       startDate: {
         gte: yearStart,
         lte: yearEnd,
@@ -309,42 +422,99 @@ async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType
     },
     select: {
       paidDays: true,
+      numberOfDays: true,
+      isHourly: true,
     },
   });
 
-  return leaves.reduce((sum: number, leave: any) => sum + (leave.paidDays || 0), 0);
+  return leaves.reduce((sum: number, leave: { paidDays: number | null; numberOfDays: number; isHourly?: boolean }) => {
+    // Skip hourly leaves (paidDays = 0)
+    if (leave.isHourly) {
+      return sum;
+    }
+    // For full-day leaves: always use numberOfDays for consistency
+    // This matches what's displayed in the UI (q.usedDays)
+    return sum + leave.numberOfDays;
+  }, 0);
 }
 
 /**
  * ดูสถิติการลาแต่ละประเภทของผู้ใช้
+ * 
+ * returns: 
+ * - leaveType: ประเภทการลา
+ * - usedDays: จำนวนวันลาที่ใช้ไปในปีนี้ (APPROVED เท่านั้น)
+ * - usedPaidDays: จำนวนวันลาที่ได้รับค่าจ้างในปีนี้
+ * - maxPaidDaysPerYear: จำนวนวันลาสูงสุดต่อปี (เมื่อได้รับค่าจ้าง)
+ * - maxDaysTotal: จำนวนวันลาสูงสุดต่อครั้ง (สำหรับการลาระยะยาว เช่น ลาคลอด, ลาบวช)
+ * - remainingPaidDays: จำนวนวันลาสะสมที่เหลือในปีนี้ (null = ไม่มีข้อจำกัด)
+ * - displayName: ชื่อการลาตามประเภท (ภาษาไทย)
+ * - iconName: ชื่อ icon สำหรับแสดง UI
+ * - isPaid: ได้รับค่าจ้างหรือไม่
+ * - requireMedicalCert: ต้องใบรับรองแพทย์หรือไม่ (number=ต้องเมื่อลา>=วัน, true=ต้องเสมอ, false=ไม่ต้อง)
+ * - genderRestriction: ระบุเพศ (MALE=เฉพาะชาย, FEMALE=เฉพาะหญิง, null=ทั้งสองเพศ)
  */
-async function getLeaveQuota(userId: number): Promise<any> {
+async function getLeaveQuota(userId: number): Promise<LeaveQuotaItem[]> {
   const quotas = await Promise.all(
-    Object.keys(LEAVE_RULES).map(async (leaveType) => {
-      const type = leaveType as LeaveType;
-      const rules = LEAVE_RULES[type];
-      const usedDays = await getUsedLeaveDaysThisYear(userId, type);
-      const usedPaidDays = await getUsedPaidLeaveDaysThisYear(userId, type);
+    Object.keys(LEAVE_RULES)
+      .filter(leaveType => leaveType !== 'PATERNITY') // Skip PATERNITY until Prisma sync is complete
+      .map(async (leaveType) => {
+        const type = leaveType as LeaveType;
+        const rules = LEAVE_RULES[type];
+        const usedDays = await getUsedLeaveDaysThisYear(userId, type);
+        const usedPaidDays = await getUsedPaidLeaveDaysThisYear(userId, type);
 
-      // Get maxPaidDaysPerYear safely (some types have it, some don't)
-      const maxPaid = 'maxPaidDaysPerYear' in rules ? rules.maxPaidDaysPerYear : null;
-      const maxTotal = 'maxDaysTotal' in rules ? rules.maxDaysTotal : null;
+        // Get maxPaidDaysPerYear safely
+        const maxPaid = 'maxPaidDaysPerYear' in rules ? rules.maxPaidDaysPerYear : null;
+        const maxTotal = 'maxDaysTotal' in rules ? rules.maxDaysTotal : null;
 
-      return {
-        leaveType: type,
-        usedDays,
-        usedPaidDays,
-        maxPaidDaysPerYear: maxPaid,
-        maxDaysTotal: maxTotal,
-        remainingPaidDays: maxPaid 
-          ? Math.max(0, maxPaid - usedPaidDays)
-          : null,
-        isPaid: rules.paid,
-        requireMedicalCert: rules.requireMedicalCert || false,
-        genderRestriction: rules.genderRestriction || null,
-      };
-    })
+        // Calculate remaining days properly:
+        // - If it's paid type with maxPaidDaysPerYear, use that for remaining calculation
+        // - Otherwise if has maxDaysTotal (like maternity/ordination that renew), use maxPaidDaysPerYear if available
+        // - Otherwise null (unlimited for this year)
+        let remainingPaidDays: number | null = null;
+        if (rules.paid && maxPaid !== null && maxPaid !== undefined) {
+          remainingPaidDays = Math.max(0, maxPaid - usedPaidDays);
+        } else if (!rules.paid && maxPaid !== null && maxPaid !== undefined) {
+          // For unpaid leaves, still track remaining against maxPaidDaysPerYear
+          remainingPaidDays = Math.max(0, maxPaid - usedDays);
+        }
+
+        return {
+          leaveType: type,
+          usedDays,
+          usedPaidDays,
+          maxPaidDaysPerYear: maxPaid as (typeof maxPaid extends number ? number : null) | null,
+          maxDaysTotal: maxTotal as (typeof maxTotal extends number ? number : null) | null,
+          remainingPaidDays,
+          displayName: rules.displayName as string,
+          displayNameEng: rules.displayNameEng as string,
+          iconName: rules.iconName as string,
+          isPaid: rules.paid as boolean,
+          requireMedicalCert: rules.requireMedicalCert as (boolean | number),
+          genderRestriction: (rules.genderRestriction as Gender) || null,
+        } as LeaveQuotaItem;
+      })
   );
+
+  // Add PATERNITY with default values (no usage data yet since it's new)
+  const paternity = LEAVE_RULES.PATERNITY as Record<string, unknown>;
+  if (paternity) {
+    quotas.push({
+      leaveType: 'PATERNITY' as LeaveType,
+      usedDays: 0,
+      usedPaidDays: 0,
+      maxPaidDaysPerYear: (paternity.maxPaidDaysPerYear as number | null) ?? 0,
+      maxDaysTotal: (paternity.maxDaysTotal as number | null) || null,
+      remainingPaidDays: ((paternity.maxPaidDaysPerYear as number) ?? null),
+      displayName: (paternity.displayName as string) || 'PATERNITY',
+      displayNameEng: (paternity.displayNameEng as string) || 'Paternity Leave',
+      iconName: (paternity.iconName as string) || 'Heart',
+      isPaid: (paternity.paid as boolean) || false,
+      requireMedicalCert: (paternity.requireMedicalCert as boolean | number) || false,
+      genderRestriction: (paternity.genderRestriction as Gender) || null,
+    } as LeaveQuotaItem);
+  }
 
   return quotas;
 }
@@ -492,10 +662,11 @@ async function createLeaveRequest(
     throw new BadRequestError(validation.message || 'ข้อมูลการลาไม่ถูกต้อง');
   }
 
-  // Check for overlapping leave requests
+  // Check for overlapping leave requests (exclude soft-deleted records)
   const overlappingLeave = await prisma.leaveRequest.findFirst({
     where: {
       userId: data.userId,
+      deletedAt: null, // Exclude soft-deleted records
       status: { not: 'REJECTED' },
       AND: [
         { startDate: { lte: endDate } },
@@ -575,7 +746,7 @@ async function getLeaveRequestsByUser(
   skip?: number,
   take?: number
 ): Promise<{ data: LeaveRequestWithApprover[]; total: number }> {
-  const where: any = { userId };
+  const where: Prisma.LeaveRequestWhereInput = { userId, deletedAt: null };
 
   if (status) {
     where.status = status;
@@ -685,7 +856,7 @@ async function updateLeaveRequest(
     }
   }
 
-  // Check for overlapping leave requests
+  // Check for overlapping leave requests (exclude soft-deleted records)
   if (data.startDate || data.endDate) {
     const overlappingLeave = await prisma.leaveRequest.findFirst({
       where: {
@@ -781,7 +952,7 @@ async function updateLeaveRequest(
 }
 
 /**
- * ลบใบลา (อนุญาตแค่เมื่อ PENDING)
+ * ลบใบลา (Soft Delete - อนุญาตแค่เมื่อ PENDING)
  */
 async function deleteLeaveRequest(leaveId: number): Promise<LeaveRequest> {
   const leaveRequest = await prisma.leaveRequest.findUnique({
@@ -796,8 +967,12 @@ async function deleteLeaveRequest(leaveId: number): Promise<LeaveRequest> {
     throw new ConflictError('สามารถลบได้เฉพาะใบลาที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
 
-  const deletedLeave = await prisma.leaveRequest.delete({
+  // Soft delete: set deletedAt instead of hard delete
+  const deletedLeave = await prisma.leaveRequest.update({
     where: { leaveId },
+    data: {
+      deletedAt: new Date(),
+    },
   });
 
   await createAuditLog({
@@ -822,22 +997,23 @@ async function getLeaveStatistics(userId: number): Promise<{
   totalDays: number;
   approvedDays: number;
 }> {
+  const baseWhere = { userId, deletedAt: null };
   const [total, approved, pending, rejected] = await Promise.all([
-    prisma.leaveRequest.count({ where: { userId } }),
-    prisma.leaveRequest.count({ where: { userId, status: 'APPROVED' } }),
-    prisma.leaveRequest.count({ where: { userId, status: 'PENDING' } }),
-    prisma.leaveRequest.count({ where: { userId, status: 'REJECTED' } }),
+    prisma.leaveRequest.count({ where: baseWhere }),
+    prisma.leaveRequest.count({ where: { ...baseWhere, status: 'APPROVED' } }),
+    prisma.leaveRequest.count({ where: { ...baseWhere, status: 'PENDING' } }),
+    prisma.leaveRequest.count({ where: { ...baseWhere, status: 'REJECTED' } }),
   ]);
 
   const allLeaves = await prisma.leaveRequest.findMany({
-    where: { userId },
+    where: baseWhere,
     select: { numberOfDays: true, status: true },
   });
 
-  const totalDays = allLeaves.reduce((sum: number, leave: any) => sum + leave.numberOfDays, 0);
+  const totalDays = allLeaves.reduce((sum: number, leave: { numberOfDays: number; status: LeaveStatus }) => sum + leave.numberOfDays, 0);
   const approvedDays = allLeaves
-    .filter((leave: any) => leave.status === 'APPROVED')
-    .reduce((sum: number, leave: any) => sum + leave.numberOfDays, 0);
+    .filter((leave: { numberOfDays: number; status: LeaveStatus }) => leave.status === 'APPROVED')
+    .reduce((sum: number, leave: { numberOfDays: number; status: LeaveStatus }) => sum + leave.numberOfDays, 0);
 
   return {
     total,
@@ -854,18 +1030,53 @@ async function getLeaveStatistics(userId: number): Promise<{
 // ========================================================================================
 
 /**
- * ดึงใบลาทั้งหมด (Admin only)
+ * ดึงใบลาทั้งหมด สำหรับอนุมัติ (filtered by approval hierarchy)
+ * - SUPERADMIN: เห็นทั้งหมด
+ * - ADMIN: เห็น MANAGER + USER เท่านั้น (เพื่ออนุมัติ)
+ * - MANAGER: เห็น USER เท่านั้น (เพื่ออนุมัติ)
+ * - Default to PENDING status if not specified (approval use case)
  */
 async function getAllLeaveRequests(
   status?: LeaveStatus,
   skip?: number,
-  take?: number
+  take?: number,
+  userRole?: string, // Current user's role for approval hierarchy filtering
+  currentUserId?: number // Current user's ID to include self-request
 ): Promise<{ data: LeaveRequestWithApprover[]; total: number }> {
-  const where: any = {};
+  const where: Prisma.LeaveRequestWhereInput = { 
+    deletedAt: null,
+    // Default to PENDING if not specified (for approval workflow)
+    status: status || 'PENDING',
+  };
 
-  if (status) {
-    where.status = status;
+  // Normalize role to uppercase for comparison
+  const normalizedRole = userRole?.toUpperCase();
+
+  // Filter by approval hierarchy - who can approve whom
+  // Also include self-requests (where userId = current user)
+  if (normalizedRole === 'ADMIN') {
+    // ADMIN can only approve MANAGER and USER requests, OR their own requests
+    const orConditions: any[] = [
+      { user: { role: { in: ['MANAGER', 'USER'] } } },
+    ];
+    if (currentUserId) {
+      orConditions.push({ userId: currentUserId });
+    }
+    where.OR = orConditions;
+  } else if (normalizedRole === 'MANAGER') {
+    // MANAGER can only approve USER requests, OR their own requests
+    const orConditions: any[] = [
+      { user: { role: { in: ['USER'] } } },
+    ];
+    if (currentUserId) {
+      orConditions.push({ userId: currentUserId });
+    }
+    where.OR = orConditions;
+  } else if (normalizedRole === 'SUPERADMIN') {
+    // SUPERADMIN: can approve all, including self
+    // No additional filter needed - can see/approve all roles + self
   }
+  // For other roles, they can at least see their own requests
 
   const [data, total] = await Promise.all([
     prisma.leaveRequest.findMany({
@@ -902,6 +1113,14 @@ async function approveLeaveRequest(
 ): Promise<LeaveRequestWithApprover> {
   const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
+    include: {
+      requester: {
+        select: { role: true },
+      },
+      approver: {
+        select: { role: true },
+      },
+    },
   });
 
   if (!leaveRequest) {
@@ -910,6 +1129,23 @@ async function approveLeaveRequest(
 
   if (leaveRequest.status !== 'PENDING') {
     throw new ConflictError('ไม่สามารถอนุมัติใบลาที่มีสถานะอื่นได้');
+  }
+
+  // 🔐 ตรวจสอบ role hierarchy - Approver ต้องมี role ที่พอเพียง
+  const approverUser = await prisma.user.findUnique({
+    where: { userId: data.approvedByUserId },
+    select: { role: true },
+  });
+
+  if (!approverUser) {
+    throw new NotFoundError('ไม่พบผู้อนุมัติ');
+  }
+
+  const requesterRole = leaveRequest.requester.role;
+  if (!canApprove(approverUser.role, requesterRole)) {
+    throw new ForbiddenError(
+      `${approverUser.role} ไม่สามารถอนุมัติใบลาของ ${requesterRole} ได้`
+    );
   }
 
   const approvedLeave = await prisma.$transaction(async (tx) => {
@@ -969,6 +1205,11 @@ async function rejectLeaveRequest(
 ): Promise<LeaveRequestWithApprover> {
   const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
+    include: {
+      requester: {
+        select: { role: true },
+      },
+    },
   });
 
   if (!leaveRequest) {
@@ -977,6 +1218,23 @@ async function rejectLeaveRequest(
 
   if (leaveRequest.status !== 'PENDING') {
     throw new ConflictError('ไม่สามารถปฏิเสธใบลาที่มีสถานะอื่นได้');
+  }
+
+  // 🔐 ตรวจสอบ role hierarchy - Approver ต้องมี role ที่พอเพียง
+  const approverUser = await prisma.user.findUnique({
+    where: { userId: data.approvedByUserId },
+    select: { role: true },
+  });
+
+  if (!approverUser) {
+    throw new NotFoundError('ไม่พบผู้อนุมัติ');
+  }
+
+  const requesterRole = leaveRequest.requester.role;
+  if (!canApprove(approverUser.role, requesterRole)) {
+    throw new ForbiddenError(
+      `${approverUser.role} ไม่สามารถปฏิเสธใบลาของ ${requesterRole} ได้`
+    );
   }
 
   const rejectedLeave = await prisma.$transaction(async (tx) => {

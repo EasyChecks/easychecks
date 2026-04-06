@@ -26,6 +26,14 @@ const router = Router();
 router.post('/', authenticate, lateRequestController.createLateRequest);
 
 /**
+ * @route   POST /api/late-requests/upload-attachment
+ * @desc    อัปโหลดไฟล์แนบ
+ * @access  Authenticated
+ * @body    base64, mimeType, filename?
+ */
+router.post('/upload-attachment', authenticate, lateRequestController.uploadAttachment);
+
+/**
  * @route   GET /api/late-requests/my
  * @desc    ดึงคำขอมาสายของผู้ใช้เอง
  * @access  Authenticated

@@ -144,7 +144,7 @@ async function getLatestLateApprovalMap(lateRequestIds: number[]): Promise<Map<n
   return latestMap;
 }
 
-function mapLateRequestForFrontend(request: LateRequest & { approver?: any; adminComment?: any; rejectionReason?: any; approvedByUserId?: any }): any {
+function mapLateRequestForFrontend(request: LateRequest & { approver?: any; adminComment?: any; rejectionReason?: any; approvedByUserId?: any; user?: any }): any {
   return {
     id: request.lateRequestId,
     userId: request.userId,

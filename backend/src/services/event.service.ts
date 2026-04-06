@@ -62,6 +62,8 @@ export interface SearchEventParams {
   skip?: number;
   take?: number;
   branchId?: number; // กรองกิจกรรมตามสาขา (ALL หรือ BRANCH ที่มี branchId นี้)
+  includeDeleted?: boolean; // รวมกิจกรรมที่ถูกลบด้วย
+  onlyDeleted?: boolean; // แสดงเฉพาะกิจกรรมที่ลบแล้ว
 }
 
 // ========================================================================================
@@ -254,8 +256,13 @@ async function getAllEvents(params: SearchEventParams): Promise<{
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = {};
 
-  // ซ่อน legacy soft-deleted records (ถ้ามีในระบบเดิม)
-  where.deleteReason = null;
+  // ตรวจสอบการลบ: soft-deleted records
+  if (params.onlyDeleted) {
+    where.deleteReason = { not: null };
+  } else if (!params.includeDeleted) {
+    where.deleteReason = null;
+  }
+  // ถ้า includeDeleted = true, ไม่จำกัด deleteReason
 
   // 🔍 เพิ่มเงื่อนไขค้นหาแบบ OR เพื่อค้นหาจากหลายฟิลด์
   // ใช้ mode: 'insensitive' เพื่อให้ไม่สนใจตัวพิมพ์เล็ก-ใหญ่

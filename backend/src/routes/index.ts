@@ -13,6 +13,7 @@ import leaveRequestRoutes from './leave-request.routes.js';
 import locationRoutes from './location.routes.js';
 import announcementRoutes from './announcement.routes.js';
 import auditRoutes from './audit.routes.js';
+import policyRoutes from './policy.routes.js';
 
 const router = Router();
 
@@ -22,6 +23,9 @@ const router = Router();
 
 // 🔐 Auth Routes (ไม่ต้อง authentication)
 router.use('/auth', authRoutes);
+
+// 📜 Policy Routes (ไม่ต้อง authentication — เปิดให้ทุกคนอ่านได้)
+router.use('/policies', policyRoutes);
 
 // 🔒 Protected Routes (ต้อง authentication)
 router.use(authenticate);

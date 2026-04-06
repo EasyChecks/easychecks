@@ -123,6 +123,16 @@ export const authService = {
         }
       });
 
+      // ดึง branch name ถ้ามี branchId
+      let branchName: string | undefined;
+      if (user.branchId) {
+        const branch = await prisma.branch.findUnique({
+          where: { branchId: user.branchId },
+          select: { name: true, code: true },
+        });
+        branchName = branch?.name ?? undefined;
+      }
+
       const result = {
         accessToken: session.token,
         refreshToken: session.refreshToken,
@@ -136,7 +146,11 @@ export const authService = {
           email: user.email,
           role: user.role,
           avatarUrl: user.avatarUrl,
-          branchId: user.branchId ?? undefined
+          branchId: user.branchId ?? undefined,
+          department: user.department ?? undefined,
+          position: user.position ?? undefined,
+          phone: user.phone ?? undefined,
+          branch: branchName,
         }
       };
 

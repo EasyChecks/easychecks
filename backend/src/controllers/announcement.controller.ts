@@ -134,7 +134,9 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
         targetBranchIds,
         targetUserIds,
       },
-      req.user.userId
+      req.user.userId,
+      req.user.role,
+      req.user.branchId
     );
 
     sendSuccess(res, updated, 'อัปเดตประกาศเรียบร้อยแล้ว');

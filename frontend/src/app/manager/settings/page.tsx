@@ -1,12 +1,28 @@
 'use client';
 
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import { policyService } from '@/services/policyService';
 
 export default function ManagerSettingsPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const basePath = '/manager';
+
+  const [policyModal, setPolicyModal] = useState<{ open: boolean; title: string; content: string; loading: boolean }>({
+    open: false, title: '', content: '', loading: false,
+  });
+
+  const openPolicy = async (key: string) => {
+    setPolicyModal({ open: true, title: '', content: '', loading: true });
+    try {
+      const policy = await policyService.getByKey(key);
+      setPolicyModal({ open: true, title: policy.title, content: policy.content, loading: false });
+    } catch {
+      setPolicyModal({ open: true, title: 'ข้อผิดพลาด', content: 'ไม่สามารถโหลดนโยบายได้', loading: false });
+    }
+  };
 
   const menuItems = [
     {
@@ -18,16 +34,6 @@ export default function ManagerSettingsPage() {
       label: 'เปลี่ยนรหัสผ่าน',
       desc: 'อัปเดตรหัสผ่านบัญชีของคุณ',
       onClick: () => router.push(`${basePath}/profile`),
-    },
-    {
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
-        </svg>
-      ),
-      label: 'การแจ้งเตือน',
-      desc: 'ตั้งค่าการรับแจ้งเตือน',
-      onClick: () => {},
     },
     {
       icon: (
@@ -48,6 +54,16 @@ export default function ManagerSettingsPage() {
       label: 'ช่วยเหลือ',
       desc: 'ศูนย์ช่วยเหลือและคำถามที่พบบ่อย',
       onClick: () => {},
+    },
+    {
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+        </svg>
+      ),
+      label: 'นโยบายความเป็นส่วนตัว',
+      desc: 'ข้อกำหนดและนโยบายการใช้งาน',
+      onClick: () => openPolicy('privacy'),
     },
     {
       icon: (
@@ -128,6 +144,43 @@ export default function ManagerSettingsPage() {
 
       {/* Version */}
       <p className="text-center text-xs text-gray-300 pb-2">EasyCheck v1.0.0</p>
+
+      {/* Policy Modal */}
+      {policyModal.open && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPolicyModal(prev => ({ ...prev, open: false }))} />
+          <div className="relative bg-white rounded-t-3xl sm:rounded-2xl shadow-xl w-full max-w-lg sm:mx-4 max-h-[85vh] flex flex-col">
+            <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mt-3 sm:hidden" />
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {policyModal.loading ? 'กำลังโหลด...' : policyModal.title}
+              </h2>
+              <button onClick={() => setPolicyModal(prev => ({ ...prev, open: false }))} className="p-1 rounded-lg hover:bg-gray-100">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto px-6 py-4 text-sm text-gray-600 leading-relaxed whitespace-pre-line">
+              {policyModal.loading ? (
+                <div className="flex justify-center py-8">
+                  <div className="w-8 h-8 border-2 border-[#f26623] border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : (
+                policyModal.content
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100">
+              <button
+                onClick={() => setPolicyModal(prev => ({ ...prev, open: false }))}
+                className="w-full py-2.5 rounded-xl bg-[#f26623] text-sm font-medium text-white active:bg-[#d9551a] transition-colors"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

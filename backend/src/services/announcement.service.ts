@@ -231,7 +231,9 @@ export const getAnnouncementById = async (announcementId: number) => {
 export const updateAnnouncement = async (
   announcementId: number,
   data: UpdateAnnouncementDTO,
-  updatedByUserId: number
+  updatedByUserId: number,
+  updatedByUserRole?: string,
+  _updatedByUserBranchId?: number
 ) => {
   // ดึงข้อมูลเดิมก่อน เพื่อ (1) เช็ค SENT guard (2) เก็บ oldValues ให้ audit log
   const existing = await prisma.announcement.findUnique({
@@ -246,6 +248,12 @@ export const updateAnnouncement = async (
   // เพราะมีคน receive ไปแล้ว การแก้ไขจะทำให้ข้อมูลใน DB ไม่ตรงกับที่รับไปจริงๆ
   if (existing.status === 'SENT') {
     throw new Error('ไม่สามารถแก้ไขประกาศที่ส่งไปแล้ว');
+  }
+
+  // ADMIN สามารถแก้ไขได้เฉพาะประกาศที่ตัวเองสร้าง
+  // SUPERADMIN แก้ไขได้ทุกประกาศ
+  if (updatedByUserRole === 'ADMIN' && existing.createdByUserId !== updatedByUserId) {
+    throw new Error('ไม่สามารถแก้ไขประกาศที่สร้างโดยผู้ใช้อื่น');
   }
 
   const updated = await prisma.announcement.update({
@@ -401,6 +409,17 @@ export const sendAnnouncement = async (
     }
     const recipientIds = users.map((u) => u.userId);
 
+    // INSERT recipients ลง announcement_recipients
+    // ต้องทำภายใน transaction เดียวกัน เพื่อให้ rollback ได้ถ้า update status ล้มเหลว
+    if (recipientIds.length > 0) {
+      await tx.announcementRecipient.createMany({
+        data: recipientIds.map((userId) => ({
+          announcementId,
+          userId,
+        })),
+      });
+    }
+
     // อัปเดต status ให้เป็น SENT ภายใน transaction เดียวกัน
     // ถ้า request อื่นเข้ามาพร้อมกัน จะเจอ status ≠ DRAFT แล้ว throw ออกไป
     const updated = await tx.announcement.update({
@@ -408,6 +427,7 @@ export const sendAnnouncement = async (
       data: {
         status: 'SENT',
         sentByUserId,
+        sentAt: new Date(),
       },
     });
 

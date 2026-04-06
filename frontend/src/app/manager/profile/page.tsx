@@ -60,7 +60,7 @@ export default function ManagerProfilePage() {
   );
 
   return (
-    <div className="space-y-5 -mt-4 -mx-4">
+    <div className="space-y-5 -mt-4 -mx-4 overflow-x-hidden">
       {/* Hero header */}
       <div className="relative bg-gradient-to-br from-[#f26623] to-[#ea580c] px-6 pt-6 pb-16">
         <button onClick={() => router.back()} className="mb-4 p-1 -ml-1 rounded-lg active:bg-white/10 transition-colors">
@@ -84,7 +84,7 @@ export default function ManagerProfilePage() {
         </div>
       </div>
 
-      <div className="px-4 -mt-10 space-y-4 pb-4">
+      <div className="mx-4 -mt-10 space-y-4 pb-4">
         <div className="bg-white rounded-2xl shadow-sm p-4">
           <h3 className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center">

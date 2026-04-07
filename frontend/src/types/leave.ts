@@ -1,7 +1,10 @@
 // Leave Quota Management Types
 
 export interface LeaveQuotaSettings {
-  totalDays: number;
+  maxDaysPerYear: number | null;
+  maxPaidDaysPerYear: number | null;
+  maxDaysTotal: number | null;
+  paid: boolean;
   requireDocument: boolean;
   documentAfterDays: number;
 }
@@ -15,7 +18,10 @@ export interface IndividualQuotas {
 }
 
 export interface LeaveQuotaEditForm {
-  totalDays: number | string;
+  maxDaysPerYear: number | string;
+  maxPaidDaysPerYear: number | string;
+  maxDaysTotal: number | string;
+  paid: boolean;
   requireDocument: boolean;
   documentAfterDays: number | string;
 }
@@ -34,34 +40,37 @@ export interface AlertState {
   autoClose?: boolean;
 }
 
-export type LeaveType = 
-  | 'ลาป่วย'
-  | 'ลากิจ'
-  | 'ลาพักร้อน'
-  | 'ลาคลอด'
-  | 'ลาเพื่อทำหมัน'
-  | 'ลาเพื่อรับราชการทหาร'
-  | 'ลาเพื่อฝึกอบรม'
-  | 'ลาไม่รับค่าจ้าง';
+export type LeaveType =
+  | 'SICK'
+  | 'PERSONAL'
+  | 'VACATION'
+  | 'MILITARY'
+  | 'TRAINING'
+  | 'MATERNITY'
+  | 'STERILIZATION'
+  | 'ORDINATION'
+  | 'PATERNITY';
 
 export const DEFAULT_LEAVE_QUOTA: LeaveQuotaMap = {
-  'ลาป่วย': { totalDays: 60, requireDocument: true, documentAfterDays: 3 },
-  'ลากิจ': { totalDays: 45, requireDocument: false, documentAfterDays: 0 },
-  'ลาพักร้อน': { totalDays: 10, requireDocument: false, documentAfterDays: 0 },
-  'ลาคลอด': { totalDays: 90, requireDocument: false, documentAfterDays: 0 },
-  'ลาเพื่อทำหมัน': { totalDays: 30, requireDocument: true, documentAfterDays: 0 },
-  'ลาเพื่อรับราชการทหาร': { totalDays: 60, requireDocument: true, documentAfterDays: 0 },
-  'ลาเพื่อฝึกอบรม': { totalDays: 30, requireDocument: false, documentAfterDays: 0 },
-  'ลาไม่รับค่าจ้าง': { totalDays: 90, requireDocument: false, documentAfterDays: 0 }
+  SICK: { maxDaysPerYear: 30, maxPaidDaysPerYear: 30, maxDaysTotal: null, paid: true, requireDocument: true, documentAfterDays: 3 },
+  PERSONAL: { maxDaysPerYear: 15, maxPaidDaysPerYear: 3, maxDaysTotal: null, paid: true, requireDocument: false, documentAfterDays: 0 },
+  VACATION: { maxDaysPerYear: 6, maxPaidDaysPerYear: 6, maxDaysTotal: null, paid: true, requireDocument: false, documentAfterDays: 0 },
+  MILITARY: { maxDaysPerYear: 60, maxPaidDaysPerYear: 60, maxDaysTotal: null, paid: true, requireDocument: false, documentAfterDays: 0 },
+  TRAINING: { maxDaysPerYear: null, maxPaidDaysPerYear: null, maxDaysTotal: null, paid: false, requireDocument: false, documentAfterDays: 0 },
+  MATERNITY: { maxDaysPerYear: 98, maxPaidDaysPerYear: 45, maxDaysTotal: 98, paid: true, requireDocument: true, documentAfterDays: 0 },
+  STERILIZATION: { maxDaysPerYear: null, maxPaidDaysPerYear: null, maxDaysTotal: null, paid: true, requireDocument: true, documentAfterDays: 0 },
+  ORDINATION: { maxDaysPerYear: 120, maxPaidDaysPerYear: 120, maxDaysTotal: 120, paid: true, requireDocument: false, documentAfterDays: 0 },
+  PATERNITY: { maxDaysPerYear: 15, maxPaidDaysPerYear: 15, maxDaysTotal: null, paid: true, requireDocument: false, documentAfterDays: 0 },
 };
 
 export const LEAVE_TYPE_DESCRIPTIONS: Record<LeaveType, string> = {
-  'ลาป่วย': 'ลาเนื่องจากเจ็บป่วย สามารถใช้สิทธิ์ได้ตามจำนวนวันที่กำหนด',
-  'ลากิจ': 'ลาเพื่อธุระส่วนตัว ปีแรก 15 วัน ปีถัดไป 45 วัน',
-  'ลาพักร้อน': 'ลาพักผ่อนประจําปี สะสมได้ไม่เกิน 20 วัน',
-  'ลาคลอด': 'ลาเพื่อคลอดบุตร สำหรับพนักงานหญิง',
-  'ลาเพื่อทำหมัน': 'ลาเพื่อทำหมัน ตามระยะเวลาที่แพทย์กำหนด',
-  'ลาเพื่อรับราชการทหาร': 'ลาเพื่อเรียกพล ฝึกวิชาทหาร หรือทดสอบความพร้อม',
-  'ลาเพื่อฝึกอบรม': 'ลาเพื่อฝึกอบรมหรือพัฒนาความรู้ความสามารถ',
-  'ลาไม่รับค่าจ้าง': 'ลาเพื่อธุระส่วนตัว ติดตามคู่สมรส หรือพักฟื้น'
+  SICK: 'ลาเนื่องจากเจ็บป่วย สามารถใช้สิทธิ์ได้ตามจำนวนวันที่กำหนด',
+  PERSONAL: 'ลาเพื่อธุระส่วนตัว ตามสิทธิ์ที่กำหนด',
+  VACATION: 'ลาพักผ่อนประจําปี',
+  MATERNITY: 'ลาเพื่อคลอดบุตร สำหรับพนักงานหญิง',
+  STERILIZATION: 'ลาเพื่อทำหมัน ตามระยะเวลาที่แพทย์กำหนด',
+  MILITARY: 'ลาเพื่อรับราชการทหาร',
+  TRAINING: 'ลาเพื่อฝึกอบรมหรือพัฒนาความรู้ความสามารถ',
+  ORDINATION: 'ลาเพื่ออุปสมบท',
+  PATERNITY: 'ลาเพื่อช่วยเหลือภริยาคลอดบุตร',
 };

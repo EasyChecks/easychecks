@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DatePicker } from '@/components/ui/DateTimePicker';
+import Toast from '@/components/common/Toast';
 import { leaveRequestService, LeaveRequest, LeaveQuotaItem } from '@/services/leaveRequestService';
 import { lateRequestService, LateRequest } from '@/services/lateRequestService';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,6 +30,11 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="pending">รอพิจารณา</Badge>;
 }
 
+function formatQuotaValue(value: number | null | undefined) {
+  if (value === null || value === undefined) return 'ไม่จำกัด';
+  return `${value} วัน`;
+}
+
 // ─────────────────────────────── MY LEAVE TAB ────────────────────────────────
 function MyLeaveTab() {
   const { user: authUser } = useAuth();
@@ -37,6 +43,7 @@ function MyLeaveTab() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'warning' | 'info' } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -62,6 +69,10 @@ function MyLeaveTab() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState('');
 
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'error') => {
+    setToast({ message, type });
+  };
+
   useEffect(() => {
     async function load() {
       try {
@@ -73,6 +84,7 @@ function MyLeaveTab() {
         setRequests(r.leaveRequests);
       } catch {
         setError('โหลดข้อมูลไม่สำเร็จ');
+        showToast('โหลดข้อมูลไม่สำเร็จ');
       } finally {
         setLoading(false);
       }
@@ -120,7 +132,7 @@ function MyLeaveTab() {
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingReq) return;
-    if (!editType || !editStart || !editEnd) { setEditError('กรุณากรอกข้อมูลให้ครบ'); return; }
+    if (!editType || !editStart || !editEnd) { setEditError('กรุณากรอกข้อมูลให้ครบ'); showToast('กรุณากรอกข้อมูลให้ครบ'); return; }
     setEditSubmitting(true);
     setEditError('');
     try {
@@ -151,7 +163,9 @@ function MyLeaveTab() {
     } catch (err: unknown) {
       setEditAttachmentUploading(false);
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setEditError(msg || 'บันทึกไม่สำเร็จ');
+      const finalMsg = msg || 'บันทึกไม่สำเร็จ';
+      setEditError(finalMsg);
+      showToast(finalMsg);
     } finally {
       setEditSubmitting(false);
     }
@@ -171,7 +185,9 @@ function MyLeaveTab() {
       closeEdit();
       await refreshRequests();
     } catch {
-      setEditError('ยกเลิกคำขอไม่สำเร็จ');
+      const finalMsg = 'ยกเลิกคำขอไม่สำเร็จ';
+      setEditError(finalMsg);
+      showToast(finalMsg);
     } finally {
       setEditSubmitting(false);
     }
@@ -180,7 +196,9 @@ function MyLeaveTab() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedType || !startDate || !endDate) {
-      setError('กรุณาเลือกประเภทการลาและช่วงวันที่');
+      const finalMsg = 'กรุณาเลือกประเภทการลาและช่วงวันที่';
+      setError(finalMsg);
+      showToast(finalMsg);
       return;
     }
     setError('');
@@ -200,7 +218,9 @@ function MyLeaveTab() {
       }, 2500);
     } catch (err: unknown) {
       const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setError(axiosMsg || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
+      const finalMsg = axiosMsg || 'เกิดข้อผิดพลาด กรุณาลองใหม่';
+      setError(finalMsg);
+      showToast(finalMsg);
     } finally {
       setSubmitting(false);
     }
@@ -208,13 +228,71 @@ function MyLeaveTab() {
 
   const quotaMap: Record<string, LeaveQuotaItem> = {};
   quota.forEach(q => { quotaMap[q.leaveType] = q; });
-  
-  const quotaTypes = quota.map(q => q.leaveType);
+
+  const rawGender = (authUser as { gender?: string | null })?.gender ?? null;
+  const normalizedGender = rawGender ? String(rawGender).toUpperCase() : null;
+
+  const title = (authUser as { title?: string })?.title ?? '';
+  const titleLower = title.toLowerCase();
+  const titleGender = title === 'นาย' || titleLower === 'mr'
+    ? 'MALE'
+    : title === 'นาง' || title === 'นางสาว' || titleLower === 'mrs' || titleLower === 'ms' || titleLower === 'miss'
+    ? 'FEMALE'
+    : null;
+
+  const userGender = normalizedGender === 'MALE' || normalizedGender === 'FEMALE'
+    ? normalizedGender
+    : titleGender;
+  const isMale = userGender === 'MALE';
+  const isFemale = userGender === 'FEMALE';
+
+  const allowedQuotaItems = quota.filter((item) => {
+    if (item.genderRestriction) {
+      if (!userGender || item.genderRestriction !== userGender) return false;
+    }
+    if (item.leaveType === 'VACATION' && item.maxDaysPerYear === 0 && item.maxPaidDaysPerYear === 0) {
+      return false;
+    }
+    return true;
+  });
+
+  const allowedTypeList = allowedQuotaItems.map((item) => item.leaveType);
+  const allowedTypeKey = allowedTypeList.join('|');
+  const allowedTypeSet = new Set(allowedTypeList);
+
+  const isAllowedType = (type: string) => {
+    if (allowedTypeSet.size > 0) return allowedTypeSet.has(type);
+    if (type === 'MATERNITY') return isFemale;
+    if (type === 'ORDINATION' || type === 'MILITARY' || type === 'PATERNITY') return isMale;
+    return true;
+  };
+
+  const selectedQuota = selectedType ? quotaMap[selectedType] : null;
+  const selectedTotalPerYear = selectedQuota?.maxDaysPerYear ?? null;
+  const selectedPaidPerYear = selectedQuota?.maxPaidDaysPerYear ?? null;
+  const selectedRemainingTotal = selectedQuota && selectedTotalPerYear !== null
+    ? Math.max(0, selectedTotalPerYear - selectedQuota.usedDays)
+    : null;
+  const selectedRemainingPaid = selectedQuota && selectedPaidPerYear !== null
+    ? Math.max(0, selectedPaidPerYear - selectedQuota.usedPaidDays)
+    : null;
+  const selectedMaxPerRequest = selectedQuota?.maxDaysTotal ?? null;
+  const selectedIneligible = selectedQuota && selectedTotalPerYear === 0 && selectedPaidPerYear === 0;
 
   const mainTypes = ['SICK', 'PERSONAL', 'VACATION', 'MATERNITY'];
   const extraTypes = ['MILITARY', 'TRAINING', 'STERILIZATION', 'ORDINATION', 'PATERNITY'];
-  
-  const isMale = authUser?.title === 'MR' || authUser?.title === 'นาย';
+  const filteredMainTypes = mainTypes.filter((type) => isAllowedType(type));
+  const filteredExtraTypes = extraTypes.filter((type) => isAllowedType(type));
+  const filteredTypes = [...filteredMainTypes, ...filteredExtraTypes];
+  const displayQuotaTypes = allowedTypeList.length ? allowedTypeList : quota.map(q => q.leaveType);
+
+  useEffect(() => {
+    if (!selectedType) return;
+    if (allowedTypeSet.size > 0 && !allowedTypeSet.has(selectedType)) {
+      setSelectedType('');
+    }
+  }, [selectedType, allowedTypeKey]);
+
   const today = new Date().toISOString().split('T')[0];
   const isSick = selectedType === 'SICK';
   const weekdayCount = (() => {
@@ -233,19 +311,33 @@ function MyLeaveTab() {
 
   return (
     <div className="space-y-4">
+      <Toast
+        open={Boolean(toast)}
+        type={toast?.type}
+        message={toast?.message ?? ''}
+        onClose={() => setToast(null)}
+      />
       {/* Leave Quota List */}
       {!loading && quota.length > 0 && (
         <div className="space-y-2">
           <h3 className="font-semibold text-gray-800 px-1">โควต้าการลา (ปีนี้)</h3>
-          {quotaTypes.map((type) => {
+          {displayQuotaTypes.map((type) => {
             const q = quotaMap[type];
             const info = LEAVE_TYPE_MAP[type];
             if (!q || !info) return null;
-            
-            const maxDays = q.maxPaidDaysPerYear || q.maxDaysTotal || 1;
-            const remaining = q.remainingPaidDays !== null ? q.remainingPaidDays : Math.max(0, maxDays - q.usedDays);
-            const total = maxDays;
-            const percentage = Math.min((remaining / total) * 100, 100);
+
+            const totalPerYear = q.maxDaysPerYear;
+            const remainingPerYear = totalPerYear !== null && totalPerYear !== undefined
+              ? Math.max(0, totalPerYear - q.usedDays)
+              : null;
+            const paidPerYear = q.maxPaidDaysPerYear;
+            const remainingPaid = paidPerYear !== null && paidPerYear !== undefined
+              ? Math.max(0, paidPerYear - q.usedPaidDays)
+              : null;
+            const usageText = totalPerYear !== null && totalPerYear !== undefined
+              ? `ใช้ไป ${q.usedDays} วัน จาก ${totalPerYear} วัน`
+              : `ใช้ไป ${q.usedDays} วัน (ไม่จำกัด)`;
+            const usedPercent = totalPerYear ? Math.min((q.usedDays / totalPerYear) * 100, 100) : 0;
             const isExpanded = expandedQuota === type;
 
             return (
@@ -263,42 +355,64 @@ function MyLeaveTab() {
                   </div>
                   <div className="flex-1 text-left">
                     <div className="font-semibold text-gray-800">{info?.label}</div>
-                    <div className="text-xs text-gray-500">ใช้ไป {q.usedDays} วัน จาก {total} วัน</div>
+                    <div className="text-xs text-gray-500">{usageText}</div>
                   </div>
                   <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                 </button>
 
                 {/* Progress Bar */}
-                <div className="px-4 pb-3">
-                  <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-linear-to-r from-orange-500 to-orange-600 transition-all"
-                      style={{ width: `${100 - percentage}%` }}
-                    />
+                {totalPerYear !== null && totalPerYear !== undefined && (
+                  <div className="px-4 pb-3">
+                    <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-linear-to-r from-orange-500 to-orange-600 transition-all"
+                        style={{ width: `${usedPercent}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between items-center mt-1.5">
+                      <span className="text-xs text-gray-500">เหลือ {remainingPerYear} วัน</span>
+                      <span className={`text-xs font-semibold ${usedPercent >= 80 ? 'text-red-600' : usedPercent >= 50 ? 'text-amber-600' : 'text-green-600'}`}>
+                        {Math.round(100 - usedPercent)}%
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center mt-1.5">
-                    <span className="text-xs text-gray-500">เหลือ {remaining} วัน</span>
-                    <span className={`text-xs font-semibold ${percentage <= 20 ? 'text-red-600' : percentage <= 50 ? 'text-amber-600' : 'text-green-600'}`}>
-                      {Math.round(percentage)}%
-                    </span>
-                  </div>
-                </div>
+                )}
 
                 {/* Details - Dropdown */}
                 {isExpanded && (
                   <div className="px-4 pb-4 pt-2 border-t border-gray-100 bg-gray-50 space-y-2 text-sm text-gray-700">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">วันลารายปี:</span>
-                      <span className="font-semibold">{total} วัน</span>
+                      <span className="text-gray-600">วันลาทั้งหมด/ปี:</span>
+                      <span className="font-semibold">{formatQuotaValue(totalPerYear)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">ใช้ไปแล้ว:</span>
+                      <span className="text-gray-600">วันที่ได้รับค่าจ้าง/ปี:</span>
+                      <span className="font-semibold">{q.isPaid ? formatQuotaValue(paidPerYear) : 'ไม่จ่ายค่าจ้าง'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">ลาได้ต่อครั้งไม่เกิน:</span>
+                      <span className="font-semibold">{formatQuotaValue(q.maxDaysTotal ?? null)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">วันลาที่ใช้ไปแล้ว:</span>
                       <span className="font-semibold">{q.usedDays} วัน</span>
                     </div>
+                    {q.isPaid && paidPerYear !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">วันลาที่ได้ค่าจ้างแล้ว:</span>
+                        <span className="font-semibold">{q.usedPaidDays} วัน</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
-                      <span className="text-gray-600">คงเหลือ:</span>
-                      <span className="font-semibold text-orange-600">{remaining} วัน</span>
+                      <span className="text-gray-600">วันลาคงเหลือปีนี้:</span>
+                      <span className="font-semibold text-orange-600">{remainingPerYear !== null ? `${remainingPerYear} วัน` : 'ไม่จำกัด'}</span>
                     </div>
+                    {q.isPaid && remainingPaid !== null && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">วันลาคงเหลือที่ได้ค่าจ้าง:</span>
+                        <span className="font-semibold text-orange-600">{remainingPaid} วัน</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </Card>
@@ -346,8 +460,8 @@ function MyLeaveTab() {
                         <label className="block font-semibold text-gray-800 mb-3">
                           ประเภทการลา <span className="text-red-500">*</span>
                         </label>
-                        <div className="grid grid-cols-2 gap-3 mb-3">
-                          {(isMale ? mainTypes.filter(t => t !== 'MATERNITY') : mainTypes).map(key => {
+                        <div className="grid grid-cols-3 gap-3">
+                          {filteredTypes.map(key => {
                             const info = LEAVE_TYPE_MAP[key];
                             return (
                               <button key={key} type="button" onClick={() => setSelectedType(key)}
@@ -360,37 +474,59 @@ function MyLeaveTab() {
                             );
                           })}
                         </div>
-                        <details className="text-sm">
-                          <summary className="text-gray-500 cursor-pointer mb-2">ประเภทอื่น ▸</summary>
-                          <div className="grid grid-cols-2 gap-3 mt-2">
-                            {(isMale ? extraTypes : extraTypes.filter(t => t !== 'MILITARY' && t !== 'PATERNITY')).map(key => {
-                              const info = LEAVE_TYPE_MAP[key];
-                              return (
-                                <button key={key} type="button" onClick={() => setSelectedType(key)}
-                                  className={`p-3 rounded-xl border-2 transition-all flex items-center gap-2 ${selectedType === key ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                                  <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${info?.color ?? ''}`}>
-                                    {info && <info.Icon className="w-3.5 h-3.5" />}
-                                  </div>
-                                  <span className="text-sm text-gray-900">{info?.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </details>
                       </div>
       
+                      {selectedQuota && (
+                        <div className="rounded-xl border-2 border-orange-100 bg-orange-50/60 p-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-orange-700">สิทธิ์การลา</span>
+                            {selectedIneligible && (
+                              <span className="text-xs text-red-600">ยังไม่ถึงเกณฑ์อายุงาน 1 ปี</span>
+                            )}
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-700">
+                            <div className="flex items-center justify-between">
+                              <span>รวม/ปี</span>
+                              <span className="font-semibold">{formatQuotaValue(selectedTotalPerYear)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>คงเหลือ/ปี</span>
+                              <span className="font-semibold">
+                                {selectedRemainingTotal !== null ? `${selectedRemainingTotal} วัน` : 'ไม่จำกัด'}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>สิทธิ์จ่าย/ปี</span>
+                              <span className="font-semibold">
+                                {selectedQuota.isPaid ? formatQuotaValue(selectedPaidPerYear) : 'ไม่จ่ายค่าจ้าง'}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>คงเหลือแบบจ่าย</span>
+                              <span className="font-semibold">
+                                {selectedQuota.isPaid && selectedRemainingPaid !== null ? `${selectedRemainingPaid} วัน` : '—'}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>ต่อครั้งไม่เกิน</span>
+                              <span className="font-semibold">{formatQuotaValue(selectedMaxPerRequest)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Dates */}
                       <div className="space-y-3">
                         <label className="block font-semibold text-gray-800">ช่วงเวลา <span className="text-red-500">*</span></label>
                         <div>
                           <label className="block text-sm text-gray-600 mb-1">วันที่เริ่มต้น</label>
                           <DatePicker value={startDate} onChange={setStartDate} placeholder="เลือกวันเริ่มต้น"
-                            weekdaysOnly min={isSick ? undefined : today} />
+                            weekdaysOnly={selectedType !== 'MATERNITY'} min={isSick ? undefined : today} />
                         </div>
                         <div>
                           <label className="block text-sm text-gray-600 mb-1">วันที่สิ้นสุด</label>
                           <DatePicker value={endDate} min={startDate || (isSick ? undefined : today)} onChange={setEndDate} placeholder="เลือกวันสิ้นสุด"
-                            weekdaysOnly />
+                            weekdaysOnly={selectedType !== 'MATERNITY'} />
                         </div>
                       </div>
       
@@ -465,6 +601,16 @@ function MyLeaveTab() {
             {requests.map((req, i) => {
               const info = LEAVE_TYPE_MAP[req.leaveType];
               const isPending = req.status === 'PENDING';
+              const totalDays = req.numberOfDays ?? 0;
+              const paidDays = typeof req.paidDays === 'number' ? req.paidDays : totalDays;
+              const unpaidDays = Math.max(0, totalDays - paidDays);
+              const payText = req.isHourly
+                ? null
+                : paidDays === 0
+                ? `ไม่จ่าย ${totalDays} วัน`
+                : unpaidDays === 0
+                ? `จ่าย ${paidDays} วัน`
+                : `จ่าย ${paidDays} วัน / ไม่จ่าย ${unpaidDays} วัน`;
               return (
                 <div
                   key={req.leaveId ?? i}
@@ -492,6 +638,9 @@ function MyLeaveTab() {
                         {new Date(req.startDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })} – {new Date(req.endDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
                         {req.numberOfDays ? <span className="ml-1 font-medium text-gray-700">({req.numberOfDays} วัน)</span> : null}
                       </div>
+                      {payText && (
+                        <div className="text-xs text-gray-600 mt-0.5">{payText}</div>
+                      )}
                       {req.rejectionReason && (
                         <div className="text-xs text-red-500 mt-1 truncate">เหตุผล: {req.rejectionReason}</div>
                       )}
@@ -625,11 +774,11 @@ function MyLeaveTab() {
                   <label className="block font-semibold text-gray-800">ช่วงเวลา <span className="text-red-500">*</span></label>
                   <div>
                     <label className="block text-sm text-gray-600 mb-1">วันที่เริ่มต้น</label>
-                    <DatePicker value={editStart} onChange={setEditStart} weekdaysOnly placeholder="วันเริ่มต้น" />
+                    <DatePicker value={editStart} onChange={setEditStart} weekdaysOnly={editType !== 'MATERNITY'} placeholder="วันเริ่มต้น" />
                   </div>
                   <div>
                     <label className="block text-sm text-gray-600 mb-1">วันที่สิ้นสุด</label>
-                    <DatePicker value={editEnd} min={editStart} onChange={setEditEnd} weekdaysOnly placeholder="วันสิ้นสุด" />
+                    <DatePicker value={editEnd} min={editStart} onChange={setEditEnd} weekdaysOnly={editType !== 'MATERNITY'} placeholder="วันสิ้นสุด" />
                   </div>
                 </div>
 
@@ -1266,6 +1415,16 @@ function ApproveLeaveTab() {
       ) : (
         requests.map(req => {
           const info = LEAVE_TYPE_MAP[req.leaveType];
+          const totalDays = req.numberOfDays ?? 0;
+          const paidDays = typeof req.paidDays === 'number' ? req.paidDays : totalDays;
+          const unpaidDays = Math.max(0, totalDays - paidDays);
+          const payText = req.isHourly
+            ? null
+            : paidDays === 0
+            ? `ไม่จ่าย ${totalDays} วัน`
+            : unpaidDays === 0
+            ? `จ่าย ${paidDays} วัน`
+            : `จ่าย ${paidDays} วัน / ไม่จ่าย ${unpaidDays} วัน`;
           return (
             <Card key={req.leaveId} className="p-4 border-l-4 border-orange-400">
               <div className="flex items-start justify-between mb-2">
@@ -1284,6 +1443,7 @@ function ApproveLeaveTab() {
                   {req.numberOfDays ? ` (${req.numberOfDays} วัน)` : ''}
                 </span>
               </div>
+              {payText && <div className="text-xs text-gray-600 mb-1">{payText}</div>}
               {req.reason && <div className="text-xs text-gray-500 mb-3 bg-gray-50 p-2 rounded">เหตุผล: {req.reason}</div>}
               <div className="flex gap-2">
                 <Button size="sm" onClick={() => handleApprove(req.leaveId)} disabled={actionId === req.leaveId}

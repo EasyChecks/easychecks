@@ -1,8 +1,10 @@
 import { prisma } from '../lib/prisma.js';
 import type { LeaveRequest, LeaveStatus, LeaveType, Gender, Prisma, Role } from '@prisma/client';
-import { differenceInBusinessDays, startOfYear, endOfYear } from 'date-fns';
+import { differenceInBusinessDays, differenceInCalendarDays, startOfYear, endOfYear, subYears } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
 import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
+import { LEAVE_RULES } from './leave-rules.js';
+import { getEffectiveLeaveRulesForUser, type EffectiveLeaveRules } from './leave-quota.service.js';
 
 /**
  * Leave Request Service - จัดการใบลา
@@ -52,6 +54,7 @@ export interface LeaveQuotaItem {
   leaveType: LeaveType;
   usedDays: number;
   usedPaidDays: number;
+  maxDaysPerYear: number | null;
   maxPaidDaysPerYear: number | null;
   maxDaysTotal: number | null;
   remainingPaidDays: number | null;
@@ -63,114 +66,6 @@ export interface LeaveQuotaItem {
   genderRestriction: Gender | null;
 }
 
-// กำหนดกฎการลาแต่ละประเภท
-export const LEAVE_RULES = {
-  SICK: { 
-    displayName: 'ลาป่วย',
-    displayNameEng: 'Sick Leave',
-    iconName: 'Thermometer',
-    maxPaidDaysPerYear: 30, 
-    requireMedicalCert: 3, // ต้องมีใบรับรองแพทย์เมื่อลา >= 3 วัน
-    paid: true,
-    genderRestriction: null 
-  },
-  PERSONAL: { 
-    displayName: 'ลากิจธุระอันจำเป็น',
-    displayNameEng: 'Personal/Urgent Leave',
-    iconName: 'FileText',
-    maxPaidDaysPerYear: 3, // ลาได้ไม่น้อยกว่า 3 วัน/ปี ได้รับค่าจ้าง
-    requireMedicalCert: null,
-    paid: true, // ได้รับค่าจ้างตามปกติ
-    genderRestriction: null 
-  },
-  VACATION: { 
-    displayName: 'ลาพักร้อน',
-    displayNameEng: 'Vacation/Holiday Leave',
-    iconName: 'Plane',
-    maxPaidDaysPerYear: 6, // 6 วันต่อปี (ทำงานครบ 1 ปี)
-    requireMedicalCert: null,
-    paid: true,
-    carryOver: true, // สะสมได้
-    genderRestriction: null 
-  },
-  MILITARY: { 
-    displayName: 'ลาเพื่อรับราชการทหาร',
-    displayNameEng: 'Military Service Leave',
-    iconName: 'Shield',
-    maxPaidDaysPerYear: 60, // ได้รับค่าจ้างไม่เกิน 60 วัน/ปี
-    requireMedicalCert: null,
-    paid: true,
-    genderRestriction: 'MALE' as Gender // เฉพาะชาย
-  },
-  TRAINING: { 
-    displayName: 'ลาฝึกอบรม',
-    displayNameEng: 'Training/Educational Leave',
-    iconName: 'BookOpen',
-    maxPaidDaysPerYear: 1, // บริษัทกำหนด 1 วัน/ปี (ไม่จ่ายค่าจ้าง)
-    requireMedicalCert: null,
-    paid: false, // ไม่ได้รับค่าจ้าง
-    genderRestriction: null 
-  },
-  MATERNITY: { 
-    displayName: 'ลาคลอดบุตร',
-    displayNameEng: 'Maternity Leave',
-    iconName: 'Heart',
-    maxDaysTotal: 98, // ลาได้ไม่เกิน 98 วัน (รวมวันหยุด)
-    maxPaidDaysPerYear: 45, // ได้รับค่าจ้างจากนายจ้าง 45 วัน (เหลือจากประกันสังคม 45 วัน)
-    requireMedicalCert: true, // ต้องมีใบรับรองแพทย์
-    paid: true,
-    genderRestriction: 'FEMALE' as Gender // เฉพาะหญิง
-  },
-  STERILIZATION: { 
-    displayName: 'ลาทำหมัน',
-    displayNameEng: 'Sterilization Leave',
-    iconName: 'Stethoscope',
-    maxPaidDaysPerYear: null, // ลาได้ตามระยะเวลาที่แพทย์กำหนด ได้รับค่าจ้างตามปกติ
-    maxDaysTotal: 30, // เหมาะสมสำหรับการทำหมัน
-    requireMedicalCert: true, // ต้องมีใบรับรองแพทย์
-    paid: true,
-    genderRestriction: null // ทั้งสองเพศ
-  },
-  ORDINATION: { 
-    displayName: 'ลาบวช',
-    displayNameEng: 'Ordination/Monkhood Leave',
-    iconName: 'Sparkles',
-    maxDaysTotal: 120,
-    maxPaidDaysPerYear: 120, // จ่ายค่าจ้างทั้งหมด 120 วัน/ครั้ง
-    requireMedicalCert: null,
-    paid: true, // ในไทย ลาบวชรัฐให้จ่ายค่าจ้าง
-    genderRestriction: 'MALE' as Gender // เฉพาะชาย (เบื้องต้น)
-  },
-  PATERNITY: { 
-    displayName: 'ลาเพื่อช่วยเหลือภริยาคลอดบุตร',
-    displayNameEng: 'Paternity/Spousal Maternity Support Leave',
-    iconName: 'Heart',
-    maxPaidDaysPerYear: 15, // ลาได้ไม่เกิน 15 วัน
-    requireMedicalCert: false,
-    paid: true, // ได้รับค่าจ้างตามปกติ (ตามกฎหมายแรงงาน)
-    genderRestriction: 'MALE' as Gender // เฉพาะชาย
-  },
-} as const;
-
-/**
- * ให้ข้อมูลแสดงผลสำหรับแต่ละประเภทการลา
- */
-export function getLeaveTypeDisplay(leaveType: LeaveType) {
-  const rules = LEAVE_RULES[leaveType];
-  return {
-    leaveType,
-    displayName: rules?.displayName || leaveType,
-    displayNameEng: rules?.displayNameEng || leaveType,
-    iconName: rules?.iconName || 'FileText',
-  };
-}
-
-/**
- * ให้รายละเอียดกฎของประเภทการลา
- */
-export function getLeaveTypeRules(leaveType: LeaveType) {
-  return LEAVE_RULES[leaveType];
-}
 
 export interface CreateLeaveRequestDTO {
   userId: number;
@@ -344,6 +239,24 @@ function calculateBusinessDays(startDate: Date, endDate: Date): number {
 }
 
 /**
+ * ฟังก์ชันคำนวณจำนวนวันแบบปฏิทิน (รวมเสาร์-อาทิตย์)
+ */
+function calculateCalendarDays(startDate: Date, endDate: Date): number {
+  const days = differenceInCalendarDays(endDate, startDate) + 1;
+  return days > 0 ? days : 0;
+}
+
+/**
+ * เลือกวิธีนับวันตามประเภทการลา
+ */
+function calculateLeaveDays(leaveType: LeaveType, startDate: Date, endDate: Date): number {
+  if (leaveType === 'MATERNITY') {
+    return calculateCalendarDays(startDate, endDate);
+  }
+  return calculateBusinessDays(startDate, endDate);
+}
+
+/**
  * ฟังก์ชันคำนวณวันที่ได้รับค่าจ้างตามประเภทการลา
  * 
  * เป้าหมาย: คำนวณว่าวันลาที่ขอได้รับค่าจ้างกี่วัน (ตามกฎของแต่ละประเภท)
@@ -351,16 +264,19 @@ function calculateBusinessDays(startDate: Date, endDate: Date): number {
  * เหตุผล: แต่ละประเภทลามีกฎต่างกัน (SICK: 30 วัน, VACATION: 6 วัน, ฯลฯ)
  *            บางประเภทไม่ได้รับค่าจ้างเลย (PERSONAL, TRAINING)
  */
-function calculatePaidDays(leaveType: LeaveType, numberOfDays: number): number {
-  const rules = LEAVE_RULES[leaveType];
-  
+function calculatePaidDays(
+  rules: EffectiveLeaveRules,
+  numberOfDays: number,
+  remainingPaidDays?: number | null
+): number {
   if (!rules.paid) {
     return 0; // ไม่ได้รับค่าจ้าง
   }
 
   // ถ้ามีข้อจำกัดวันที่ได้รับค่าจ้าง
-  if (rules.maxPaidDaysPerYear !== null && rules.maxPaidDaysPerYear !== undefined) {
-    return Math.min(numberOfDays, rules.maxPaidDaysPerYear);
+  const paidLimit = remainingPaidDays ?? rules.maxPaidDaysPerYear;
+  if (paidLimit !== null && paidLimit !== undefined) {
+    return Math.min(numberOfDays, paidLimit);
   }
 
   return numberOfDays; // ได้รับค่าจ้างทุกวัน
@@ -379,10 +295,12 @@ function calculatePaidDays(leaveType: LeaveType, numberOfDays: number): number {
  *      WHERE userId = ? AND leaveType = ? AND status = 'APPROVED' 
  *      AND deletedAt IS NULL AND startDate BETWEEN ? AND ?
  */
-async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): Promise<number> {
-  const yearStart = startOfYear(new Date());
-  const yearEnd = endOfYear(new Date());
-
+async function getUsedLeaveDaysInRange(
+  userId: number,
+  leaveType: LeaveType,
+  rangeStart: Date,
+  rangeEnd: Date
+): Promise<number> {
   const leaves = await prisma.leaveRequest.findMany({
     where: {
       userId,
@@ -390,16 +308,26 @@ async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): P
       status: 'APPROVED',
       deletedAt: null, // Exclude soft deleted
       startDate: {
-        gte: yearStart,
-        lte: yearEnd,
+        gte: rangeStart,
+        lte: rangeEnd,
       },
     },
     select: {
       numberOfDays: true,
+      isHourly: true,
     },
   });
 
-  return leaves.reduce((sum: number, leave: { numberOfDays: number }) => sum + leave.numberOfDays, 0);
+  return leaves.reduce((sum: number, leave: { numberOfDays: number; isHourly?: boolean }) => {
+    if (leave.isHourly) return sum;
+    return sum + leave.numberOfDays;
+  }, 0);
+}
+
+async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): Promise<number> {
+  const yearStart = startOfYear(new Date());
+  const yearEnd = endOfYear(new Date());
+  return getUsedLeaveDaysInRange(userId, leaveType, yearStart, yearEnd);
 }
 
 /**
@@ -428,14 +356,68 @@ async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType
   });
 
   return leaves.reduce((sum: number, leave: { paidDays: number | null; numberOfDays: number; isHourly?: boolean }) => {
-    // Skip hourly leaves (paidDays = 0)
     if (leave.isHourly) {
       return sum;
     }
-    // For full-day leaves: always use numberOfDays for consistency
-    // This matches what's displayed in the UI (q.usedDays)
-    return sum + leave.numberOfDays;
+    return sum + (leave.paidDays ?? leave.numberOfDays);
   }, 0);
+}
+
+async function getEmploymentStartDate(userId: number): Promise<Date> {
+  const user = await prisma.user.findUnique({
+    where: { userId },
+    select: { createdAt: true },
+  });
+
+  if (!user) {
+    throw new NotFoundError('ไม่พบผู้ใช้');
+  }
+
+  return user.createdAt;
+}
+
+async function getVacationAnnualLimits(
+  userId: number,
+  rules: EffectiveLeaveRules
+): Promise<{ eligible: boolean; maxDaysPerYear: number | null; maxPaidDaysPerYear: number | null }> {
+  const employmentStart = await getEmploymentStartDate(userId);
+  const eligible = employmentStart <= subYears(new Date(), 1);
+  if (!eligible) {
+    return { eligible: false, maxDaysPerYear: 0, maxPaidDaysPerYear: 0 };
+  }
+
+  const baseDays = rules.maxDaysPerYear ?? rules.maxPaidDaysPerYear ?? 6;
+  const carryOverCap = rules.carryOverMaxDays ?? 20;
+  const currentYear = new Date().getFullYear();
+  const firstEligibleYear = employmentStart.getFullYear() + 1;
+
+  let carryOver = 0;
+  for (let year = firstEligibleYear; year < currentYear; year += 1) {
+    const yearStart = new Date(year, 0, 1);
+    const yearEnd = endOfYear(yearStart);
+    const totalAllowed = Math.min(carryOverCap, baseDays + carryOver);
+    const usedDays = await getUsedLeaveDaysInRange(userId, 'VACATION', yearStart, yearEnd);
+    carryOver = Math.max(0, totalAllowed - usedDays);
+  }
+
+  const totalAllowed = Math.min(carryOverCap, baseDays + carryOver);
+  return { eligible: true, maxDaysPerYear: totalAllowed, maxPaidDaysPerYear: totalAllowed };
+}
+
+async function getAnnualLimitsForUser(
+  userId: number,
+  leaveType: LeaveType,
+  rules: EffectiveLeaveRules
+): Promise<{ eligible: boolean; maxDaysPerYear: number | null; maxPaidDaysPerYear: number | null }> {
+  if (leaveType === 'VACATION') {
+    return getVacationAnnualLimits(userId, rules);
+  }
+
+  return {
+    eligible: true,
+    maxDaysPerYear: rules.maxDaysPerYear ?? null,
+    maxPaidDaysPerYear: rules.maxPaidDaysPerYear ?? null,
+  };
 }
 
 /**
@@ -455,66 +437,44 @@ async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType
  * - genderRestriction: ระบุเพศ (MALE=เฉพาะชาย, FEMALE=เฉพาะหญิง, null=ทั้งสองเพศ)
  */
 async function getLeaveQuota(userId: number): Promise<LeaveQuotaItem[]> {
+  const effectiveRulesByType = await getEffectiveLeaveRulesForUser(userId);
   const quotas = await Promise.all(
-    Object.keys(LEAVE_RULES)
-      .filter(leaveType => leaveType !== 'PATERNITY') // Skip PATERNITY until Prisma sync is complete
-      .map(async (leaveType) => {
-        const type = leaveType as LeaveType;
-        const rules = LEAVE_RULES[type];
-        const usedDays = await getUsedLeaveDaysThisYear(userId, type);
-        const usedPaidDays = await getUsedPaidLeaveDaysThisYear(userId, type);
+    (Object.keys(LEAVE_RULES) as LeaveType[]).map(async (type) => {
+      const rules = effectiveRulesByType[type];
+      const usedDays = await getUsedLeaveDaysThisYear(userId, type);
+      const usedPaidDays = await getUsedPaidLeaveDaysThisYear(userId, type);
 
-        // Get maxPaidDaysPerYear safely
-        const maxPaid = 'maxPaidDaysPerYear' in rules ? rules.maxPaidDaysPerYear : null;
-        const maxTotal = 'maxDaysTotal' in rules ? rules.maxDaysTotal : null;
+      const annualLimits = await getAnnualLimitsForUser(userId, type, rules);
+      const maxPaid = annualLimits.maxPaidDaysPerYear ?? rules?.maxPaidDaysPerYear ?? null;
+      const maxDaysPerYear = annualLimits.maxDaysPerYear ?? rules?.maxDaysPerYear ?? null;
+      const maxTotal = rules?.maxDaysTotal ?? null;
 
-        // Calculate remaining days properly:
-        // - If it's paid type with maxPaidDaysPerYear, use that for remaining calculation
-        // - Otherwise if has maxDaysTotal (like maternity/ordination that renew), use maxPaidDaysPerYear if available
-        // - Otherwise null (unlimited for this year)
-        let remainingPaidDays: number | null = null;
-        if (rules.paid && maxPaid !== null && maxPaid !== undefined) {
-          remainingPaidDays = Math.max(0, maxPaid - usedPaidDays);
-        } else if (!rules.paid && maxPaid !== null && maxPaid !== undefined) {
-          // For unpaid leaves, still track remaining against maxPaidDaysPerYear
-          remainingPaidDays = Math.max(0, maxPaid - usedDays);
-        }
+      let remainingPaidDays: number | null = null;
+      if (!annualLimits.eligible) {
+        remainingPaidDays = 0;
+      } else if (rules?.paid && maxPaid !== null && maxPaid !== undefined) {
+        remainingPaidDays = Math.max(0, maxPaid - usedPaidDays);
+      } else if (maxDaysPerYear !== null && maxDaysPerYear !== undefined) {
+        remainingPaidDays = Math.max(0, maxDaysPerYear - usedDays);
+      }
 
-        return {
-          leaveType: type,
-          usedDays,
-          usedPaidDays,
-          maxPaidDaysPerYear: maxPaid as (typeof maxPaid extends number ? number : null) | null,
-          maxDaysTotal: maxTotal as (typeof maxTotal extends number ? number : null) | null,
-          remainingPaidDays,
-          displayName: rules.displayName as string,
-          displayNameEng: rules.displayNameEng as string,
-          iconName: rules.iconName as string,
-          isPaid: rules.paid as boolean,
-          requireMedicalCert: rules.requireMedicalCert as (boolean | number),
-          genderRestriction: (rules.genderRestriction as Gender) || null,
-        } as LeaveQuotaItem;
-      })
+      return {
+        leaveType: type,
+        usedDays,
+        usedPaidDays,
+        maxDaysPerYear: maxDaysPerYear as (typeof maxDaysPerYear extends number ? number : null) | null,
+        maxPaidDaysPerYear: maxPaid as (typeof maxPaid extends number ? number : null) | null,
+        maxDaysTotal: maxTotal as (typeof maxTotal extends number ? number : null) | null,
+        remainingPaidDays,
+        displayName: rules.displayName as string,
+        displayNameEng: rules.displayNameEng as string,
+        iconName: rules.iconName as string,
+        isPaid: rules.paid as boolean,
+        requireMedicalCert: rules.requireMedicalCert as (boolean | number),
+        genderRestriction: (rules.genderRestriction as Gender) || null,
+      } as LeaveQuotaItem;
+    })
   );
-
-  // Add PATERNITY with default values (no usage data yet since it's new)
-  const paternity = LEAVE_RULES.PATERNITY as Record<string, unknown>;
-  if (paternity) {
-    quotas.push({
-      leaveType: 'PATERNITY' as LeaveType,
-      usedDays: 0,
-      usedPaidDays: 0,
-      maxPaidDaysPerYear: (paternity.maxPaidDaysPerYear as number | null) ?? 0,
-      maxDaysTotal: (paternity.maxDaysTotal as number | null) || null,
-      remainingPaidDays: ((paternity.maxPaidDaysPerYear as number) ?? null),
-      displayName: (paternity.displayName as string) || 'PATERNITY',
-      displayNameEng: (paternity.displayNameEng as string) || 'Paternity Leave',
-      iconName: (paternity.iconName as string) || 'Heart',
-      isPaid: (paternity.paid as boolean) || false,
-      requireMedicalCert: (paternity.requireMedicalCert as boolean | number) || false,
-      genderRestriction: (paternity.genderRestriction as Gender) || null,
-    } as LeaveQuotaItem);
-  }
 
   return quotas;
 }
@@ -528,7 +488,9 @@ async function validateLeaveRequest(
   numberOfDays: number,
   medicalCertificateUrl?: string
 ): Promise<{ isValid: boolean; message?: string }> {
-  const rules = LEAVE_RULES[leaveType];
+  const effectiveRulesByType = await getEffectiveLeaveRulesForUser(userId);
+  const rules = effectiveRulesByType[leaveType];
+  const displayName = rules.displayName as string;
 
   // ตรวจสอบข้อมูลผู้ใช้
   const user = await prisma.user.findUnique({
@@ -545,7 +507,7 @@ async function validateLeaveRequest(
     const genderText = rules.genderRestriction === 'MALE' ? 'ชาย' : 'หญิง';
     return { 
       isValid: false, 
-      message: `การลาประเภท ${leaveType} สามารถใช้ได้เฉพาะเพศ${genderText}เท่านั้น` 
+      message: `การลาประเภท ${displayName} สามารถใช้ได้เฉพาะเพศ${genderText}เท่านั้น` 
     };
   }
 
@@ -556,13 +518,13 @@ async function validateLeaveRequest(
       if (numberOfDays >= rules.requireMedicalCert && !medicalCertificateUrl) {
         return { 
           isValid: false, 
-          message: `การลาป่วย ${rules.requireMedicalCert} วันขึ้นไป ต้องแนบใบรับรองแพทย์` 
+          message: `การลาประเภท ${displayName} ${rules.requireMedicalCert} วันขึ้นไป ต้องแนบใบรับรองแพทย์` 
         };
       }
     } else if (rules.requireMedicalCert === true && !medicalCertificateUrl) {
       return { 
         isValid: false, 
-        message: `การลาประเภท ${leaveType} ต้องแนบใบรับรองแพทย์` 
+        message: `การลาประเภท ${displayName} ต้องแนบใบรับรองแพทย์` 
       };
     }
   }
@@ -572,20 +534,33 @@ async function validateLeaveRequest(
     if (numberOfDays > rules.maxDaysTotal) {
       return { 
         isValid: false, 
-        message: `การลาประเภท ${leaveType} ลาได้ไม่เกิน ${rules.maxDaysTotal} วันต่อครั้ง` 
+        message: `การลาประเภท ${displayName} ลาได้ไม่เกิน ${rules.maxDaysTotal} วันต่อครั้ง` 
       };
     }
   }
 
-  // ตรวจสอบจำนวนวันที่ใช้ไปในปีนี้ (สำหรับประเภทที่มี maxPaidDaysPerYear)
-  if ('maxPaidDaysPerYear' in rules && rules.maxPaidDaysPerYear) {
+  const annualLimits = await getAnnualLimitsForUser(userId, leaveType, rules);
+  if (!annualLimits.eligible) {
+    return {
+      isValid: false,
+      message: `การลาประเภท ${displayName} ต้องมีอายุงานอย่างน้อย 1 ปี`,
+    };
+  }
+
+  if (annualLimits.maxDaysPerYear !== null && annualLimits.maxDaysPerYear !== undefined) {
+    const usedDays = await getUsedLeaveDaysThisYear(userId, leaveType);
+    if (usedDays + numberOfDays > annualLimits.maxDaysPerYear) {
+      return {
+        isValid: false,
+        message: `คุณใช้วันลาประเภท ${displayName} ไปแล้ว ${usedDays} วัน (สูงสุด ${annualLimits.maxDaysPerYear} วันต่อปี)`,
+      };
+    }
+  } else if (annualLimits.maxPaidDaysPerYear !== null && annualLimits.maxPaidDaysPerYear !== undefined) {
     const usedPaidDays = await getUsedPaidLeaveDaysThisYear(userId, leaveType);
-    const paidDays = calculatePaidDays(leaveType, numberOfDays);
-    
-    if (usedPaidDays + paidDays > rules.maxPaidDaysPerYear) {
-      return { 
-        isValid: false, 
-        message: `คุณใช้วันลา${leaveType}ที่ได้รับค่าจ้างไปแล้ว ${usedPaidDays} วัน (สูงสุด ${rules.maxPaidDaysPerYear} วันต่อปี)` 
+    if (usedPaidDays + numberOfDays > annualLimits.maxPaidDaysPerYear) {
+      return {
+        isValid: false,
+        message: `คุณใช้วันลาประเภท ${displayName} ที่ได้รับค่าจ้างไปแล้ว ${usedPaidDays} วัน (สูงสุด ${annualLimits.maxPaidDaysPerYear} วันต่อปี)`,
       };
     }
   }
@@ -638,7 +613,7 @@ async function createLeaveRequest(
   }
 
   // Calculate number of business days
-  const numberOfDays = isHourly ? 0 : calculateBusinessDays(startDate, endDate);
+  const numberOfDays = isHourly ? 0 : calculateLeaveDays(data.leaveType, startDate, endDate);
 
   const leaveHours = isHourly
     ? (data.leaveHours && data.leaveHours > 0
@@ -680,7 +655,16 @@ async function createLeaveRequest(
   }
 
   // Calculate paid days
-  const paidDays = isHourly ? 0 : calculatePaidDays(data.leaveType, numberOfDays);
+  const effectiveRulesByType = await getEffectiveLeaveRulesForUser(data.userId);
+  const rules = effectiveRulesByType[data.leaveType];
+  const annualLimits = await getAnnualLimitsForUser(data.userId, data.leaveType, rules);
+  const usedPaidDays = annualLimits.maxPaidDaysPerYear !== null && annualLimits.maxPaidDaysPerYear !== undefined
+    ? await getUsedPaidLeaveDaysThisYear(data.userId, data.leaveType)
+    : 0;
+  const remainingPaidDays = annualLimits.maxPaidDaysPerYear !== null && annualLimits.maxPaidDaysPerYear !== undefined
+    ? Math.max(0, annualLimits.maxPaidDaysPerYear - usedPaidDays)
+    : null;
+  const paidDays = isHourly ? 0 : calculatePaidDays(rules, numberOfDays, remainingPaidDays);
 
   const newLeaveRequest = await prisma.leaveRequest.create({
     data: {
@@ -875,8 +859,10 @@ async function updateLeaveRequest(
     }
   }
 
+  const leaveType = data.leaveType || leaveRequest.leaveType;
+
   // Calculate number of days
-  const numberOfDays = isHourly ? 0 : calculateBusinessDays(startDate, endDate);
+  const numberOfDays = isHourly ? 0 : calculateLeaveDays(leaveType, startDate, endDate);
   const leaveHours = isHourly
     ? (data.leaveHours && data.leaveHours > 0 ? data.leaveHours : calculateLeaveHours(startTime as string, endTime as string))
     : null;
@@ -886,8 +872,16 @@ async function updateLeaveRequest(
   }
 
   // Calculate paid days if leaveType is provided
-  const leaveType = data.leaveType || leaveRequest.leaveType;
-  const paidDays = isHourly ? 0 : calculatePaidDays(leaveType, numberOfDays);
+  const effectiveRulesByType = await getEffectiveLeaveRulesForUser(leaveRequest.userId);
+  const rules = effectiveRulesByType[leaveType];
+  const annualLimits = await getAnnualLimitsForUser(leaveRequest.userId, leaveType, rules);
+  const usedPaidDays = annualLimits.maxPaidDaysPerYear !== null && annualLimits.maxPaidDaysPerYear !== undefined
+    ? await getUsedPaidLeaveDaysThisYear(leaveRequest.userId, leaveType)
+    : 0;
+  const remainingPaidDays = annualLimits.maxPaidDaysPerYear !== null && annualLimits.maxPaidDaysPerYear !== undefined
+    ? Math.max(0, annualLimits.maxPaidDaysPerYear - usedPaidDays)
+    : null;
+  const paidDays = isHourly ? 0 : calculatePaidDays(rules, numberOfDays, remainingPaidDays);
 
   const updatedLeave = await prisma.leaveRequest.update({
     where: { leaveId },

@@ -41,6 +41,7 @@ model User {
   events_events_created_by_user_idTousers                 Event[]              @relation("events_created_by_user_idTousers")
   late_requests_late_requests_user_idTousers              LateRequest[]        @relation("late_requests_user_idTousers")
   leaveRequests                                           LeaveRequest[]       @relation("Requester")
+  leaveQuotaOverrides                                     LeaveQuotaOverride[]
   locationsCreated                                        Location[]           @relation("LocationCreator")
   notifications                                           Notification[]
   shifts                                                  Shift[]              @relation("UserShift")
@@ -417,4 +418,51 @@ enum AnnouncementStatus {
 enum ApprovalActionType {
   APPROVED
   REJECTED
+}
+
+enum LeaveQuotaScope {
+  GLOBAL
+  BRANCH
+  DEPARTMENT
+  USER
+}
+
+model Policy {
+  policyId    Int      @id @default(autoincrement()) @map("policy_id")
+  key         String   @unique @map("key")
+  title       String   @map("title")
+  content     String   @map("content")
+  version     String   @default("1.0") @map("version")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("policies")
+}
+
+model LeaveQuotaOverride {
+  overrideId          Int             @id @default(autoincrement()) @map("override_id")
+  scope               LeaveQuotaScope @map("scope")
+  leaveType           LeaveType       @map("leave_type")
+  targetKey           String          @map("target_key")
+  branchCode          String?         @map("branch_code")
+  department          String?         @map("department")
+  userId              Int?            @map("user_id")
+  maxPaidDaysPerYear  Int?            @map("max_paid_days_per_year")
+  maxDaysPerYear      Int?            @map("max_days_per_year")
+  maxDaysTotal        Int?            @map("max_days_total")
+  paid                Boolean?        @map("paid")
+  requireDocument     Boolean?        @map("require_document")
+  documentAfterDays   Int?            @map("document_after_days")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  user                User?           @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([scope])
+  @@index([scope, branchCode])
+  @@index([scope, department])
+  @@index([scope, userId])
+  @@unique([scope, leaveType, targetKey])
+  @@map("leave_quota_overrides")
 }

@@ -141,8 +141,10 @@ export const authService = {
         user: {
           userId: user.userId,
           employeeId: user.employeeId,
+          title: user.title,
           firstName: user.firstName,
           lastName: user.lastName,
+          gender: user.gender,
           email: user.email,
           role: user.role,
           avatarUrl: user.avatarUrl,
@@ -289,8 +291,10 @@ export const authService = {
         user: {
           userId: session.user.userId,
           employeeId: session.user.employeeId,
+          title: session.user.title,
           firstName: session.user.firstName,
           lastName: session.user.lastName,
+          gender: session.user.gender,
           email: session.user.email,
           role: session.user.role
         }

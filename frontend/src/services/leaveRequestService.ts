@@ -4,6 +4,7 @@ export interface LeaveQuotaItem {
   leaveType: string;
   usedDays: number;
   usedPaidDays: number;
+  maxDaysPerYear: number | null;
   maxPaidDaysPerYear: number | null;
   maxDaysTotal?: number | null;
   remainingPaidDays: number | null;
@@ -23,6 +24,7 @@ export interface LeaveRequest {
   endTime?: string;
   leaveHours?: number;
   numberOfDays: number;
+  paidDays?: number;
   reason?: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   attachmentUrl?: string;
@@ -50,6 +52,10 @@ export interface CreateLeaveRequestDTO {
   reason?: string;
   attachmentUrl?: string;
   medicalCertificateUrl?: string;
+  isHourly?: boolean;
+  startTime?: string;
+  endTime?: string;
+  leaveHours?: number;
 }
 export const leaveRequestService = {
   async getMyLeaveRequests(params?: { status?: string; skip?: number; take?: number }) {

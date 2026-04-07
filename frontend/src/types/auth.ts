@@ -10,6 +10,8 @@ export interface AuthUser {
   name: string;
   email: string;
   username: string;
+  gender?: string;
+  title?: string;
   role: UserRole;
   dashboardMode?: UserRole; // effective dashboard: may differ from role (e.g. admin logging in as user)
   status: UserStatus;

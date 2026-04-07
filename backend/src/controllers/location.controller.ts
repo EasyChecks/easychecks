@@ -45,7 +45,7 @@ export const createLocation = asyncHandler(async (req: Request, res: Response) =
     throw new BadRequestError('radius ต้องมากกว่า 0');
   }
 
-  const validTypes = ['OFFICE', 'BRANCH', 'EVENT', 'SITE', 'MEETING', 'OTHER'];
+  const validTypes = ['OFFICE', 'BRANCH', 'EVENT', 'MEETING', 'OTHER'];
   if (!validTypes.includes(locationType)) {
     throw new BadRequestError(`locationType ต้องเป็น ${validTypes.join(', ')}`);
   }

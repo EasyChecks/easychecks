@@ -2,10 +2,8 @@ import type { Request, Response } from 'express';
 import { 
   LeaveRequestUserActions, 
   LeaveRequestAdminActions,
-  LEAVE_RULES,
-  getLeaveTypeDisplay,
-  getLeaveTypeRules,
 } from '../services/leave-request.service.js';
+import { LEAVE_RULES, getLeaveTypeDisplay, getLeaveTypeRules } from '../services/leave-rules.js';
 import { sendSuccess } from '../utils/response.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { UnauthorizedError, BadRequestError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';

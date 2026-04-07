@@ -173,6 +173,10 @@ function mapBackendUserToAuthUser(backendUser: Record<string, unknown>): AuthUse
   };
 
   const role = roleMap[backendUser.role as string] || 'user';
+  const rawGender = backendUser.gender;
+  const normalizedGender = typeof rawGender === 'string' && rawGender
+    ? rawGender.toUpperCase()
+    : undefined;
 
   return {
     id: String(backendUser.userId ?? ''),
@@ -180,6 +184,8 @@ function mapBackendUserToAuthUser(backendUser: Record<string, unknown>): AuthUse
     name: `${backendUser.firstName ?? ''} ${backendUser.lastName ?? ''}`.trim(),
     email: String(backendUser.email ?? ''),
     username: String(backendUser.employeeId ?? ''),
+    gender: normalizedGender,
+    title: String(backendUser.title ?? ''),
     role: role as AuthUser['role'],
     status: 'active',
     department: String(backendUser.department ?? ''),

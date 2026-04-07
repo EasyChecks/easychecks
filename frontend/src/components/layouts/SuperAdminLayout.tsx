@@ -18,7 +18,7 @@ export default function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Keep user-facing pages in the mobile shell (header + bottom navigation) for superadmin.
-  if (pathname.startsWith('/superadmin/leave-request') || pathname.startsWith('/superadmin/events') || pathname.startsWith('/superadmin/settings')) {
+  if (pathname.startsWith('/superadmin/leave-request') || pathname.startsWith('/superadmin/events') || pathname.startsWith('/superadmin/settings') || pathname.startsWith('/superadmin/profile')) {
     return <UserLayout>{children}</UserLayout>;
   }
 

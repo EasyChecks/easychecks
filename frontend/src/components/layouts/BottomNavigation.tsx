@@ -8,7 +8,6 @@ export default function BottomNavigation() {
   const pathname = usePathname();
   const { user } = useAuth();
   const role = user?.role;
-  const isManager = user?.role === 'manager';
   const roleBasePath = role === 'manager' ? '/manager' :
                        role === 'admin' ? '/admin' :
                        role === 'superadmin' ? '/superadmin' :
@@ -16,18 +15,6 @@ export default function BottomNavigation() {
 
   // Hybrid rule: admin/superadmin use /user/dashboard as Home, but keep role routes for other tabs.
   const homeHref = (role === 'admin' || role === 'superadmin') ? '/user/dashboard' : `${roleBasePath}/dashboard`;
-
-  // Manager tabs: หลัก / อนุมัติ / วันลา / กิจกรรม
-  // User   tabs: หลัก / วันลา / กิจกรรม  (ไม่มีประวัติ เพราะอยู่ในหน้าหลักแล้ว)
-  const approveTab = {
-    name: 'อนุมัติ',
-    href: `${roleBasePath}/history`,
-    icon: (isActive: boolean) => (
-      <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${isActive ? 'text-[#f26623]' : 'text-[#a5a5a5]'}`} viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-      </svg>
-    ),
-  };
 
   const homeTabs = [
     {
@@ -68,10 +55,7 @@ export default function BottomNavigation() {
     },
   ];
 
-  // Manager gets "อนุมัติ" inserted after "หลัก"
-  const navItems = isManager
-    ? [homeTabs[0], approveTab, ...homeTabs.slice(1)]
-    : homeTabs;
+  const navItems = homeTabs;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white shadow-[0_-2px_10px_rgba(0,0,0,0.08)] z-50">

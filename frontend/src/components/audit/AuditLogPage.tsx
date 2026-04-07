@@ -66,6 +66,14 @@ export default function AuditLogPage() {
     loadData();
   }, [loadData]);
 
+  // Auto refresh every 5 seconds
+  useEffect(() => {
+    const id = setInterval(() => {
+      loadData();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [loadData]);
+
   const tableOptions = useMemo(() => {
     return Array.from(new Set(logs.map((x) => x.targetTable))).sort();
   }, [logs]);

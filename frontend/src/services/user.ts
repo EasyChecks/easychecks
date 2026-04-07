@@ -64,12 +64,15 @@ function mapBackendUserToFrontend(backendUser: Record<string, unknown>): User {
 
   const emergencyFirstName = String(backendUser.emergent_first_name ?? backendUser.emergentFirstName ?? '');
   const emergencyLastName = String(backendUser.emergent_last_name ?? backendUser.emergentLastName ?? '');
+  const firstName = String(backendUser.firstName ?? '');
+  const lastName = String(backendUser.lastName ?? '');
+  const fullNameFromParts = `${firstName} ${lastName}`.trim();
 
   return {
     id: String(backendUser.userId ?? backendUser.id ?? ''),
-    name: backendUser.name
-      ? String(backendUser.name)
-      : `${backendUser.firstName ?? ''} ${backendUser.lastName ?? ''}`.trim(),
+    name: fullNameFromParts.length > 0
+      ? fullNameFromParts
+      : (backendUser.name ? String(backendUser.name) : ''),
     email: String(backendUser.email ?? ''),
     phone: String(backendUser.phone ?? ''),
     employeeId: String(backendUser.employeeId ?? ''),

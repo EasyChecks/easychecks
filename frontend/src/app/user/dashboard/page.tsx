@@ -221,9 +221,39 @@ export default function UserDashboard() {
   };
 
   // ── navigate to attendance page ────────────────────────
+  const dayToEnum = (d: number) => {
+    // JS: 0=Sun..6=Sat
+    return ([
+      'SUNDAY',
+      'MONDAY',
+      'TUESDAY',
+      'WEDNESDAY',
+      'THURSDAY',
+      'FRIDAY',
+      'SATURDAY',
+    ] as const)[d] ?? 'SUNDAY';
+  };
+
+  const activeShift = (() => {
+    if (shifts.length === 0) return null;
+    const shiftId = selectedShift ?? shifts[0]?.id;
+    return shifts.find((s) => s.id === shiftId) ?? shifts[0] ?? null;
+  })();
+
+  const isSpecificDayMismatch = (() => {
+    if (!activeShift) return false;
+    if (activeShift.shiftType !== 'SPECIFIC_DAY') return false;
+    const allowed = activeShift.specificDays ?? [];
+    if (allowed.length === 0) return true;
+    const todayEnum = dayToEnum(new Date().getDay());
+    return !allowed.includes(todayEnum);
+  })();
+
   const handleCheckClick = () => {
     // ถ้าเข้า-ออกงานครบแล้ววันนี้ → ไม่ต้องทำอะไร
     if (isCheckedIn && isCheckedOut) return;
+
+    if (isSpecificDayMismatch) return;
 
     if (shifts.length > 1 && !selectedShift) {
       setInfoMessage('กรุณาเลือกกะที่ต้องการเข้างานก่อน');
@@ -309,7 +339,7 @@ export default function UserDashboard() {
             </div>
           </div>
           <button onClick={handleCheckClick}
-            disabled={statusLoading || (isCheckedIn && isCheckedOut)}
+            disabled={statusLoading || (isCheckedIn && isCheckedOut) || isSpecificDayMismatch}
             className={`px-8 py-3 rounded-full font-bold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 ${
               statusLoading
                 ? 'bg-gray-200 text-gray-400'
@@ -328,6 +358,12 @@ export default function UserDashboard() {
                   : 'เข้างาน'}
           </button>
         </div>
+
+        {isSpecificDayMismatch && (
+          <div className="mt-3 text-xs text-red-600">
+            กะนี้เป็นแบบเฉพาะวัน — วันนี้ไม่ใช่วันทำงานตามที่กำหนด จึงไม่สามารถลงเวลาได้
+          </div>
+        )}
       </div>
 
       {/* ═══════════════════════ สรุปการทำงาน CARD ═══════════════════════ */}
@@ -515,42 +551,27 @@ export default function UserDashboard() {
                   </div>
                 )}
 
-                {/* custom date */}
-                {selectedDetailShift.customDate && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center shrink-0">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">วันที่</p>
-                      <p className="font-medium text-gray-800">
-                        {new Date(selectedDetailShift.customDate).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
-                      </p>
-                    </div>
-                  </div>
-                )}
+                {/* custom date (hidden per requirement) */}
 
                 {/* location */}
-                {selectedDetailShift.location && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center shrink-0">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">สถานที่</p>
-                      <p className="font-medium text-gray-800">{selectedDetailShift.location.name}</p>
-                      {selectedDetailShift.location.address && (
-                        <p className="text-sm text-gray-500 mt-0.5">{selectedDetailShift.location.address}</p>
-                      )}
-                      <p className="text-xs text-gray-400 mt-1">รัศมีเช็คอิน: {selectedDetailShift.location.radius} เมตร</p>
-                    </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
                   </div>
-                )}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">สถานที่</p>
+                    <p className="font-medium text-gray-800">{selectedDetailShift.location?.name ?? '-'}</p>
+                    {selectedDetailShift.location?.address && (
+                      <p className="text-sm text-gray-500 mt-0.5">{selectedDetailShift.location.address}</p>
+                    )}
+                    {selectedDetailShift.location?.radius != null && (
+                      <p className="text-xs text-gray-400 mt-1">รัศมีเช็คอิน: {selectedDetailShift.location.radius} เมตร</p>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Timing rules */}
@@ -632,7 +653,10 @@ export default function UserDashboard() {
                 historyRecords.map((r, idx) => (
                   <div key={r.id ?? idx} className="bg-gray-50 rounded-xl p-5 border border-gray-200">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-bold text-gray-800">{fmtDate(r.checkIn)}</h3>
+                      <div>
+                        <h3 className="font-bold text-gray-800">{fmtDate(r.checkIn)}</h3>
+                        <p className="text-xs text-gray-500 mt-1">กะงาน: {r.shift?.name ?? '-'}</p>
+                      </div>
                       <span className={`text-xs px-2 py-1 rounded-full ${
                         r.status === 'LATE' ? 'bg-yellow-100 text-yellow-700' :
                         r.status === 'ON_TIME' ? 'bg-green-100 text-green-700' :

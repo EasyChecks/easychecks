@@ -4,7 +4,6 @@
   "description": "",
   "main": "./src/index.ts",
   "scripts": {
-    "predev": "prisma generate",
     "dev": "tsx watch --include ./src/docs/**/*.ts --include ./src/config/**/*.ts ./src/index.ts",
     "build": "tsc",
     "prisma:generate": "prisma generate",

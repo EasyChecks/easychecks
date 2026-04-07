@@ -1197,7 +1197,7 @@ function MyLateTab() {
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่กำหนด</label>
                 <div className="flex gap-2 items-end">
                   <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength="2" placeholder="HH" value={editScheduledHour}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editScheduledHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledHour(val);
@@ -1206,7 +1206,7 @@ function MyLateTab() {
                   </div>
                   <div className="text-2xl text-gray-400">:</div>
                   <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength="2" placeholder="MM" value={editScheduledMin}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editScheduledMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledMin(val);
@@ -1221,7 +1221,7 @@ function MyLateTab() {
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่มาจริง</label>
                 <div className="flex gap-2 items-end">
                   <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength="2" placeholder="HH" value={editActualHour}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editActualHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualHour(val);
@@ -1230,7 +1230,7 @@ function MyLateTab() {
                   </div>
                   <div className="text-2xl text-gray-400">:</div>
                   <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength="2" placeholder="MM" value={editActualMin}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editActualMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualMin(val);

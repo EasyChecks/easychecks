@@ -58,8 +58,8 @@ const ROUTE_ACTION_MAP: RouteActionMapping[] = [
 
   // ─── Leave Requests ───
   { method: 'POST', pattern: /\/leave-requests$/, action: 'CREATE_LEAVE', targetTable: 'leave_requests' },
-  { method: 'PUT', pattern: /\/leave-requests\/\d+\/approve$/, action: 'APPROVE_LEAVE', targetTable: 'leave_requests' },
-  { method: 'PUT', pattern: /\/leave-requests\/\d+\/reject$/, action: 'REJECT_LEAVE', targetTable: 'leave_requests' },
+  { method: 'POST', pattern: /\/leave-requests\/\d+\/approve$/, action: 'APPROVE_LEAVE', targetTable: 'leave_requests' },
+  { method: 'POST', pattern: /\/leave-requests\/\d+\/reject$/, action: 'REJECT_LEAVE', targetTable: 'leave_requests' },
   { method: 'PUT', pattern: /\/leave-requests\/\d+$/, action: 'UPDATE_LEAVE', targetTable: 'leave_requests' },
   { method: 'DELETE', pattern: /\/leave-requests\/\d+$/, action: 'DELETE_LEAVE', targetTable: 'leave_requests' },
 
@@ -80,6 +80,8 @@ const ROUTE_ACTION_MAP: RouteActionMapping[] = [
 
   // ─── Late Requests ───
   { method: 'POST', pattern: /\/late-requests$/, action: 'CREATE_LATE_REQUEST', targetTable: 'late_requests' },
+  { method: 'POST', pattern: /\/late-requests\/\d+\/approve$/, action: 'APPROVE_LATE_REQUEST', targetTable: 'late_requests' },
+  { method: 'POST', pattern: /\/late-requests\/\d+\/reject$/, action: 'REJECT_LATE_REQUEST', targetTable: 'late_requests' },
   { method: 'PUT', pattern: /\/late-requests\/\d+$/, action: 'UPDATE_LATE_REQUEST', targetTable: 'late_requests' },
   { method: 'DELETE', pattern: /\/late-requests\/\d+$/, action: 'DELETE_LATE_REQUEST', targetTable: 'late_requests' },
 ];
@@ -105,6 +107,19 @@ function extractIdFromBody(body: Record<string, unknown>): number | null {
     if (typeof data?.[key] === 'number') return data[key] as number;
   }
   return null;
+}
+
+function normalizePath(path: string): string {
+  // strip query
+  const clean = path.split('?')[0] ?? path;
+  // remove /api prefix if present
+  return clean.startsWith('/api/') ? clean.slice('/api'.length) : clean;
+}
+
+function inferTargetTableFromPath(path: string): string {
+  const p = normalizePath(path);
+  const seg = (p.split('/').filter(Boolean)[0] ?? '').trim();
+  return seg || 'unknown';
 }
 
 // ========== Middleware ==========
@@ -137,27 +152,34 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     if (res.statusCode >= 200 && res.statusCode < 300) {
       // ค้นหา action จาก route mapping
       const path = req.originalUrl || req.path;
+      const normalized = normalizePath(path);
+
+      // Don't log audit API itself
+      if (normalized === '/audit' || normalized.startsWith('/audit/')) {
+        return result;
+      }
+
       const mapping = ROUTE_ACTION_MAP.find(
-        (m) => m.method === req.method && m.pattern.test(path),
+        (m) => m.method === req.method && m.pattern.test(normalized),
       );
 
-      if (mapping) {
-        // ดึง targetId จาก URL ก่อน → ถ้าไม่มี ลองจาก response body
-        const targetId = extractIdFromPath(path) ?? extractIdFromBody(body ?? {}) ?? 0;
+      const action = mapping?.action ?? `${req.method} ${normalized}`;
+      const targetTable = mapping?.targetTable ?? inferTargetTableFromPath(normalized);
+      // ดึง targetId จาก URL ก่อน → ถ้าไม่มี ลองจาก response body
+      const targetId = extractIdFromPath(normalized) ?? extractIdFromBody(body ?? {}) ?? 0;
 
-        // fire-and-forget: ไม่ await เพราะไม่ต้องการ block response
-        createAuditLog({
-          userId: req.user?.userId,
-          action: mapping.action,
-          targetTable: mapping.targetTable,
-          targetId,
-          newValues: body?.data ?? undefined,
-          ipAddress: (req.headers['x-forwarded-for'] as string) || req.ip || undefined,
-          userAgent: req.headers['user-agent'] || undefined,
-        }).catch(() => {
-          // silent: audit failure ไม่ส่งผลต่อ response
-        });
-      }
+      // fire-and-forget: ไม่ await เพราะไม่ต้องการ block response
+      createAuditLog({
+        userId: req.user?.userId,
+        action,
+        targetTable,
+        targetId,
+        newValues: body?.data ?? undefined,
+        ipAddress: (req.headers['x-forwarded-for'] as string) || req.ip || undefined,
+        userAgent: req.headers['user-agent'] || undefined,
+      }).catch(() => {
+        // silent: audit failure ไม่ส่งผลต่อ response
+      });
     }
 
     return result;

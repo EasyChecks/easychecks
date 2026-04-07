@@ -16,13 +16,6 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const { user, logout } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // Keep user-facing pages in the mobile shell (header + bottom navigation) for admin.
-  if (pathname.startsWith('/admin/settings') || pathname.startsWith('/admin/profile')) {
-    // Lazy-import to avoid circular dependency
-    const UserLayout = require('./UserLayout').default;
-    return <UserLayout>{children}</UserLayout>;
-  }
-
   const handleLogout = () => {
     logout();
     router.push('/login');

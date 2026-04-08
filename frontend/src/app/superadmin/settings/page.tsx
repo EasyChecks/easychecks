@@ -1,12 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import ChangePasswordModal from '@/components/common/ChangePasswordModal';
 
 export default function SuperAdminSettingsPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const basePath = '/superadmin';
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
 
   const menuItems = [
     {
@@ -17,7 +19,7 @@ export default function SuperAdminSettingsPage() {
       ),
       label: 'เปลี่ยนรหัสผ่าน',
       desc: 'อัปเดตรหัสผ่านบัญชีของคุณ',
-      onClick: () => router.push(`${basePath}/profile`),
+      onClick: () => setShowPasswordModal(true),
     },
     {
       icon: (
@@ -65,7 +67,7 @@ export default function SuperAdminSettingsPage() {
     <div className="space-y-5">
       {/* Profile Card */}
       <button
-        onClick={() => router.push(`${basePath}/profile`)}
+        onClick={() => router.push('/superadmin/profile')}
         className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center gap-4 active:bg-gray-50 transition-colors"
       >
         {/* Avatar */}
@@ -128,6 +130,9 @@ export default function SuperAdminSettingsPage() {
 
       {/* Version */}
       <p className="text-center text-xs text-gray-300 pb-2">EasyCheck v1.0.0</p>
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal isOpen={showPasswordModal} onClose={() => setShowPasswordModal(false)} />
     </div>
   );
 }

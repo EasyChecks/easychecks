@@ -1,404 +1,390 @@
-import type { Request, Response } from 'express';
-import * as userService from '../services/user.service.js';
-import { broadcastUserUpdate } from '../websocket/attendance.websocket.js';
-import { sendSuccess, sendError } from '../utils/response.js';
-import { parse } from 'csv-parse/sync';
+// ═══════════════════════════════════════════════════════════════
+// 📁 user.controller.ts — User Management Controller
+// ═══════════════════════════════════════════════════════════════
+// 👤 รับ HTTP Request ที่เกี่ยวกับการจัดการพนักงาน แล้วส่งต่อให้ userService
+//
+// Functions ในไฟล์นี้:
+//   1️⃣ createUser()        — POST   /api/users            (Admin/SuperAdmin)
+//   2️⃣ getUsers()          — GET    /api/users            (Admin/SuperAdmin)
+//   3️⃣ getUserById()       — GET    /api/users/:id        (ทุก role)
+//   4️⃣ updateUser()        — PUT    /api/users/:id        (Admin/SuperAdmin)
+//   5️⃣ deleteUser()        — DELETE /api/users/:id        (Admin/SuperAdmin)
+//   6️⃣ bulkCreateUsers()   — POST   /api/users/bulk       (Admin/SuperAdmin)
+//   7️⃣ getUserStatistics() — GET    /api/users/statistics  (Admin/SuperAdmin)
+//   8️⃣ getUserAvatar()     — GET    /api/users/:id/avatar  (ทุก role)
+//   9️⃣ getCsvTemplate()    — GET    /api/users/csv-template (Admin/SuperAdmin)
+//
+// สิทธิ์การเข้าถึง (RBAC):
+// ┌────────────┬───────┬──────────────┬──────────────┬──────────────┐
+// │ Action     │ USER  │ MANAGER      │ ADMIN        │ SUPERADMIN   │
+// ├────────────┼───────┼──────────────┼──────────────┼──────────────┤
+// │ Create     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+// │ Read (all) │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+// │ Read (own) │  ✓    │  ✓           │  ✓           │  ✓           │
+// │ Update     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+// │ Delete     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
+// └────────────┴───────┴──────────────┴──────────────┴──────────────┘
+//
+// 📌 Source: routes/user.routes.ts → user.controller → user.service
+// ═══════════════════════════════════════════════════════════════
 
-/**
- * 👤 User Controller - จัดการ API เกี่ยวกับผู้ใช้
- *
- * สิทธิ์การเข้าถึง (Role-based Access Control):
- * ┌────────────┬───────┬──────────────┬──────────────┬──────────────┐
- * │ Action     │ USER  │ MANAGER      │ ADMIN        │ SUPERADMIN   │
- * ├────────────┼───────┼──────────────┼──────────────┼──────────────┤
- * │ Create     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
- * │ Read (all) │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
- * │ Read (own) │  ✓    │  ✓           │  ✓           │  ✓           │
- * │ Update     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
- * │ Delete     │  ✗    │  ✗           │ สาขาตัวเอง  │ ทุกสาขา     │
- * └────────────┴───────┴──────────────┴──────────────┴──────────────┘
- *
- * ทุก endpoint ใช้ข้อมูล requester จาก req.user (ผ่าน authenticate middleware)
- */
+import type { Request, Response } from 'express';                        // ← Express types
+import * as userService from '../services/user.service.js';              // ← User business logic
+import { broadcastUserUpdate } from '../websocket/attendance.websocket.js';  // ← WebSocket broadcast
+import { sendSuccess, sendError } from '../utils/response.js';          // ← Standard response helpers
+import { parse } from 'csv-parse/sync';                                 // ← CSV parser (synchronous)
 
-/**
- * ➕ สร้างพนักงานใหม่ (Admin/SuperAdmin only)
- * POST /api/users
- *
- * ขั้นตอน:
- * 1. ตรวจ role จาก req.user (ผ่าน authenticate)
- * 2. Validate required fields
- * 3. ส่งต่อให้ userService.createUser() ซึ่งจะ:
- *    - Auto-generate employeeId จาก branchCode (เช่น BKK001)
- *    - Hash password ด้วย bcrypt
- *    - Upload avatar อัตโนมัติตามเพศ
- *    - บันทึก Audit Log
- * 4. Broadcast WebSocket เพื่ออัพเดท real-time
- *
- * Admin สร้างได้เฉพาะสาขาตัวเอง, SuperAdmin สร้างได้ทุกสาขา
- */
+// ═══════════════════════════════════════════════════════════════
+// 1️⃣ createUser() — สร้างพนักงานใหม่
+// ═══════════════════════════════════════════════════════════════
+// POST /api/users
+// - Auto-generate employeeId จาก branchCode (เช่น BKK001)
+// - Hash password ด้วย bcrypt
+// - Upload avatar อัตโนมัติตามเพศ
+// - บันทึก Audit Log
+// - Admin สร้างได้เฉพาะสาขาตัวเอง, SuperAdmin สร้างได้ทุกสาขา
 export const createUser = async (req: Request, res: Response) => {
   try {
-    // ดึงข้อมูล requester จาก token (ผ่าน authenticate middleware)
-    const requester = req.user!;
+    const requester = req.user!;  // ← ข้อมูล requester จาก JWT (ผ่าน authenticate middleware)
+
+    // ✅ STEP 1: ตรวจสิทธิ์ — เฉพาะ ADMIN/SUPERADMIN
     if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
-      return sendError(res, 'ไม่มีสิทธิ์สร้างผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
+      return sendError(res, 'ไม่มีสิทธิ์สร้างผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);  // ← 403 Forbidden
     }
 
-    const { ...userData } = req.body;
+    const { ...userData } = req.body;  // ← ดึงข้อมูลทั้งหมดจาก body
 
-    // Validate required fields (ไม่มี employeeId แล้ว เพราะ auto-generate)
+    // ✅ STEP 2: Validate required fields
     const requiredFields = ['title', 'firstName', 'lastName', 'gender', 'nationalId', 
                            'emergent_tel', 'emergent_first_name', 'emergent_last_name', 'emergent_relation',
-                           'phone', 'email', 'birthDate', 'branchId'];
+                           'phone', 'email', 'birthDate', 'branchId'];  // ← ไม่มี employeeId (auto-generate)
     for (const field of requiredFields) {
       if (!userData[field]) {
-        return sendError(res, `กรุณาระบุ ${field}`, 400);
+        return sendError(res, `กรุณาระบุ ${field}`, 400);  // ← 400 Bad Request
       }
     }
 
-    // Validate title
-    const titleUpper = userData.title?.toUpperCase();
+    // ✅ STEP 3: Validate title (MR/MRS/MISS)
+    const titleUpper = userData.title?.toUpperCase();  // ← แปลงตัวพิมพ์ใหญ่
     if (!['MR', 'MRS', 'MISS'].includes(titleUpper)) {
       return sendError(res, 'title ต้องเป็น MR (นาย), MRS (นาง) หรือ MISS (นางสาว)', 400);
     }
-    userData.title = titleUpper;
+    userData.title = titleUpper;  // ← เก็บเป็นตัวพิมพ์ใหญ่
 
-    // Validate gender
-    const genderUpper = userData.gender?.toUpperCase();
+    // ✅ STEP 4: Validate gender (MALE/FEMALE)
+    const genderUpper = userData.gender?.toUpperCase();  // ← แปลงตัวพิมพ์ใหญ่
     if (genderUpper !== 'MALE' && genderUpper !== 'FEMALE') {
       return sendError(res, 'gender ต้องเป็น MALE หรือ FEMALE', 400);
     }
-    userData.gender = genderUpper;
+    userData.gender = genderUpper;  // ← เก็บเป็นตัวพิมพ์ใหญ่
 
-    // เรียก service
+    // ✅ STEP 5: ส่งต่อให้ userService.createUser()
     const user = await userService.createUser({
       ...userData,
-      branchId: parseInt(userData.branchId),
-      createdByUserId: requester.userId,
-      creatorRole: requester.role,
-      creatorBranchId: requester.branchId,
+      branchId: parseInt(userData.branchId),    // ← string → number
+      createdByUserId: requester.userId,        // ← ผู้สร้าง
+      creatorRole: requester.role,              // ← role ของผู้สร้าง
+      creatorBranchId: requester.branchId,      // ← สาขาของผู้สร้าง
     });
 
-    // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Create สำเร็จ
-    broadcastUserUpdate('CREATE', user);
+    // ✅ STEP 6: Broadcast ผ่าน WebSocket
+    broadcastUserUpdate('CREATE', user);  // ← แจ้ง real-time ทุก client
 
-    sendSuccess(res, user, 'สร้างผู้ใช้เรียบร้อยแล้ว', 201);
+    sendSuccess(res, user, 'สร้างผู้ใช้เรียบร้อยแล้ว', 201);  // ← 201 Created
   } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้างผู้ใช้');
+    sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้างผู้ใช้');  // ← 500 Internal Server Error
   }
 };
 
-/**
- * 📋 ดึงผู้ใช้ทั้งหมด (ตาม role และ branch)
- * GET /api/users
- *
- * Query: {
- *   branchId?: number,  // (optional) กรองตามสาขา (SuperAdmin only)
- *   role?: string,      // (optional) กรองตาม role
- *   status?: string,    // (optional) กรองตาม status
- *   search?: string,    // (optional) ค้นหา
- *   page?: number,      // (optional) หน้า
- *   limit?: number      // (optional) จำนวนต่อหน้า
- * }
- */
+// ═══════════════════════════════════════════════════════════════
+// 2️⃣ getUsers() — ดึงรายชื่อพนักงานทั้งหมด (paginated + RBAC)
+// ═══════════════════════════════════════════════════════════════
+// GET /api/users
+// Query: branchId?, role?, status?, search?, page?, limit?
 export const getUsers = async (req: Request, res: Response) => {
   try {
-    // ดึงข้อมูล requester จาก token
-    const requester = req.user!;
-    const { branchId, role, status, search, page, limit } = req.query;
+    const requester = req.user!;  // ← ข้อมูล requester จาก JWT
+    const { branchId, role, status, search, page, limit } = req.query;  // ← query parameters
 
-    // เตรียม filter
+    // ✅ STEP 1: เตรียม filter object
     const filters: any = {};
-    if (branchId) filters.branchId = parseInt(branchId as string);
-    if (role) filters.role = role as string;
-    if (status) filters.status = status as string;
-    if (search) filters.search = search as string;
+    if (branchId) filters.branchId = parseInt(branchId as string);  // ← กรองตามสาขา
+    if (role) filters.role = role as string;                        // ← กรองตาม role
+    if (status) filters.status = status as string;                  // ← กรองตาม status
+    if (search) filters.search = search as string;                  // ← ค้นหาชื่อ/รหัส
 
-    // เรียก service
+    // ✅ STEP 2: ส่งต่อให้ userService.getUsers()
     const result = await userService.getUsers(
-      requester.userId,
-      requester.role,
-      requester.branchId,
-      filters,
-      page ? parseInt(page as string) : 1,
-      limit ? parseInt(limit as string) : 20
+      requester.userId,                           // ← userId ของผู้ request
+      requester.role,                             // ← role (สำหรับ RBAC filter)
+      requester.branchId,                         // ← สาขา (Admin เห็นเฉพาะสาขาตัวเอง)
+      filters,                                    // ← filter object
+      page ? parseInt(page as string) : 1,        // ← หน้าปัจจุบัน (default: 1)
+      limit ? parseInt(limit as string) : 20      // ← จำนวนต่อหน้า (default: 20)
     );
 
-    sendSuccess(res, result);
+    sendSuccess(res, result);  // ← return { users, total, page, limit }
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ใช้');
   }
 };
 
-/**
- * 📋 ดึงผู้ใช้ตาม ID
- * GET /api/users/:id
- * 
- * Query: {
- *   requesterId?: number,
- *   requesterRole?: string,
- *   requesterBranchId?: number
- * }
- */
+// ═══════════════════════════════════════════════════════════════
+// 3️⃣ getUserById() — ดึงข้อมูลพนักงานตาม ID
+// ═══════════════════════════════════════════════════════════════
+// GET /api/users/:id
 export const getUserById = async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.id as string);
+    const userId = parseInt(req.params.id as string);  // ← ดึง userId จาก URL param
 
+    // ✅ STEP 1: Validate userId
     if (!userId || isNaN(userId)) {
-      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
+      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);  // ← 400 Bad Request
     }
 
-    const requester = req.user!;
+    const requester = req.user!;  // ← ข้อมูล requester จาก JWT
 
-    // เรียก service
+    // ✅ STEP 2: ส่งต่อให้ userService.getUserById()
     const user = await userService.getUserById(
-      userId,
-      requester.userId,
-      requester.role,
-      requester.branchId
+      userId,                    // ← target userId
+      requester.userId,          // ← requester userId
+      requester.role,            // ← role (สำหรับ RBAC)
+      requester.branchId         // ← สาขา (Admin เห็นเฉพาะสาขาตัวเอง)
     );
 
-    sendSuccess(res, user);
+    sendSuccess(res, user);  // ← return user object
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ใช้');
   }
 };
 
-/**
- * 🔄 อัปเดตข้อมูลพนักงาน (Admin/SuperAdmin only)
- * PUT /api/users/:id
- *
- * สามารถแก้ไขได้: ชื่อ, เบอร์, อีเมล, nationalId, แผนก, ตำแหน่ง ฯลฯ
- * การ reset รหัสผ่าน: ส่ง field `password` มาใน body
- *   → service จะ hash ด้วย bcrypt แล้วบันทึกใน password column
- *   → พนักงานจะต้อง login ด้วยรหัสใหม่ได้ทันที
- *
- * Admin แก้ได้เฉพาะคนในสาขาตัวเอง, SuperAdmin แก้ได้ทุกคน
- * Admin ไม่สามารถย้ายพนักงานไปสาขาอื่นได้
- */
+// ═══════════════════════════════════════════════════════════════
+// 4️⃣ updateUser() — แก้ไขข้อมูลพนักงาน
+// ═══════════════════════════════════════════════════════════════
+// PUT /api/users/:id
+// - แก้ไขได้: ชื่อ, เบอร์, อีเมล, nationalId, แผนก, ตำแหน่ง ฯลฯ
+// - Reset รหัสผ่าน: ส่ง field `password` มาใน body → hash ด้วย bcrypt
+// - Admin แก้ได้เฉพาะสาขาตัวเอง, SuperAdmin แก้ได้ทุกคน
 export const updateUser = async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.id as string);
+    const userId = parseInt(req.params.id as string);  // ← ดึง userId จาก URL param
 
+    // ✅ STEP 1: Validate userId
     if (!userId || isNaN(userId)) {
-      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
+      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);  // ← 400 Bad Request
     }
 
-    // ดึงข้อมูล requester จาก token
-    const requester = req.user!;
+    const requester = req.user!;  // ← ข้อมูล requester จาก JWT
+
+    // ✅ STEP 2: ตรวจสิทธิ์
     if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
-      return sendError(res, 'ไม่มีสิทธิ์แก้ไขผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
+      return sendError(res, 'ไม่มีสิทธิ์แก้ไขผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);  // ← 403 Forbidden
     }
 
-    const { ...updateData } = req.body;
+    const { ...updateData } = req.body;  // ← ดึงข้อมูลที่ต้องการแก้ไข
 
-    // เรียก service
+    // ✅ STEP 3: ส่งต่อให้ userService.updateUser()
     const updatedUser = await userService.updateUser(
-      userId,
-      requester.userId,
-      requester.role,
-      requester.branchId,
-      updateData
+      userId,                    // ← target userId
+      requester.userId,          // ← ผู้แก้ไข
+      requester.role,            // ← role ของผู้แก้ไข
+      requester.branchId,        // ← สาขาของผู้แก้ไข
+      updateData                 // ← ข้อมูลที่ต้องการแก้ไข (partial)
     );
 
-    // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Update สำเร็จ
-    broadcastUserUpdate('UPDATE', updatedUser);
+    // ✅ STEP 4: Broadcast ผ่าน WebSocket
+    broadcastUserUpdate('UPDATE', updatedUser);  // ← แจ้ง real-time ทุก client
 
-    sendSuccess(res, updatedUser, 'อัปเดตผู้ใช้เรียบร้อยแล้ว');
+    sendSuccess(res, updatedUser, 'อัปเดตผู้ใช้เรียบร้อยแล้ว');  // ← 200 OK
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการอัปเดตผู้ใช้');
   }
 };
 
-/**
- * 🗑️ ลบพนักงาน — Soft Delete (Admin/SuperAdmin only)
- * DELETE /api/users/:id
- *
- * ไม่ได้ลบข้อมูลออกจาก database จริง แต่เปลี่ยน status เป็น RESIGNED
- * เพื่อรักษาประวัติ Attendance, Leave Request และ Audit Log ไว้
- * Body: { deleteReason: string } — จำเป็น เพื่อบันทึกใน Audit Log
- */
+// ═══════════════════════════════════════════════════════════════
+// 5️⃣ deleteUser() — ลบพนักงาน (Soft Delete)
+// ═══════════════════════════════════════════════════════════════
+// DELETE /api/users/:id
+// Body: { deleteReason: string } — จำเป็น เพื่อบันทึกใน Audit Log
+// ไม่ลบจริง → เปลี่ยน status เป็น RESIGNED เพื่อรักษาประวัติ
 export const deleteUser = async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.id as string);
+    const userId = parseInt(req.params.id as string);  // ← ดึง userId จาก URL param
 
+    // ✅ STEP 1: Validate userId
     if (!userId || isNaN(userId)) {
-      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
+      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);  // ← 400 Bad Request
     }
 
-    const requester = req.user!;
+    const requester = req.user!;  // ← ข้อมูล requester จาก JWT
+
+    // ✅ STEP 2: ตรวจสิทธิ์
     if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
-      return sendError(res, 'ไม่มีสิทธิ์ลบผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
+      return sendError(res, 'ไม่มีสิทธิ์ลบผู้ใช้ (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);  // ← 403 Forbidden
     }
 
-    const { deleteReason } = req.body;
+    const { deleteReason } = req.body;  // ← ดึงเหตุผลจาก body
 
+    // ✅ STEP 3: Validate deleteReason
     if (!deleteReason || deleteReason.trim().length === 0) {
-      return sendError(res, 'กรุณาระบุเหตุผลในการลบ (deleteReason)', 400);
+      return sendError(res, 'กรุณาระบุเหตุผลในการลบ (deleteReason)', 400);  // ← ต้องมีเหตุผล
     }
 
-    // เรียก service
+    // ✅ STEP 4: ส่งต่อให้ userService.deleteUser()
     const result = await userService.deleteUser(
-      userId,
-      requester.userId,
-      requester.role,
-      requester.branchId,
-      deleteReason
+      userId,                    // ← target userId
+      requester.userId,          // ← ผู้ลบ
+      requester.role,            // ← role ของผู้ลบ
+      requester.branchId,        // ← สาขาของผู้ลบ
+      deleteReason               // ← เหตุผลในการลบ
     );
 
-    // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Delete สำเร็จ
-    broadcastUserUpdate('DELETE', result);
+    // ✅ STEP 5: Broadcast ผ่าน WebSocket
+    broadcastUserUpdate('DELETE', result);  // ← แจ้ง real-time ทุก client
 
-    sendSuccess(res, null, 'ลบผู้ใช้เรียบร้อยแล้ว');
+    sendSuccess(res, null, 'ลบผู้ใช้เรียบร้อยแล้ว');  // ← 200 OK
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการลบผู้ใช้');
   }
 };
 
-/**
- * 📤 Bulk Import Users จาก CSV
- * POST /api/users/bulk
- * 
- * Body: {
- *   createdByUserId: number,   // (จำเป็น) ผู้สร้าง
- *   creatorRole: string,       // (จำเป็น) ADMIN หรือ SUPERADMIN
- *   creatorBranchId?: number,  // (จำเป็นถ้าเป็น ADMIN) สาขาของผู้สร้าง
- *   csvData: string            // (จำเป็น) CSV data as string
- * }
- * 
- * CSV Format (employeeId ไม่ต้องใส่ จะ auto-generate):
- * title,firstName,lastName,nickname,gender,nationalId,emergent_tel,emergent_first_name,emergent_last_name,emergent_relation,phone,email,password,birthDate,branchId,role
- * 
- * Title: MR (นาย), MRS (นาง), MISS (นางสาว)
- * 
- * ⚡ employeeId จะถูก auto-generate จาก branchCode + running number
- */
+// ═══════════════════════════════════════════════════════════════
+// 6️⃣ bulkCreateUsers() — นำเข้าพนักงานจาก CSV
+// ═══════════════════════════════════════════════════════════════
+// POST /api/users/bulk
+// Body: { csvData: string } — CSV data as string
+// employeeId จะถูก auto-generate จาก branchCode + running number
 export const bulkCreateUsers = async (req: Request, res: Response) => {
   try {
-    const requester = req.user!;
+    const requester = req.user!;  // ← ข้อมูล requester จาก JWT
+
+    // ✅ STEP 1: ตรวจสิทธิ์
     if (!['ADMIN', 'SUPERADMIN'].includes(requester.role)) {
-      return sendError(res, 'ไม่มีสิทธิ์นำเข้าข้อมูล (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);
+      return sendError(res, 'ไม่มีสิทธิ์นำเข้าข้อมูล (ต้องเป็น ADMIN หรือ SUPERADMIN)', 403);  // ← 403 Forbidden
     }
-    const { csvData } = req.body;
+    const { csvData } = req.body;  // ← ดึง CSV data จาก body
 
+    // ✅ STEP 2: Validate csvData
     if (!csvData || typeof csvData !== 'string') {
-      return sendError(res, 'กรุณาระบุ csvData', 400);
+      return sendError(res, 'กรุณาระบุ csvData', 400);  // ← 400 Bad Request
     }
 
-    // Parse CSV
+    // ✅ STEP 3: Parse CSV → array of objects
     let users: any[];
     try {
       users = parse(csvData, {
-        columns: true,
-        skip_empty_lines: true,
-        trim: true,
+        columns: true,          // ← ใช้ row แรกเป็น column names
+        skip_empty_lines: true, // ← ข้ามบรรทัดว่าง
+        trim: true,             // ← ตัด whitespace
       });
     } catch (parseError: any) {
-      return sendError(res, `รูปแบบ CSV ไม่ถูกต้อง: ${parseError.message}`, 400);
+      return sendError(res, `รูปแบบ CSV ไม่ถูกต้อง: ${parseError.message}`, 400);  // ← parse error
     }
 
     if (!users || users.length === 0) {
-      return sendError(res, 'ไม่พบข้อมูลใน CSV', 400);
+      return sendError(res, 'ไม่พบข้อมูลใน CSV', 400);  // ← CSV ว่าง
     }
 
-    // เรียก service
+    // ✅ STEP 4: ส่งต่อให้ userService.bulkCreateUsers()
     const result = await userService.bulkCreateUsers(
-      users,
-      requester.userId,
-      requester.role,
-      requester.branchId
+      users,                     // ← array ของ user data
+      requester.userId,          // ← ผู้ import
+      requester.role,            // ← role ของผู้ import
+      requester.branchId         // ← สาขาของผู้ import
     );
 
-    // 📡 Broadcast ผ่าน WebSocket (polling) หลังจาก Bulk Import สำเร็จ
-    if (result.success > 0) {
+    // ✅ STEP 5: Broadcast ผ่าน WebSocket
+    if (result.success > 0) {  // ← broadcast เฉพาะเมื่อมีสร้างสำเร็จ
       broadcastUserUpdate('BULK_CREATE', {
-        success: result.success,
-        failed: result.failed,
-        createdUsers: result.createdUsers,
+        success: result.success,            // ← จำนวนสำเร็จ
+        failed: result.failed,              // ← จำนวนล้มเหลว
+        createdUsers: result.createdUsers,  // ← รายชื่อที่สร้างสำเร็จ
       });
     }
 
-    sendSuccess(res, result, `นำเข้าข้อมูลสำเร็จ ${result.success} รายการ, ล้มเหลว ${result.failed} รายการ`, 201);
+    sendSuccess(res, result, `นำเข้าข้อมูลสำเร็จ ${result.success} รายการ, ล้มเหลว ${result.failed} รายการ`, 201);  // ← 201 Created
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการนำเข้าข้อมูล');
   }
 };
 
-/**
- * 📊 Get user statistics (for dashboard)
- * GET /api/users/statistics
- * 
- * Query: {
- *   requesterRole: string,
- *   requesterBranchId?: number
- * }
- */
+// ═══════════════════════════════════════════════════════════════
+// 7️⃣ getUserStatistics() — ดึงสถิติพนักงาน (Dashboard)
+// ═══════════════════════════════════════════════════════════════
+// GET /api/users/statistics
 export const getUserStatistics = async (req: Request, res: Response) => {
   try {
-    const requester = req.user!;
+    const requester = req.user!;  // ← ข้อมูล requester จาก JWT
 
+    // ✅ STEP 1: ส่งต่อให้ userService.getUserStatistics()
     const statistics = await userService.getUserStatistics(
-      requester.role,
-      requester.branchId
+      requester.role,       // ← role (สำหรับ RBAC filter)
+      requester.branchId    // ← สาขา (Admin เห็นเฉพาะสาขาตัวเอง)
     );
 
-    sendSuccess(res, statistics);
+    sendSuccess(res, statistics);  // ← return { total, byStatus, byRole }
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลสถิติ');
   }
 };
 
-/**
- * 📷 Get user avatar URL
- * GET /api/users/:id/avatar
- */
+// ═══════════════════════════════════════════════════════════════
+// 8️⃣ getUserAvatar() — ดึง Avatar URL ของพนักงาน
+// ═══════════════════════════════════════════════════════════════
+// GET /api/users/:id/avatar
 export const getUserAvatar = async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.id as string);
+    const userId = parseInt(req.params.id as string);  // ← ดึง userId จาก URL param
 
+    // ✅ STEP 1: Validate userId
     if (!userId || isNaN(userId)) {
-      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);
+      return sendError(res, 'กรุณาระบุ userId ที่ถูกต้อง', 400);  // ← 400 Bad Request
     }
 
-    const user = await userService.getUserById(userId);
+    // ✅ STEP 2: ดึงข้อมูล user
+    const user = await userService.getUserById(userId);  // ← ดึง user จาก DB
     
     sendSuccess(res, { 
-      userId: user.userId,
-      employeeId: user.employeeId,
-      avatarUrl: user.avatarUrl 
+      userId: user.userId,          // ← userId
+      employeeId: user.employeeId,  // ← รหัสพนักงาน
+      avatarUrl: user.avatarUrl     // ← avatar URL (Supabase หรือ fallback)
     });
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงรูปโปรไฟล์');
   }
 };
 
-/**
- * 📝 Get CSV template for bulk import
- * GET /api/users/csv-template
- */
+// ═══════════════════════════════════════════════════════════════
+// 9️⃣ getCsvTemplate() — ดาวน์โหลด CSV template สำหรับ bulk import
+// ═══════════════════════════════════════════════════════════════
+// GET /api/users/csv-template
 export const getCsvTemplate = async (_req: Request, res: Response) => {
   try {
+    // ✅ STEP 1: สร้าง CSV template พร้อมตัวอย่างข้อมูล
     const template = `employeeId,firstName,lastName,nickname,nationalId,emergent_tel,emergent_first_name,emergent_last_name,emergent_relation,phone,email,password,birthDate,branchId,role,avatarGender
 EMP001,สมชาย,ใจดี,ชาย,1234567890123,0812345678,สมหญิง,ใจดี,ภรรยา,0898765432,somchai@example.com,password123,1990-01-15,1,USER,male
 EMP002,สมหญิง,รักดี,หญิง,1234567890124,0812345679,สมชาย,รักดี,สามี,0898765433,somying@example.com,password456,1992-05-20,1,USER,female`;
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=users_import_template.csv');
-    res.send('\ufeff' + template); // Add BOM for Excel UTF-8 support
+    // ✅ STEP 2: ตั้ง HTTP headers สำหรับ download
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');  // ← MIME type = CSV
+    res.setHeader('Content-Disposition', 'attachment; filename=users_import_template.csv');  // ← filename
+    res.send('\ufeff' + template);  // ← \ufeff = BOM สำหรับ Excel UTF-8 support
   } catch (error: any) {
     sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้าง template');
   }
 };
 
+// ═══════════════════════════════════════════════════════════════
+// 📦 Default Export — รวมทุก function ที่ export
+// ═══════════════════════════════════════════════════════════════
 export default {
-  createUser,
-  getUsers,
-  getUserById,
-  updateUser,
-  deleteUser,
-  bulkCreateUsers,
-  getUserStatistics,
-  getUserAvatar,
-  getCsvTemplate,
+  createUser,           // ← 1️⃣ สร้างพนักงานใหม่
+  getUsers,             // ← 2️⃣ ดึงรายชื่อพนักงาน
+  getUserById,          // ← 3️⃣ ดึงข้อมูลพนักงานตาม ID
+  updateUser,           // ← 4️⃣ แก้ไขข้อมูลพนักงาน
+  deleteUser,           // ← 5️⃣ ลบพนักงาน (soft delete)
+  bulkCreateUsers,      // ← 6️⃣ Import พนักงานจาก CSV
+  getUserStatistics,    // ← 7️⃣ ดึงสถิติ (Dashboard)
+  getUserAvatar,        // ← 8️⃣ ดึง Avatar URL
+  getCsvTemplate,       // ← 9️⃣ ดาวน์โหลด CSV template
 };

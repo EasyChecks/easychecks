@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import UserLayout from './UserLayout';
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -15,6 +16,11 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const router = useRouter();
   const { user, logout } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Keep user-facing pages in the mobile shell (header + bottom navigation) for admin.
+  if (pathname.startsWith('/admin/settings') || pathname.startsWith('/admin/profile')) {
+    return <UserLayout>{children}</UserLayout>;
+  }
 
   const handleLogout = () => {
     logout();

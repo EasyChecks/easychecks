@@ -15,60 +15,6 @@ function InfoRow({ label, value }: { label: string; value?: string | null }) {
 export default function AdminProfilePage() {
   const { user, logout } = useAuth();
   const router = useRouter();
-  const basePath = '/admin';
-
-  const menuItems = [
-    {
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
-        </svg>
-      ),
-      label: 'เปลี่ยนรหัสผ่าน',
-      desc: 'อัปเดตรหัสผ่านบัญชีของคุณ',
-      onClick: () => router.push(`${basePath}/profile`),
-    },
-    {
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
-        </svg>
-      ),
-      label: 'การแจ้งเตือน',
-      desc: 'ตั้งค่าการรับแจ้งเตือน',
-      onClick: () => {},
-    },
-    {
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 21l5.25-11.25L21 21m-9-3h7.5M3 5.621a48.474 48.474 0 016-.371m0 0c1.12 0 2.233.038 3.334.114M9 5.25V3m3.334 2.364V3" />
-        </svg>
-      ),
-      label: 'ภาษา',
-      desc: 'ภาษาไทย',
-      onClick: () => {},
-    },
-    {
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
-        </svg>
-      ),
-      label: 'ช่วยเหลือ',
-      desc: 'ศูนย์ช่วยเหลือและคำถามที่พบบ่อย',
-      onClick: () => {},
-    },
-    {
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
-        </svg>
-      ),
-      label: 'เกี่ยวกับแอป',
-      desc: 'EasyCheck เวอร์ชัน 1.0.0',
-      onClick: () => {},
-    },
-  ];
 
   return (
     <div className="-mt-4">
@@ -133,29 +79,10 @@ export default function AdminProfilePage() {
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="overflow-hidden bg-white border border-gray-100 divide-y shadow-md rounded-2xl divide-gray-50">
-          {menuItems.map((item, idx) => (
-            <button
-              key={idx}
-              onClick={item.onClick}
-              className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-gray-50 transition-colors"
-            >
-              <div className="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center text-[#f26623] shrink-0">
-                {item.icon}
-              </div>
-              <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-medium text-gray-800">{item.label}</p>
-                <p className="text-xs text-gray-400 truncate">{item.desc}</p>
-              </div>
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          ))}
-        </div>
+        {/* Actions — REMOVED (use Settings page instead) */}
+      </div>
 
-        {/* Logout */}
+      {/* Logout */}
         <button
           onClick={logout}
           className="flex items-center justify-center w-full gap-2 p-4 font-medium text-red-500 transition-colors bg-white shadow-sm rounded-2xl active:bg-red-50"
@@ -168,7 +95,6 @@ export default function AdminProfilePage() {
 
         {/* Version */}
         <p className="pb-2 text-xs text-center text-gray-300">EasyCheck v1.0.0</p>
-      </div>
     </div>
   );
 }

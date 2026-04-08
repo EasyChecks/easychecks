@@ -1,5 +1,23 @@
 "use client";
 
+/**
+ * ─────────────────────────────────────────────────────────────
+ * 📢 AnnouncementManagement — หน้าจัดการประกาศสำหรับ Admin
+ * ─────────────────────────────────────────────────────────────
+ * หน้านี้รวมทุกอย่างของระบบประกาศไว้ที่เดียว:
+ *   - ดูรายการประกาศ (แบ่งแท็บ DRAFT / SENT)
+ *   - สร้างประกาศใหม่ (modal form)
+ *   - แก้ไขประกาศ DRAFT
+ *   - ส่งประกาศ (เลือกกลุ่มเป้าหมาย → กดส่ง → สถานะเปลี่ยนเป็น SENT)
+ *   - ลบประกาศ (ทีละรายการ หรือเลือกหลายรายการแล้วลบพร้อมกัน)
+ *   - ดูรายชื่อผู้รับประกาศที่ส่งแล้ว
+ *
+ * Flow หลัก:
+ *   ADMIN สร้างประกาศ (DRAFT) → เลือกกลุ่มเป้าหมาย → กดส่ง → SENT
+ *   เมื่อ SENT แล้ว แก้ไขไม่ได้ ลบได้อย่างเดียว
+ * ─────────────────────────────────────────────────────────────
+ */
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import announcementService from '@/services/announcementService';
 import api from '@/services/api';
@@ -14,7 +32,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import AlertDialog from '@/components/common/AlertDialog';
 
-// ─── User type for recipient picker ──────────────────────────
+// ─── ข้อมูล user แบบย่อ สำหรับ dropdown เลือกผู้รับประกาศ ──────
 interface SimpleUser {
   userId: number;
   firstName: string;
@@ -23,7 +41,7 @@ interface SimpleUser {
   role: string;
 }
 
-// ─── Constants ───────────────────────────────────────────────────
+// ─── ค่าคงที่ — ตัวเลือก role, สี badge, ไอคอน ─────────────────
 const ROLE_OPTIONS: { value: AnnouncementRole; label: string }[] = [
   { value: 'SUPERADMIN', label: 'Super Admin' },
   { value: 'ADMIN', label: 'Admin' },
@@ -61,7 +79,9 @@ const AVATAR_COLORS = [
   'from-indigo-500 to-blue-600',
 ];
 
-// ─── Helpers ─────────────────────────────────────────────────────
+// ─── ฟังก์ชันช่วย ─────────────────────────────────────────────────
+
+/** แปลง ISO date string เป็นรูปแบบไทย เช่น "8 เม.ย. 2569 14:30" */
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleString('th-TH', {
     year: 'numeric',
@@ -71,48 +91,49 @@ const formatDate = (iso: string) =>
     minute: '2-digit',
   });
 
+/** แปลง string "1, 2, 5" เป็น array [1, 2, 5] สำหรับ branchIds */
 const parseBranchIds = (raw: string): number[] =>
   raw
     .split(',')
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => !isNaN(n) && n > 0);
 
-// ─── Constants ───────────────────────────────────────────────────
+/** จำนวนประกาศต่อหน้า */
 const PAGE_SIZE = 4;
 
-// ─── Component ───────────────────────────────────────────────────
+// ─── Component หลัก ─────────────────────────────────────────────
 export default function AnnouncementManagement() {
-  // ── Data state ──
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'ALL' | AnnouncementStatus>('ALL');
+  // ── State: ข้อมูลประกาศ ──
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]); // รายการประกาศทั้งหมดจาก API
+  const [isLoading, setIsLoading] = useState(true);                       // กำลังโหลดข้อมูลครั้งแรก
+  const [activeTab, setActiveTab] = useState<'ALL' | AnnouncementStatus>('ALL'); // แท็บที่เลือกอยู่
 
-  // ── Multi-select state ──
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [showBulkDelete, setShowBulkDelete] = useState(false);
+  // ── State: เลือกหลายรายการ (สำหรับลบพร้อมกัน) ──
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set()); // ID ประกาศที่ถูกเลือก
+  const [showBulkDelete, setShowBulkDelete] = useState(false);            // แสดง modal ยืนยันลบหลายรายการ
 
-  // ── Pagination state ──
+  // ── State: แบ่งหน้า ──
   const [currentPage, setCurrentPage] = useState(1);
 
-  // ── Modal state ──
-  const [editTarget, setEditTarget] = useState<Announcement | 'new' | null>(null);
-  const [viewTarget, setViewTarget] = useState<Announcement | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Announcement | null>(null);
-  const [sendTarget, setSendTarget] = useState<Announcement | null>(null);
+  // ── State: Modal ต่างๆ ──
+  const [editTarget, setEditTarget] = useState<Announcement | 'new' | null>(null); // 'new' = สร้างใหม่, Announcement = แก้ไข, null = ปิด
+  const [viewTarget, setViewTarget] = useState<Announcement | null>(null);         // ดูรายชื่อผู้รับ
+  const [deleteTarget, setDeleteTarget] = useState<Announcement | null>(null);     // ยืนยันลบ
+  const [sendTarget, setSendTarget] = useState<Announcement | null>(null);         // ยืนยันส่ง
 
-  // ── Form state ──
+  // ── State: ฟอร์มสร้าง/แก้ไข ──
   const emptyForm = { title: '', content: '', targetRoles: [] as AnnouncementRole[], branchIds: '' };
   const [form, setForm] = useState(emptyForm);
 
-  // ── User picker state ──
-  const [allUsers, setAllUsers] = useState<SimpleUser[]>([]);
-  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
-  const [userSearch, setUserSearch] = useState('');
-  const [isUserPickerOpen, setIsUserPickerOpen] = useState(false);
-  const [loadingUsers, setLoadingUsers] = useState(false);
-  const userPickerRef = useRef<HTMLDivElement>(null);
+  // ── State: เลือกพนักงานเฉพาะราย (user picker dropdown) ──
+  const [allUsers, setAllUsers] = useState<SimpleUser[]>([]);       // รายชื่อ user ทั้งหมด (โหลดครั้งเดียว)
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]); // userId ที่เลือกไว้
+  const [userSearch, setUserSearch] = useState('');                  // คำค้นหาใน dropdown
+  const [isUserPickerOpen, setIsUserPickerOpen] = useState(false);  // dropdown เปิด/ปิด
+  const [loadingUsers, setLoadingUsers] = useState(false);          // กำลังโหลดรายชื่อ user
+  const userPickerRef = useRef<HTMLDivElement>(null);               // ref สำหรับปิด dropdown เมื่อคลิกนอก
 
-  // ── Loading flag (รวมเป็นตัวเดียวเพราะแต่ละ action ไม่ทับซ้อนกัน) ──
+  // ── State: สถานะ loading ของ action (ใช้ตัวเดียวเพราะทำทีละ action) ──
   const [loadingAction, setLoadingAction] = useState<null | 'saving' | 'sending' | 'deleting'>(null);
 
   // ── Alert ──
@@ -130,7 +151,7 @@ export default function AnnouncementManagement() {
   );
   const closeAlert = () => setAlert((p) => ({ ...p, isOpen: false }));
 
-  // ── Fetch ──
+  // ── ดึงข้อมูลประกาศจาก API ──
   const fetchAnnouncements = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -148,9 +169,9 @@ export default function AnnouncementManagement() {
     fetchAnnouncements();
   }, [fetchAnnouncements]);
 
-  // ── Fetch users for picker ──
+  // ── ดึงรายชื่อ user สำหรับ dropdown เลือกผู้รับ (โหลดครั้งเดียว) ──
   const fetchUsers = useCallback(async () => {
-    if (allUsers.length > 0) return; // already loaded
+    if (allUsers.length > 0) return; // โหลดแล้ว ไม่ต้องโหลดซ้ำ
     setLoadingUsers(true);
     try {
       const response = await api.get('/users', { params: { limit: 500 } });
@@ -171,7 +192,7 @@ export default function AnnouncementManagement() {
     }
   }, [allUsers.length]);
 
-  // Click outside to close picker
+  // ปิด dropdown เมื่อคลิกนอกพื้นที่ user picker
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (userPickerRef.current && !userPickerRef.current.contains(e.target as Node)) {
@@ -182,7 +203,7 @@ export default function AnnouncementManagement() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // ── Filtered list + pagination ──
+  // ── กรองตามแท็บ + แบ่งหน้า ──
   const filtered = announcements.filter((a) => {
     if (activeTab === 'ALL') return true;
     return a.status === activeTab;
@@ -200,9 +221,10 @@ export default function AnnouncementManagement() {
   };
 
   // ───────────────────────────────────────────────────────────────
-  // Handlers
+  // Event Handlers — จัดการ action ต่างๆ ของ user
   // ───────────────────────────────────────────────────────────────
 
+  /** เปิด modal สร้างประกาศใหม่ พร้อม reset ฟอร์ม */
   const openCreate = () => {
     setForm(emptyForm);
     setSelectedUserIds([]);
@@ -212,6 +234,7 @@ export default function AnnouncementManagement() {
     fetchUsers();
   };
 
+  /** เปิด modal แก้ไขประกาศ พร้อมโหลดข้อมูลเดิมเข้าฟอร์ม */
   const openEdit = (a: Announcement) => {
     setForm({
       title: a.title,
@@ -226,6 +249,7 @@ export default function AnnouncementManagement() {
     fetchUsers();
   };
 
+  /** เปิด modal ดูรายชื่อผู้รับ (ดึง detail จาก API เพื่อให้ได้ recipients) */
   const openView = async (a: Announcement) => {
     try {
       const detail = await announcementService.getById(a.announcementId);
@@ -235,6 +259,7 @@ export default function AnnouncementManagement() {
     }
   };
 
+  /** สลับเลือก/ยกเลิก role ในฟอร์ม */
   const toggleFormRole = (role: AnnouncementRole) =>
     setForm((p) => ({
       ...p,
@@ -243,7 +268,7 @@ export default function AnnouncementManagement() {
         : [...p.targetRoles, role],
     }));
 
-  // ── Create ──
+  // ── สร้างประกาศใหม่ → เรียก API POST /announcements ──
   const handleCreate = async () => {
     if (!form.title.trim() || !form.content.trim()) {
       showAlert('warning', 'ข้อมูลไม่ครบ', 'กรุณากรอกหัวข้อและเนื้อหา');
@@ -270,7 +295,7 @@ export default function AnnouncementManagement() {
     }
   };
 
-  // ── Update ──
+  // ── แก้ไขประกาศ → เรียก API PUT /announcements/:id ──
   const handleUpdate = async () => {
     if (!editTarget || editTarget === 'new') return;
     if (!form.title.trim() || !form.content.trim()) {
@@ -298,7 +323,7 @@ export default function AnnouncementManagement() {
     }
   };
 
-  // ── Send ──
+  // ── ส่งประกาศ → เรียก API POST /announcements/:id/send (เปลี่ยนเป็น SENT + สร้าง recipients + ส่งอีเมล) ──
   const handleSend = async () => {
     if (!sendTarget) return;
     setLoadingAction('sending');
@@ -315,7 +340,7 @@ export default function AnnouncementManagement() {
     }
   };
 
-  // ── Delete single ──
+  // ── ลบประกาศ 1 รายการ → เรียก API DELETE /announcements/:id ──
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setLoadingAction('deleting');
@@ -333,7 +358,7 @@ export default function AnnouncementManagement() {
     }
   };
 
-  // ── Bulk delete ──
+  // ── ลบประกาศหลายรายการพร้อมกัน (วนลบทีละ ID) ──
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     setLoadingAction('deleting');
@@ -358,7 +383,8 @@ export default function AnnouncementManagement() {
     fetchAnnouncements();
   };
 
-  // ── Selection helpers ──
+  // ── ฟังก์ชันช่วยเลือก/ยกเลิก checkbox ──
+  /** สลับเลือก/ยกเลิกประกาศ 1 รายการ */
   const toggleSelect = (id: number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -367,6 +393,7 @@ export default function AnnouncementManagement() {
     });
   };
 
+  /** เลือก/ยกเลิกทั้งหน้าปัจจุบัน */
   const toggleSelectAll = () => {
     if (allPageSelected) {
       setSelectedIds((prev) => {
@@ -383,14 +410,16 @@ export default function AnnouncementManagement() {
     }
   };
 
+  /** เลือกทุกรายการที่ผ่านการ filter (ข้ามหน้า) */
   const selectAllFiltered = () => {
     setSelectedIds(new Set(filtered.map((a) => a.announcementId)));
   };
 
   // ───────────────────────────────────────────────────────────────
-  // Sub-renders
+  // Sub-renders — component ย่อยที่ render ภายใน
   // ───────────────────────────────────────────────────────────────
 
+  /** การ์ดประกาศ 1 รายการ — แสดงสถานะ, หัวข้อ, กลุ่มเป้าหมาย, และปุ่ม action */
   const AnnouncementCard = ({ a }: { a: Announcement }) => (
     <Card className={`p-5 transition-shadow hover:shadow-md ${selectedIds.has(a.announcementId) ? 'ring-2 ring-orange-400 bg-orange-50/30' : ''}`}>
       <div className="flex items-start justify-between gap-3">
@@ -533,7 +562,7 @@ export default function AnnouncementManagement() {
     </Card>
   );
 
-  // ── Form (Create / Edit) shared render ──
+  // ── Modal ฟอร์มสร้าง/แก้ไข (ใช้ร่วมกัน แยกด้วย isEdit flag) ──
   const renderFormModal = (isEdit: boolean) => {
     const searchLower = userSearch.toLowerCase();
     const filteredUsers = allUsers.filter((u) => {
@@ -878,7 +907,7 @@ export default function AnnouncementManagement() {
   };
 
   // ───────────────────────────────────────────────────────────────
-  // Render
+  // Render หลัก — ประกอบด้วย: Header, Stats, Tabs, List, Modals
   // ───────────────────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-6">
@@ -1051,13 +1080,13 @@ export default function AnnouncementManagement() {
 
       {/* ── Modals ── */}
 
-      {/* Create Modal */}
+      {/* Modal สร้างประกาศใหม่ */}
       {editTarget === 'new' && renderFormModal(false)}
 
-      {/* Edit Modal */}
+      {/* Modal แก้ไขประกาศ */}
       {editTarget && editTarget !== 'new' && renderFormModal(true)}
 
-      {/* View Recipients Modal */}
+      {/* Modal ดูรายชื่อผู้รับประกาศ */}
       {viewTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
@@ -1113,7 +1142,7 @@ export default function AnnouncementManagement() {
         </div>
       )}
 
-      {/* Send Confirm Modal */}
+      {/* Modal ยืนยันการส่งประกาศ */}
       {sendTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-sm mx-4 bg-white shadow-2xl rounded-2xl">
@@ -1152,7 +1181,7 @@ export default function AnnouncementManagement() {
         </div>
       )}
 
-      {/* Delete Confirm Modal */}
+      {/* Modal ยืนยันการลบประกาศ */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-sm mx-4 bg-white shadow-2xl rounded-2xl">
@@ -1188,7 +1217,7 @@ export default function AnnouncementManagement() {
         </div>
       )}
 
-      {/* Bulk Delete Confirm Modal */}
+      {/* Modal ยืนยันการลบหลายรายการ */}
       {showBulkDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-sm mx-4 bg-white shadow-2xl rounded-2xl">

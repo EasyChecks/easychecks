@@ -392,6 +392,9 @@ model Announcement {
   status                AnnouncementStatus     @default(DRAFT) @map("status")
   createdByUserId       Int                    @map("created_by_user_id")
   sentByUserId          Int?                   @map("sent_by_user_id")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @default(now()) @updatedAt @map("updated_at")
+  sentAt                DateTime?              @map("sent_at")
 
   creator               User                   @relation("AnnouncementCreator", fields: [createdByUserId], references: [userId], onDelete: Cascade)
   sentBy                User?                  @relation("AnnouncementSender", fields: [sentByUserId], references: [userId])
@@ -404,9 +407,11 @@ model AnnouncementRecipient {
   recipientId           Int                    @id @default(autoincrement()) @map("recipient_id")
   announcementId        Int                    @map("announcement_id")
   userId                Int                    @map("user_id")
+  sentAt                DateTime               @default(now()) @map("sent_at")
   announcement          Announcement           @relation(fields: [announcementId], references: [announcementId], onDelete: Cascade)
   user                  User                   @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
+  @@index([announcementId])
   @@map("announcement_recipients")
 }
 

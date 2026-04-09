@@ -358,7 +358,7 @@ export const createUser = async (data: CreateUserDTO) => {
 
   // ✅ STEP 3: Auto-generate employeeId จาก branchCode + running number
   // ═══════════════════════════════════════════════════════════════════
-  const employeeId = await generateEmployeeId(data.branchId);  // ← เช่น BKK001, CNX002
+  const employeeId = await generateEmployeeId(data.branchId);  // ← เช่น B00KK1, CNX002
 
   // ✅ STEP 4: ตรวจสอบ email และ nationalId ซ้ำ
   // ═════════════════════════════════════════════

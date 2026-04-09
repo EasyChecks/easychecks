@@ -107,7 +107,31 @@ function canAccessBranch(
   return false; // role อื่นๆ (USER, MANAGER) ไม่มีสิทธิ์จัดการกะ
 }
 
-// สร้างกะทำงานให้พนักงาน 1 คน
+/**
+ * สร้างกะทำงานให้พนักงาน 1 คน
+ *
+ * SQL เทียบเท่า:
+ *   -- 1. ตรวจว่ามีกะ active อยู่แล้วไหม
+ *   SELECT shift_id, name, start_time, end_time
+ *   FROM shifts
+ *   WHERE user_id = $userId AND is_active = true AND is_deleted = false
+ *   LIMIT 1;
+ *
+ *   -- 2. ถ้า replaceExisting=true ให้ soft-delete กะเก่าก่อน
+ *   UPDATE shifts
+ *   SET is_active = false, is_deleted = true, delete_reason = 'แทนที่ด้วยกะใหม่'
+ *   WHERE user_id = $userId AND is_active = true AND is_deleted = false;
+ *
+ *   -- 3. สร้างกะใหม่
+ *   INSERT INTO shifts
+ *     (name, shift_type, start_time, end_time, grace_period_minutes,
+ *      late_threshold_minutes, specific_days, custom_date, location_id, user_id, is_deleted)
+ *   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, false)
+ *   RETURNING
+ *     shifts.*,
+ *     locations.*,
+ *     users.user_id, users.first_name, users.last_name, users.employee_id, users.branch_id;
+ */
 export const createShift = async (data: CreateShiftDTO) => {
   // ตรวจรูปแบบเวลาทั้งเริ่มและสิ้นสุด ก่อนทำอะไรทั้งนั้น
   if (!isValidTimeFormat(data.startTime) || !isValidTimeFormat(data.endTime)) {
@@ -208,7 +232,26 @@ export const createShift = async (data: CreateShiftDTO) => {
   return shift;
 };
 
-// สร้างกะทำงานให้พนักงานหลายคนพร้อมกัน (bulk)
+/**
+ * สร้างกะทำงานให้พนักงานหลายคนพร้อมกัน (bulk)
+ *
+ * SQL เทียบเท่า:
+ *   -- 1. ตรวจ active shift ที่มีอยู่แล้วของทุกคนใน list
+ *   SELECT shift_id, user_id, name, start_time, end_time
+ *   FROM shifts
+ *   WHERE user_id = ANY($userIds) AND is_active = true AND is_deleted = false;
+ *
+ *   -- 2. (ใน transaction) ถ้า replaceExisting=true ให้ soft-delete กะเก่าทั้งหมดก่อน
+ *   UPDATE shifts
+ *   SET is_active = false, is_deleted = true, delete_reason = 'แทนที่ด้วยกะใหม่ (bulk)'
+ *   WHERE user_id = ANY($userIds) AND is_active = true AND is_deleted = false;
+ *
+ *   -- 3. (ใน transaction เดียวกัน) สร้างกะใหม่ทีละคน
+ *   INSERT INTO shifts (name, shift_type, start_time, end_time, ..., user_id, is_deleted)
+ *   VALUES (..., $userId, false)
+ *   RETURNING shifts.*, locations.*, users.*, branches.*;
+ *   -- (วนซ้ำสำหรับทุก userId)
+ */
 export const createBulkShift = async (data: CreateBulkShiftDTO) => {
   // ตรวจรูปแบบเวลาก่อน ถ้าผิดไม่ต้องทำต่อ
   if (!isValidTimeFormat(data.startTime) || !isValidTimeFormat(data.endTime)) {
@@ -453,7 +496,29 @@ export const createBulkShift = async (data: CreateBulkShiftDTO) => {
   };
 };
 
-// ดึงรายการกะทั้งหมด โดย filter ตาม role ของผู้เรียก
+/**
+ * ดึงรายการกะทั้งหมด โดย filter ตาม role ของผู้เรียก
+ *
+ * SQL เทียบเท่า (กรณี ADMIN):
+ *   SELECT s.*, l.*, u.user_id, u.first_name, u.last_name, u.employee_id, u.role, u.branch_id,
+ *          b.name AS branch_name, b.code AS branch_code
+ *   FROM shifts s
+ *   LEFT JOIN locations l ON s.location_id = l.location_id
+ *   LEFT JOIN users u ON s.user_id = u.user_id
+ *   LEFT JOIN branches b ON u.branch_id = b.branch_id
+ *   WHERE s.is_deleted = false
+ *     AND u.branch_id = $requesterBranchId    -- ADMIN เห็นเฉพาะสาขาตัวเอง
+ *     [AND s.shift_type = $shiftType]         -- optional filter
+ *     [AND s.is_active = $isActive]           -- optional filter
+ *     [AND s.user_id = $userId]               -- optional filter
+ *   ORDER BY s.shift_id DESC;
+ *
+ * SQL เทียบเท่า (กรณี USER/MANAGER):
+ *   WHERE s.is_deleted = false AND s.user_id = $requesterId AND s.is_active = true
+ *
+ * SQL เทียบเท่า (กรณี SUPERADMIN):
+ *   WHERE s.is_deleted = false [AND s.user_id = $userId]
+ */
 export const getShifts = async (
   requesterId: number,           // userId ของคนที่เรียก API
   requesterRole: string,         // role ของคนที่เรียก (SUPERADMIN / ADMIN / USER / MANAGER)
@@ -516,7 +581,20 @@ export const getShifts = async (
   });
 };
 
-// ดึงกะ 1 รายการตาม shiftId (ไม่แสดง soft-deleted)
+/**
+ * ดึงกะ 1 รายการตาม shiftId (ไม่แสดง soft-deleted)
+ *
+ * SQL เทียบเท่า:
+ *   SELECT s.*, l.*,
+ *          u.user_id, u.first_name, u.last_name, u.employee_id, u.branch_id,
+ *          b.name AS branch_name, b.code AS branch_code
+ *   FROM shifts s
+ *   LEFT JOIN locations l ON s.location_id = l.location_id
+ *   LEFT JOIN users u ON s.user_id = u.user_id
+ *   LEFT JOIN branches b ON u.branch_id = b.branch_id
+ *   WHERE s.shift_id = $1 AND s.is_deleted = false
+ *   LIMIT 1;
+ */
 export const getShiftById = async (shiftId: number) => {
   const shift = await prisma.shift.findFirst({
     where: { shiftId, isDeleted: false }, // กรอง soft-deleted ออก
@@ -544,6 +622,32 @@ export const getShiftById = async (shiftId: number) => {
   return shift;
 };
 
+/**
+ * แก้ไขข้อมูลกะที่มีอยู่แล้ว (PATCH style — ส่งเฉพาะ field ที่ต้องการเปลี่ยน)
+ *
+ * SQL เทียบเท่า:
+ *   -- 1. ดึงกะเดิมก่อน (เพื่อตรวจสิทธิ์ และเก็บ oldValues สำหรับ audit)
+ *   SELECT s.*, u.branch_id
+ *   FROM shifts s
+ *   JOIN users u ON s.user_id = u.user_id
+ *   WHERE s.shift_id = $1 AND s.is_deleted = false;
+ *
+ *   -- 2. ถ้ากะนี้จะ active และมีกะอื่น active อยู่ ให้ deactivate ก่อน
+ *   UPDATE shifts SET is_active = false
+ *   WHERE user_id = $targetUserId AND is_active = true
+ *     AND is_deleted = false AND shift_id != $shiftId;
+ *
+ *   -- 3. update กะที่ระบุ
+ *   UPDATE shifts
+ *   SET
+ *     name              = COALESCE($name, name),
+ *     start_time        = COALESCE($startTime, start_time),
+ *     end_time          = COALESCE($endTime, end_time),
+ *     is_active         = COALESCE($isActive, is_active),
+ *     ...                                         -- เฉพาะ field ที่ส่งมา (undefined = ไม่เปลี่ยน)
+ *   WHERE shift_id = $1
+ *   RETURNING shifts.*, locations.*, users.*;
+ */
 export const updateShift = async (
   shiftId: number,
   updatedByUserId: number,
@@ -670,7 +774,25 @@ export const updateShift = async (
   return updatedShift;
 };
 
-// ลบกะ (soft-delete เท่านั้น ไม่ลบออกจาก DB จริงๆ)
+/**
+ * ลบกะ (soft-delete เท่านั้น — ไม่ลบออกจาก DB จริงๆ)
+ *
+ * ทำไมถึง soft-delete แทน hard delete?
+ * → attendance record อ้างอิง shift_id อยู่
+ *   ถ้าลบจริงจะ FK violation หรือทำให้ประวัติการเข้างานหาย
+ *
+ * SQL เทียบเท่า:
+ *   -- 1. ตรวจสอบว่ากะยังอยู่และไม่ถูกลบไปแล้ว
+ *   SELECT s.*, u.branch_id FROM shifts s
+ *   JOIN users u ON s.user_id = u.user_id
+ *   WHERE s.shift_id = $1 AND s.is_deleted = false;
+ *
+ *   -- 2. soft-delete โดย set flag แทนการลบจริง
+ *   UPDATE shifts
+ *   SET is_active = false, is_deleted = true, delete_reason = $deleteReason
+ *   WHERE shift_id = $1
+ *   RETURNING *;
+ */
 export const deleteShift = async (
   shiftId: number,               // ID ของกะที่จะลบ
   deletedByUserId: number,       // userId ของคนที่ลบ (สำหรับ audit log)
@@ -719,7 +841,24 @@ export const deleteShift = async (
   return deletedShift;
 };
 
-// ดึงกะที่ใช้งานได้ของ user คนนี้ ณ วันนี้ (ใช้สำหรับ check-in)
+/**
+ * ดึงกะที่ใช้งานได้ของ user คนนี้ ณ วันนี้ (ใช้สำหรับ check-in)
+ *
+ * SQL เทียบเท่า:
+ *   SELECT s.*, l.*
+ *   FROM shifts s
+ *   LEFT JOIN locations l ON s.location_id = l.location_id
+ *   WHERE s.user_id = $userId
+ *     AND s.is_active  = true
+ *     AND s.is_deleted = false
+ *     AND (
+ *       s.shift_type = 'REGULAR'                                          -- ใช้ได้ทุกวัน
+ *       OR (s.shift_type = 'SPECIFIC_DAY' AND $dayOfWeek = ANY(s.specific_days)) -- ตรงกับวันนี้
+ *       OR (s.shift_type = 'CUSTOM'        AND s.custom_date = $thaiDate::date)   -- ตรงกับวันที่นี้
+ *     )
+ *   ORDER BY s.shift_id DESC
+ *   LIMIT 1;
+ */
 export const getActiveShiftsForToday = async (userId: number) => {
   // หาวันในสัปดาห์ปัจจุบัน ตามเวลาไทย (ป้องกัน timezone drift ถ้า server ไม่ได้อยู่ในไทย)
   const thaiDayIndex = getThaiDayOfWeekIndex();

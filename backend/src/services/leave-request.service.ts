@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import type { LeaveRequest, LeaveStatus, LeaveType, Gender, Prisma, Role } from '@prisma/client';
-import { differenceInBusinessDays, differenceInCalendarDays, startOfYear, endOfYear, subYears } from 'date-fns';
+import { differenceInBusinessDays, differenceInCalendarDays, startOfYear, endOfYear } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
 import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
 import { LEAVE_RULES } from './leave-rules.js';
@@ -301,6 +301,7 @@ async function getUsedLeaveDaysInRange(
   rangeStart: Date,
   rangeEnd: Date
 ): Promise<number> {
+  const HOURS_PER_DAY = 8;
   const leaves = await prisma.leaveRequest.findMany({
     where: {
       userId,
@@ -315,11 +316,15 @@ async function getUsedLeaveDaysInRange(
     select: {
       numberOfDays: true,
       isHourly: true,
+      leaveHours: true,
     },
   });
 
-  return leaves.reduce((sum: number, leave: { numberOfDays: number; isHourly?: boolean }) => {
-    if (leave.isHourly) return sum;
+  return leaves.reduce((sum: number, leave: { numberOfDays: number; isHourly?: boolean; leaveHours?: number | null }) => {
+    if (leave.isHourly) {
+      const hours = Math.max(0, leave.leaveHours ?? 0);
+      return sum + (hours / HOURS_PER_DAY);
+    }
     return sum + leave.numberOfDays;
   }, 0);
 }
@@ -334,6 +339,7 @@ async function getUsedLeaveDaysThisYear(userId: number, leaveType: LeaveType): P
  * ตรวจสอบจำนวนวันลาที่ได้รับค่าจ้างในปีนี้
  */
 async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType): Promise<number> {
+  const HOURS_PER_DAY = 8;
   const yearStart = startOfYear(new Date());
   const yearEnd = endOfYear(new Date());
 
@@ -352,12 +358,14 @@ async function getUsedPaidLeaveDaysThisYear(userId: number, leaveType: LeaveType
       paidDays: true,
       numberOfDays: true,
       isHourly: true,
+      leaveHours: true,
     },
   });
 
-  return leaves.reduce((sum: number, leave: { paidDays: number | null; numberOfDays: number; isHourly?: boolean }) => {
+  return leaves.reduce((sum: number, leave: { paidDays: number | null; numberOfDays: number; isHourly?: boolean; leaveHours?: number | null }) => {
     if (leave.isHourly) {
-      return sum;
+      const hours = Math.max(0, leave.leaveHours ?? 0);
+      return sum + (hours / HOURS_PER_DAY);
     }
     return sum + (leave.paidDays ?? leave.numberOfDays);
   }, 0);
@@ -381,11 +389,6 @@ async function getVacationAnnualLimits(
   rules: EffectiveLeaveRules
 ): Promise<{ eligible: boolean; maxDaysPerYear: number | null; maxPaidDaysPerYear: number | null }> {
   const employmentStart = await getEmploymentStartDate(userId);
-  const eligible = employmentStart <= subYears(new Date(), 1);
-  if (!eligible) {
-    return { eligible: false, maxDaysPerYear: 0, maxPaidDaysPerYear: 0 };
-  }
-
   const baseDays = rules.maxDaysPerYear ?? rules.maxPaidDaysPerYear ?? 6;
   const carryOverCap = rules.carryOverMaxDays ?? 20;
   const currentYear = new Date().getFullYear();
@@ -621,6 +624,8 @@ async function createLeaveRequest(
       : calculateLeaveHours(data.startTime as string, data.endTime as string))
     : null;
 
+  const quotaDays = isHourly ? ((leaveHours ?? 0) / 8) : numberOfDays;
+
   if (!isHourly && numberOfDays <= 0) {
     throw new BadRequestError('ต้องเลือกช่วงวันที่อย่างน้อย 1 วันทำงาน');
   }
@@ -629,7 +634,7 @@ async function createLeaveRequest(
   const validation = await validateLeaveRequest(
     data.userId,
     data.leaveType,
-    numberOfDays,
+    quotaDays,
     data.medicalCertificateUrl
   );
 
@@ -728,12 +733,41 @@ async function getLeaveRequestsByUser(
   userId: number,
   status?: LeaveStatus,
   skip?: number,
-  take?: number
+  take?: number,
+  query?: string
 ): Promise<{ data: LeaveRequestWithApprover[]; total: number }> {
   const where: Prisma.LeaveRequestWhereInput = { userId, deletedAt: null };
 
   if (status) {
     where.status = status;
+  }
+
+  const search = query?.trim();
+  if (search) {
+    const lower = search.toLowerCase();
+    const matchedTypes = (Object.keys(LEAVE_RULES) as LeaveType[]).filter((type) => {
+      const rules = LEAVE_RULES[type];
+      const name = String(rules.displayName ?? '').toLowerCase();
+      const nameEng = String(rules.displayNameEng ?? '').toLowerCase();
+      return name.includes(lower) || nameEng.includes(lower) || String(type).toLowerCase().includes(lower);
+    });
+    const statusMatches: LeaveStatus[] = [];
+    if (lower.includes('อนุมัติ') || lower.includes('approved')) statusMatches.push('APPROVED');
+    if (lower.includes('ไม่อนุมัติ') || lower.includes('rejected')) statusMatches.push('REJECTED');
+    if (lower.includes('รอ') || lower.includes('pending')) statusMatches.push('PENDING');
+
+    const or: Prisma.LeaveRequestWhereInput[] = [
+      { leaveType: { contains: search, mode: 'insensitive' } },
+      { reason: { contains: search, mode: 'insensitive' } },
+      { rejectionReason: { contains: search, mode: 'insensitive' } },
+    ];
+    if (matchedTypes.length) {
+      or.push({ leaveType: { in: matchedTypes } });
+    }
+    if (statusMatches.length) {
+      or.push({ status: { in: statusMatches } });
+    }
+    where.OR = or;
   }
 
   const [data, total] = await Promise.all([
@@ -820,6 +854,11 @@ async function updateLeaveRequest(
   const endDate = data.endDate ? new Date(data.endDate) : leaveRequest.endDate;
   const startTime = data.startTime ?? currentLeave.startTime ?? null;
   const endTime = data.endTime ?? currentLeave.endTime ?? null;
+  const currentStartDateOnly = leaveRequest.startDate.toISOString().slice(0, 10);
+  const currentEndDateOnly = leaveRequest.endDate.toISOString().slice(0, 10);
+  const nextStartDateOnly = data.startDate ?? currentStartDateOnly;
+  const nextEndDateOnly = data.endDate ?? currentEndDateOnly;
+  const dateRangeChanged = nextStartDateOnly !== currentStartDateOnly || nextEndDateOnly !== currentEndDateOnly;
 
   // Validate dates
   if (startDate > endDate) {
@@ -841,11 +880,12 @@ async function updateLeaveRequest(
   }
 
   // Check for overlapping leave requests (exclude soft-deleted records)
-  if (data.startDate || data.endDate) {
+  if (dateRangeChanged) {
     const overlappingLeave = await prisma.leaveRequest.findFirst({
       where: {
         userId: leaveRequest.userId,
         leaveId: { not: leaveId },
+        deletedAt: null, // Exclude soft deleted
         status: { not: 'REJECTED' },
         AND: [
           { startDate: { lte: endDate } },
@@ -1108,10 +1148,7 @@ async function approveLeaveRequest(
   const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
     include: {
-      requester: {
-        select: { role: true },
-      },
-      approver: {
+      user: {
         select: { role: true },
       },
     },
@@ -1135,7 +1172,7 @@ async function approveLeaveRequest(
     throw new NotFoundError('ไม่พบผู้อนุมัติ');
   }
 
-  const requesterRole = leaveRequest.requester.role;
+  const requesterRole = leaveRequest.user.role;
   if (!canApprove(approverUser.role, requesterRole)) {
     throw new ForbiddenError(
       `${approverUser.role} ไม่สามารถอนุมัติใบลาของ ${requesterRole} ได้`
@@ -1200,7 +1237,7 @@ async function rejectLeaveRequest(
   const leaveRequest = await prisma.leaveRequest.findUnique({
     where: { leaveId },
     include: {
-      requester: {
+      user: {
         select: { role: true },
       },
     },
@@ -1224,7 +1261,7 @@ async function rejectLeaveRequest(
     throw new NotFoundError('ไม่พบผู้อนุมัติ');
   }
 
-  const requesterRole = leaveRequest.requester.role;
+  const requesterRole = leaveRequest.user.role;
   if (!canApprove(approverUser.role, requesterRole)) {
     throw new ForbiddenError(
       `${approverUser.role} ไม่สามารถปฏิเสธใบลาของ ${requesterRole} ได้`

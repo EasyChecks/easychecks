@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Thermometer, FileText, Plane, Heart, Shield, BookOpen, Stethoscope, Sparkles, Pencil, X, Trash2, ChevronDown } from 'lucide-react';
 import { Card } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import Toast from '@/components/common/Toast';
 import { leaveRequestService, LeaveRequest, LeaveQuotaItem } from '@/services/leaveRequestService';
 import { lateRequestService, LateRequest } from '@/services/lateRequestService';
 import { useAuth } from '@/contexts/AuthContext';
+import { getLeaveRequestErrorMessage } from '@/utils/leaveRequestErrors';
 
 const LEAVE_TYPE_MAP: Record<string, { label: string; Icon: React.ElementType; color: string; apiValue: string }> = {
   SICK:          { label: 'ลาป่วย',           Icon: Thermometer, color: 'text-red-500 bg-red-50',      apiValue: 'SICK' },
@@ -24,6 +25,8 @@ const LEAVE_TYPE_MAP: Record<string, { label: string; Icon: React.ElementType; c
   ORDINATION:    { label: 'ลาบวช',          Icon: Sparkles,    color: 'text-amber-500 bg-amber-50',  apiValue: 'ORDINATION' },
   PATERNITY:     { label: 'ลาช่วยภริยาคลอด',  Icon: Heart,       color: 'text-purple-500 bg-purple-50', apiValue: 'PATERNITY' },
 };
+
+const HISTORY_TAKE = 10;
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'APPROVED') return <Badge variant="active">อนุมัติ</Badge>;
@@ -49,7 +52,10 @@ function formatQuotaValue(value: number | null | undefined) {
 function LeaveTab() {
   const { user: authUser } = useAuth();
   const [quota, setQuota] = useState<LeaveQuotaItem[]>([]);
-  const [requests, setRequests] = useState<LeaveRequest[]>([]);
+  const [historyRequests, setHistoryRequests] = useState<LeaveRequest[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -63,8 +69,6 @@ function LeaveTab() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
-  const [medicalCertUrl, setMedicalCertUrl] = useState('');
-  const [medicalCertFile, setMedicalCertFile] = useState<File | null>(null);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [isHourly, setIsHourly] = useState(false);
   const [startTime, setStartTime] = useState('');
@@ -83,36 +87,74 @@ function LeaveTab() {
   const [editAttachmentUrl, setEditAttachmentUrl] = useState('');
   const [editAttachmentFile, setEditAttachmentFile] = useState<File | null>(null);
   const [editAttachmentUploading, setEditAttachmentUploading] = useState(false);
-  const [editMedCertUrl, setEditMedCertUrl] = useState('');
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState('');
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('ALL');
+
+  const buildHistoryParams = useCallback((skipValue: number) => ({
+    skip: skipValue,
+    take: HISTORY_TAKE,
+    status: historyStatus === 'ALL' ? undefined : historyStatus,
+    query: historyQuery.trim() || undefined,
+  }), [historyQuery, historyStatus]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'error') => {
     setToast({ message, type });
   };
 
-  const refreshRequests = async () => {
-    const r = await leaveRequestService.getMyLeaveRequests({ take: 5 });
-    setRequests(r.leaveRequests);
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const h = await leaveRequestService.getMyLeaveRequests(buildHistoryParams(0));
+      setHistoryRequests(h.leaveRequests);
+      setHistoryTotal(h.total);
+    } catch {
+      setHistoryRequests([]);
+      setHistoryTotal(0);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [buildHistoryParams]);
+
+  const loadMoreHistory = async () => {
+    setHistoryLoadingMore(true);
+    try {
+      const h = await leaveRequestService.getMyLeaveRequests(buildHistoryParams(historyRequests.length));
+      setHistoryRequests((prev) => [...prev, ...h.leaveRequests]);
+      setHistoryTotal(h.total);
+    } finally {
+      setHistoryLoadingMore(false);
+    }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      refreshHistory();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [refreshHistory]);
 
   useEffect(() => {
     async function load() {
       try {
-        const [q, r] = await Promise.all([
+        const [q, h] = await Promise.all([
           leaveRequestService.getMyLeaveQuota(),
-          leaveRequestService.getMyLeaveRequests({ take: 5 }),
+          leaveRequestService.getMyLeaveRequests(buildHistoryParams(0)),
         ]);
         setQuota(q);
-        setRequests(r.leaveRequests);
+        setHistoryRequests(h.leaveRequests);
+        setHistoryTotal(h.total);
       } catch {
         setError('โหลดข้อมูลไม่สำเร็จ');
         showToast('โหลดข้อมูลไม่สำเร็จ');
       } finally {
         setLoading(false);
+        setHistoryLoading(false);
       }
     }
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openEdit = (req: LeaveRequest) => {
@@ -124,14 +166,8 @@ function LeaveTab() {
     setEditStartTime(req.startTime ?? '');
     setEditEndTime(req.endTime ?? '');
     setEditReason(req.reason ?? '');
-    // For SICK leave, medical certificate is shown in the attachment field
-    if (req.leaveType === 'SICK' && req.medicalCertificateUrl) {
-      setEditAttachmentUrl(req.medicalCertificateUrl ?? '');
-    } else {
-      setEditAttachmentUrl(req.attachmentUrl ?? '');
-    }
+    setEditAttachmentUrl(req.medicalCertificateUrl ?? req.attachmentUrl ?? '');
     setEditAttachmentFile(null);
-    setEditMedCertUrl('');
     setEditError('');
   };
   const closeEdit = () => { setEditingReq(null); setEditError(''); };
@@ -146,35 +182,29 @@ function LeaveTab() {
     }
     setEditSubmitting(true);
     setEditError('');
-    try {      let finalAttachUrl = editAttachmentUrl;
-      let finalMedCertUrl = editMedCertUrl;
-      
+    try {
+      let finalAttachUrl = editAttachmentUrl;
+
       if (editAttachmentFile) {
         setEditAttachmentUploading(true);
         const uploadedUrl = await leaveRequestService.uploadAttachment(editAttachmentFile);
         setEditAttachmentUploading(false);
-        
-        // For SICK leave, attachment is stored as medical certificate
-        if (editType === 'SICK') {
-          finalMedCertUrl = uploadedUrl;
-          finalAttachUrl = '';
-        } else {
-          finalAttachUrl = uploadedUrl;
-        }
+        finalAttachUrl = uploadedUrl;
       }
-      
+
       await leaveRequestService.updateLeaveRequest(editingReq.leaveId, {
         leaveType: editType, startDate: editStart, endDate: editIsHourly ? editStart : editEnd, reason: editReason,
         ...(editIsHourly && { isHourly: true, startTime: editStartTime, endTime: editEndTime }),
-        ...(finalAttachUrl.trim() && { attachmentUrl: finalAttachUrl.trim() }),
-        ...(finalMedCertUrl.trim() && { medicalCertificateUrl: finalMedCertUrl.trim() }),
+        ...(finalAttachUrl.trim() && {
+          attachmentUrl: finalAttachUrl.trim(),
+          medicalCertificateUrl: finalAttachUrl.trim(),
+        }),
       });
       closeEdit();
-      await refreshRequests();
+      await refreshHistory();
     } catch (err: unknown) {
       setEditAttachmentUploading(false);
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      const finalMsg = msg || 'บันทึกไม่สำเร็จ';
+      const finalMsg = getLeaveRequestErrorMessage(err, 'บันทึกไม่สำเร็จ');
       setEditError(finalMsg);
       showToast(finalMsg);
     } finally {
@@ -194,9 +224,9 @@ function LeaveTab() {
     try {
       await leaveRequestService.deleteLeaveRequest(editingReq.leaveId);
       closeEdit();
-      await refreshRequests();
-    } catch {
-      const finalMsg = 'ยกเลิกคำขอไม่สำเร็จ';
+      await refreshHistory();
+    } catch (err: unknown) {
+      const finalMsg = getLeaveRequestErrorMessage(err, 'ยกเลิกคำขอไม่สำเร็จ');
       setEditError(finalMsg);
       showToast(finalMsg);
     } finally {
@@ -226,7 +256,7 @@ function LeaveTab() {
         showToast('กรุณาเลือกช่วงวันที่');
         return;
       }
-      if (needsMedCert && !medicalCertFile && !medicalCertUrl.trim()) {
+      if (needsMedCert && !attachmentFile) {
         setError('กรุณาแนบไฟล์ เนื่องจากลาป่วยเกิน 3 วัน');
         showToast('กรุณาแนบไฟล์ เนื่องจากลาป่วยเกิน 3 วัน');
         return;
@@ -237,24 +267,8 @@ function LeaveTab() {
     setSubmitting(true);
     try {
       let finalAttachUrl = '';
-      let finalMedCertUrl = '';
-      
-      if (selectedType === 'SICK') {
-        // For SICK leave, store attachment as medical certificate
-        if (medicalCertFile) {
-          finalMedCertUrl = await leaveRequestService.uploadAttachment(medicalCertFile);
-        } else if (medicalCertUrl.trim()) {
-          finalMedCertUrl = medicalCertUrl.trim();
-        }
-        // Also check for attachmentFile and use it as medical cert if medical cert not provided
-        if (!finalMedCertUrl && attachmentFile) {
-          finalMedCertUrl = await leaveRequestService.uploadAttachment(attachmentFile);
-        }
-      } else {
-        // For non-SICK leave, use attachment normally
-        if (attachmentFile) {
-          finalAttachUrl = await leaveRequestService.uploadAttachment(attachmentFile);
-        }
+      if (attachmentFile) {
+        finalAttachUrl = await leaveRequestService.uploadAttachment(attachmentFile);
       }
       
       await leaveRequestService.createLeaveRequest({
@@ -262,8 +276,10 @@ function LeaveTab() {
         startDate,
         endDate: isHourly ? startDate : endDate,
         reason,
-        ...(finalAttachUrl && { attachmentUrl: finalAttachUrl }),
-        ...(finalMedCertUrl && { medicalCertificateUrl: finalMedCertUrl }),
+        ...(finalAttachUrl && {
+          attachmentUrl: finalAttachUrl,
+          medicalCertificateUrl: finalAttachUrl,
+        }),
         ...(isHourly && { isHourly: true, startTime, endTime }),
       });
       setShowSuccess(true);
@@ -272,21 +288,18 @@ function LeaveTab() {
         setStartDate('');
         setEndDate('');
         setReason('');
-        setMedicalCertUrl('');
         setAttachmentFile(null);
-        setMedicalCertFile(null);
         setIsHourly(false);
         setStartTime('');
         setEndTime('');
-        await refreshRequests();
+        await refreshHistory();
         setShowFormModal(false);
       }, 2500);
       setTimeout(() => {
         setShowSuccess(false);
       }, 3000);
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      const finalMsg = axiosMsg || 'เกิดข้อผิดพลาด กรุณาลองใหม่';
+      const finalMsg = getLeaveRequestErrorMessage(err, 'ส่งคำขอไม่สำเร็จ');
       setError(finalMsg);
       showToast(finalMsg);
     } finally {
@@ -328,7 +341,6 @@ function LeaveTab() {
   });
 
   const allowedTypeList = allowedQuotaItems.map((item) => item.leaveType);
-  const allowedTypeKey = allowedTypeList.join('|');
   const allowedTypeSet = new Set(allowedTypeList);
 
   const isAllowedType = (type: string) => {
@@ -345,10 +357,10 @@ function LeaveTab() {
 
   useEffect(() => {
     if (!selectedType) return;
-    if (allowedTypeSet.size > 0 && !allowedTypeSet.has(selectedType)) {
+    if (allowedTypeList.length > 0 && !allowedTypeList.includes(selectedType)) {
       setSelectedType('');
     }
-  }, [selectedType, allowedTypeKey]);
+  }, [selectedType, allowedTypeList]);
 
   const selectedQuota = selectedType ? quotaMap[selectedType] : null;
   const selectedTotalPerYear = selectedQuota?.maxDaysPerYear ?? null;
@@ -457,7 +469,7 @@ function LeaveTab() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">วันที่ได้รับค่าจ้าง/ปี:</span>
-                      <span className="font-semibold">{q.isPaid ? formatQuotaValue(paidPerYear) : 'ไม่จ่ายค่าจ้าง'}</span>
+                      <span className="font-semibold">{q.isPaid ? formatQuotaValue(paidPerYear) : 'ไม่ได้รับค่าจ้าง'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">ลาได้ต่อครั้งไม่เกิน:</span>
@@ -566,13 +578,13 @@ function LeaveTab() {
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span>สิทธิ์จ่าย/ปี</span>
+                        <span>สิทธิ์ได้รับค่าจ้าง/ปี</span>
                         <span className="font-semibold">
-                          {selectedQuota.isPaid ? formatQuotaValue(selectedPaidPerYear) : 'ไม่จ่ายค่าจ้าง'}
+                          {selectedQuota.isPaid ? formatQuotaValue(selectedPaidPerYear) : 'ไม่ได้รับค่าจ้าง'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span>คงเหลือแบบจ่าย</span>
+                        <span>คงเหลือแบบได้รับค่าจ้าง</span>
                         <span className="font-semibold">
                           {selectedQuota.isPaid && selectedRemainingPaid !== null ? `${selectedRemainingPaid} วัน` : '—'}
                         </span>
@@ -613,7 +625,7 @@ function LeaveTab() {
                     <>
                       <div>
                         <label className="block text-sm text-gray-600 mb-1">วันที่</label>
-                        <DatePicker value={startDate} onChange={setStartDate} placeholder="เลือกวันที่" />
+                        <DatePicker value={startDate} onChange={setStartDate} weekdaysOnly placeholder="เลือกวันที่" />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -682,14 +694,14 @@ function LeaveTab() {
                     style={{borderColor: needsMedCert ? '#fbbf24' : '#d1d5db', backgroundColor: needsMedCert ? '#fffbeb' : 'white'}}>
                     <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{color: needsMedCert ? '#f59e0b' : '#9ca3af'}}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                     <span className="text-sm text-gray-600 truncate flex-1">
-                      {medicalCertFile || attachmentFile ? (medicalCertFile || attachmentFile)?.name : 'คลิกเพื่อเลือกไฟล์'}
+                      {attachmentFile ? attachmentFile.name : 'คลิกเพื่อเลือกไฟล์'}
                     </span>
-                    {(medicalCertFile || attachmentFile) && (
-                      <button type="button" onClick={(e) => { e.preventDefault(); setMedicalCertFile(null); setAttachmentFile(null); }}
+                    {attachmentFile && (
+                      <button type="button" onClick={(e) => { e.preventDefault(); setAttachmentFile(null); }}
                         className="text-gray-500 hover:text-red-600 shrink-0">✕</button>
                     )}
                     <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only"
-                      onChange={e => { const f = e.target.files?.[0] ?? null; setMedicalCertFile(f); setAttachmentFile(f); }} />
+                      onChange={e => { const f = e.target.files?.[0] ?? null; setAttachmentFile(f); }} />
                   </label>
                 </div>
 
@@ -716,19 +728,43 @@ function LeaveTab() {
         </div>
       )}
 
-      {/* Recent Requests */}
+      {/* History Requests */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-gray-800">คำขอล่าสุด</h3>
-          {requests.length > 0 && <span className="text-xs text-gray-400">{requests.length} รายการ</span>}
+          <h3 className="font-semibold text-gray-800">ประวัติคำขอลา</h3>
+          {historyTotal > 0 && (
+            <span className="text-xs text-gray-400">
+              {historyRequests.length}/{historyTotal} รายการ
+            </span>
+          )}
         </div>
-        {loading ? (
+        <div className="flex flex-col gap-2">
+          <input
+            value={historyQuery}
+            onChange={(e) => setHistoryQuery(e.target.value)}
+            placeholder="ค้นหาประเภท, เหตุผล, สถานะ"
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
+          />
+          <select
+            value={historyStatus}
+            onChange={(e) => setHistoryStatus(e.target.value)}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm bg-white"
+          >
+            <option value="ALL">ทุกสถานะ</option>
+            <option value="PENDING">รอพิจารณา</option>
+            <option value="APPROVED">อนุมัติ</option>
+            <option value="REJECTED">ไม่อนุมัติ</option>
+          </select>
+        </div>
+        {historyLoading ? (
           <div className="text-sm text-gray-500 text-center py-6">กำลังโหลด...</div>
-        ) : requests.length === 0 ? (
-          <div className="text-sm text-gray-400 text-center py-6">ยังไม่มีคำขอลา</div>
+        ) : historyTotal === 0 ? (
+          <div className="text-sm text-gray-400 text-center py-6">
+            {historyQuery.trim() || historyStatus !== 'ALL' ? 'ไม่พบรายการที่ตรงกับการค้นหา' : 'ยังไม่มีประวัติคำขอลา'}
+          </div>
         ) : (
           <div className="space-y-2">
-            {requests.map((req, i) => {
+            {historyRequests.map((req, i) => {
               const info = LEAVE_TYPE_MAP[req.leaveType];
               const isPending = req.status === 'PENDING';
               const totalDays = req.numberOfDays ?? 0;
@@ -737,10 +773,10 @@ function LeaveTab() {
               const payText = req.isHourly
                 ? null
                 : paidDays === 0
-                ? `ไม่จ่าย ${totalDays} วัน`
+                ? `ไม่ได้รับค่าจ้าง ${totalDays} วัน`
                 : unpaidDays === 0
-                ? `จ่าย ${paidDays} วัน`
-                : `จ่าย ${paidDays} วัน / ไม่จ่าย ${unpaidDays} วัน`;
+                ? `ได้รับค่าจ้าง ${paidDays} วัน`
+                : `ได้รับค่าจ้าง ${paidDays} วัน / ไม่ได้รับค่าจ้าง ${unpaidDays} วัน`;
               return (
                 <div
                   key={req.leaveId ?? i}
@@ -771,8 +807,8 @@ function LeaveTab() {
                       {payText && (
                         <div className="text-xs text-gray-600 mt-0.5">{payText}</div>
                       )}
-                      {req.rejectionReason && (
-                        <div className="text-xs text-red-500 mt-1 truncate">เหตุผล: {req.rejectionReason}</div>
+                      {req.reason && !req.rejectionReason && (
+                        <div className="text-xs text-gray-600 mt-1 truncate">หมายเหตุ: {req.reason}</div>
                       )}
                     </div>
                     {isPending && (
@@ -790,6 +826,17 @@ function LeaveTab() {
               );
             })}
           </div>
+        )}
+        {historyRequests.length < historyTotal && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={loadMoreHistory}
+            disabled={historyLoadingMore}
+          >
+            {historyLoadingMore ? 'กำลังโหลด...' : 'โหลดเพิ่ม'}
+          </Button>
         )}
       </div>
 
@@ -814,8 +861,8 @@ function LeaveTab() {
                 <label className="block font-semibold text-gray-800 mb-3">
                   ประเภทการลา <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  {['SICK', 'PERSONAL', 'VACATION', 'MATERNITY'].map(key => {
+                <div className="grid grid-cols-3 gap-3">
+                  {filteredTypes.map(key => {
                     const info = LEAVE_TYPE_MAP[key];
                     return (
                       <button key={key} type="button" onClick={() => setEditType(key)}
@@ -828,23 +875,6 @@ function LeaveTab() {
                     );
                   })}
                 </div>
-                <details className="text-sm">
-                  <summary className="text-gray-500 cursor-pointer mb-2">ประเภทอื่น ▸</summary>
-                  <div className="grid grid-cols-2 gap-3 mt-2">
-                    {['MILITARY', 'TRAINING', 'STERILIZATION', 'ORDINATION', 'PATERNITY'].map(key => {
-                      const info = LEAVE_TYPE_MAP[key];
-                      return (
-                        <button key={key} type="button" onClick={() => setEditType(key)}
-                          className={`p-3 rounded-xl border-2 transition-all flex items-center gap-2 ${editType === key ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${info?.color ?? ''}`}>
-                            {info && <info.Icon className="w-3.5 h-3.5" />}
-                          </div>
-                          <span className="text-sm text-gray-900">{info?.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </details>
               </div>
 
               {/* Dates */}
@@ -875,7 +905,7 @@ function LeaveTab() {
                   <>
                     <div>
                       <label className="block text-sm text-gray-600 mb-1">วันที่</label>
-                      <DatePicker value={editStart} onChange={setEditStart} placeholder="เลือกวันที่" />
+                      <DatePicker value={editStart} onChange={setEditStart} weekdaysOnly placeholder="เลือกวันที่" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -963,9 +993,9 @@ function LeaveTab() {
                   <svg className="w-5 h-5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                   </svg>
-                  <span className="text-sm text-gray-600 truncate flex-1">
-                    {editAttachmentFile ? editAttachmentFile.name : 'เลือกไฟล์หรือวาง'}
-                  </span>
+                    <span className="text-sm text-gray-600 truncate flex-1">
+                      {editAttachmentFile?.name ?? 'เลือกไฟล์หรือวาง'}
+                    </span>
                   {editAttachmentFile && (
                     <button type="button" onClick={(e) => { e.preventDefault(); setEditAttachmentFile(null); }}
                       className="text-gray-500 hover:text-red-600 shrink-0">✕</button>
@@ -1049,14 +1079,25 @@ function LeaveTab() {
 
 // ─────────────────────────────────────── LATE TAB ─────────────────────────────────────────────
 function LateTab() {
-  const [requests, setRequests] = useState<LateRequest[]>([]);
+  const [historyRequests, setHistoryRequests] = useState<LateRequest[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [stats, setStats] = useState<{ totalRequests?: number; totalLateMinutes?: number; approved?: number; pending?: number } | null>(null);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('ALL');
 
-  const [requestDate, setRequestDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const buildHistoryParams = useCallback((skipValue: number) => ({
+    skip: skipValue,
+    take: HISTORY_TAKE,
+    status: historyStatus === 'ALL' ? undefined : historyStatus,
+    query: historyQuery.trim() || undefined,
+  }), [historyQuery, historyStatus]);
+
+  const [requestDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [scheduledTime, setScheduledTime] = useState('');
   const [actualTime, setActualTime] = useState('');
   const [reason, setReason] = useState('');
@@ -1066,30 +1107,67 @@ function LateTab() {
 
   // ===== EDIT/DELETE LATE REQUEST =====
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editScheduledTime, setEditScheduledTime] = useState('');
-  const [editActualTime, setEditActualTime] = useState('');
+  const [editScheduledHour, setEditScheduledHour] = useState('');
+  const [editScheduledMin, setEditScheduledMin] = useState('');
+  const [editActualHour, setEditActualHour] = useState('');
+  const [editActualMin, setEditActualMin] = useState('');
   const [editReason, setEditReason] = useState('');
   const [editAttachmentFile, setEditAttachmentFile] = useState<File | null>(null);
   const [editAttachmentPreview, setEditAttachmentPreview] = useState<string>('');
+  const [editImagePreviewUrl, setEditImagePreviewUrl] = useState<string>('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const [r, s] = await Promise.all([
-          lateRequestService.getMyLateRequests({ take: 5 }),
+        const [s, h] = await Promise.all([
           lateRequestService.getMyLateStatistics(),
+          lateRequestService.getMyLateRequests(buildHistoryParams(0)),
         ]);
-        setRequests(r.lateRequests);
         setStats(s);
+        setHistoryRequests(h.lateRequests);
+        setHistoryTotal(h.total);
       } catch {
         // keep empty
       } finally {
-        setLoading(false);
+        setHistoryLoading(false);
       }
     }
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const h = await lateRequestService.getMyLateRequests(buildHistoryParams(0));
+      setHistoryRequests(h.lateRequests);
+      setHistoryTotal(h.total);
+    } catch {
+      setHistoryRequests([]);
+      setHistoryTotal(0);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [buildHistoryParams]);
+
+  const loadMoreHistory = async () => {
+    setHistoryLoadingMore(true);
+    try {
+      const h = await lateRequestService.getMyLateRequests(buildHistoryParams(historyRequests.length));
+      setHistoryRequests((prev) => [...prev, ...h.lateRequests]);
+      setHistoryTotal(h.total);
+    } finally {
+      setHistoryLoadingMore(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      refreshHistory();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [refreshHistory]);
 
   const lateMinutesPreview = (() => {
     if (!scheduledTime || !actualTime) return null;
@@ -1132,8 +1210,7 @@ function LateTab() {
       setReason('');
       setAttachmentFile(null);
       setAttachmentPreview('');
-      const r = await lateRequestService.getMyLateRequests({ take: 5 });
-      setRequests(r.lateRequests);
+      await refreshHistory();
       setTimeout(() => setShowSuccess(false), 2500);
     } catch (err: unknown) {
       const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -1147,10 +1224,8 @@ function LateTab() {
     setEditingId(req.id);
     const [sh, sm] = req.scheduledTime.split(':');
     const [ah, am] = req.actualTime.split(':');
-    setEditScheduledTime(req.scheduledTime);
     setEditScheduledHour(sh || '00');
     setEditScheduledMin(sm || '00');
-    setEditActualTime(req.actualTime);
     setEditActualHour(ah || '00');
     setEditActualMin(am || '00');
     setEditReason(req.reason);
@@ -1189,8 +1264,7 @@ function LateTab() {
       
       await lateRequestService.updateLateRequest(editingId!, updateData);
       setEditingId(null);
-      const r = await lateRequestService.getMyLateRequests({ take: 5 });
-      setRequests(r.lateRequests);
+      await refreshHistory();
       setError('');
     } catch (err: unknown) {
       const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -1206,8 +1280,7 @@ function LateTab() {
     try {
       await lateRequestService.deleteLateRequest(id);
       setShowDeleteConfirm(null);
-      const r = await lateRequestService.getMyLateRequests({ take: 5 });
-      setRequests(r.lateRequests);
+      await refreshHistory();
       setError('');
     } catch (err: unknown) {
       const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -1362,34 +1435,72 @@ function LateTab() {
         </Button>
       </form>
 
-      {/* Recent Requests */}
+      {/* History Requests */}
       <Card className="p-4">
-        <h3 className="font-semibold text-gray-800 mb-3">คำขอล่าสุด</h3>
-        {loading ? (
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-800">ประวัติคำขอมาสาย</h3>
+          {historyTotal > 0 && (
+            <span className="text-xs text-gray-400">
+              {historyRequests.length}/{historyTotal} รายการ
+            </span>
+          )}
+        </div>
+        <div className="flex flex-col gap-2 mb-3">
+          <input
+            value={historyQuery}
+            onChange={(e) => setHistoryQuery(e.target.value)}
+            placeholder="ค้นหาวันที่, เหตุผล, สถานะ"
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
+          />
+          <select
+            value={historyStatus}
+            onChange={(e) => setHistoryStatus(e.target.value)}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm bg-white"
+          >
+            <option value="ALL">ทุกสถานะ</option>
+            <option value="PENDING">รอพิจารณา</option>
+            <option value="APPROVED">อนุมัติ</option>
+            <option value="REJECTED">ไม่อนุมัติ</option>
+          </select>
+        </div>
+        {historyLoading ? (
           <div className="text-sm text-gray-500 text-center py-4">กำลังโหลด...</div>
-        ) : requests.length === 0 ? (
-          <div className="text-sm text-gray-500 text-center py-4">ยังไม่มีคำขอมาสาย</div>
+        ) : historyTotal === 0 ? (
+          <div className="text-sm text-gray-500 text-center py-4">
+            {historyQuery.trim() || historyStatus !== 'ALL' ? 'ไม่พบรายการที่ตรงกับการค้นหา' : 'ยังไม่มีประวัติคำขอมาสาย'}
+          </div>
         ) : (
           <div className="space-y-3">
-            {requests.map(req => (
-              <div 
-                key={req.id} 
-                onClick={() => req.status === 'PENDING' && handleEditOpen(req)}
-                className={`p-3 bg-gray-50 rounded-lg ${req.status === 'PENDING' ? 'cursor-pointer hover:bg-blue-50 transition' : ''}`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-medium text-gray-900">{fmtDate(req.requestDate)}</span>
-                  <StatusBadge status={req.status} />
+            {historyRequests.map((req) => (
+                <div
+                  key={req.id}
+                  onClick={() => req.status === 'PENDING' && handleEditOpen(req)}
+                  className={`p-3 bg-gray-50 rounded-lg ${req.status === 'PENDING' ? 'cursor-pointer hover:bg-blue-50 transition' : ''}`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-medium text-gray-900">{fmtDate(req.requestDate)}</span>
+                    <StatusBadge status={req.status} />
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
+                    <span className="ml-2 text-orange-600 font-medium">สาย {req.lateMinutes} นาที</span>
+                  </div>
+                  {req.reason && <div className="text-xs text-gray-500 mt-1">{req.reason}</div>}
+                  {req.rejectionReason && <div className="text-xs text-red-600 mt-1">เหตุผล: {req.rejectionReason}</div>}
                 </div>
-                <div className="text-sm text-gray-600">
-                  กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
-                  <span className="ml-2 text-orange-600 font-medium">สาย {req.lateMinutes} นาที</span>
-                </div>
-                {req.reason && <div className="text-xs text-gray-500 mt-1">{req.reason}</div>}
-                {req.rejectionReason && <div className="text-xs text-red-600 mt-1">เหตุผล: {req.rejectionReason}</div>}
-              </div>
-            ))}
+              ))}
           </div>
+        )}
+        {historyRequests.length < historyTotal && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full mt-3"
+            onClick={loadMoreHistory}
+            disabled={historyLoadingMore}
+          >
+            {historyLoadingMore ? 'กำลังโหลด...' : 'โหลดเพิ่ม'}
+          </Button>
         )}
       </Card>
 
@@ -1412,9 +1523,15 @@ function LateTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-sm max-h-[75vh] p-0 rounded-xl shadow-xl flex flex-col">
             {/* Header */}
-            <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 rounded-t-xl flex items-center justify-between flex-shrink-0">
+            <div className="bg-linear-to-r from-orange-500 to-orange-600 px-5 py-3 rounded-t-xl flex items-center justify-between shrink-0">
               <h3 className="text-xl font-bold text-white">แก้ไขคำขอมาสาย</h3>
-              <button onClick={() => setEditingId(null)} className="text-white hover:text-orange-100 text-2xl leading-none">×</button>
+              <button
+                onClick={() => setEditingId(null)}
+                className="w-9 h-9 rounded-full bg-white/15 text-white hover:bg-white/25 flex items-center justify-center"
+                aria-label="ปิด"
+              >
+                <span className="block text-2xl leading-none -translate-y-px">×</span>
+              </button>
             </div>
 
             {/* Body */}
@@ -1422,23 +1539,35 @@ function LateTab() {
               {/* Scheduled Time */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่กำหนด</label>
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editScheduledHour}
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="HH"
+                      value={editScheduledHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledHour(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
-                  <div className="text-2xl text-gray-400">:</div>
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editScheduledMin}
+                  <div className="text-lg text-gray-400">:</div>
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="MM"
+                      value={editScheduledMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledMin(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
                 </div>
               </div>
@@ -1446,23 +1575,35 @@ function LateTab() {
               {/* Actual Time */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่มาจริง</label>
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editActualHour}
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="HH"
+                      value={editActualHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualHour(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
-                  <div className="text-2xl text-gray-400">:</div>
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editActualMin}
+                  <div className="text-lg text-gray-400">:</div>
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="MM"
+                      value={editActualMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualMin(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
                 </div>
               </div>
@@ -1470,22 +1611,33 @@ function LateTab() {
               {/* Reason */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">เหตุผล</label>
-                <textarea value={editReason} onChange={e => setEditReason(e.target.value)}
-                  placeholder="บรรยายเหตุผลการมาสาย" className="w-full px-3 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none resize-none text-sm" rows={3} />
+                <textarea
+                  value={editReason}
+                  onChange={e => setEditReason(e.target.value)}
+                  placeholder="บรรยายเหตุผลการมาสาย"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none resize-none text-sm"
+                  rows={3}
+                />
               </div>
 
               {/* File Upload */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">ไฟล์แนบ (PDF, JPG, PNG)</label>
-                {editImagePreviewUrl && (<img src={editImagePreviewUrl} alt="Preview" className="mb-2 max-h-40 object-contain rounded border border-gray-200" />)}
+                {editImagePreviewUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={editImagePreviewUrl} alt="Preview" className="mb-2 max-h-40 object-contain rounded-lg border border-gray-200" />
+                )}
                 {editAttachmentPreview && !editImagePreviewUrl && (
-                  <div className="mb-2 p-2 bg-orange-50 border-l-3 border-orange-500 rounded text-sm text-orange-700">{editAttachmentPreview}</div>
+                  <div className="mb-2 p-2 bg-orange-50 border-l-3 border-orange-500 rounded-lg text-sm text-orange-700">{editAttachmentPreview}</div>
                 )}
                 <label className="block cursor-pointer">
-                  <div className="border-2 border-dashed border-gray-300 rounded p-4 hover:border-orange-500 hover:bg-orange-50 transition text-center">
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-orange-500 hover:bg-orange-50 transition text-center">
                     <p className="text-base text-gray-600 font-medium">เลือกไฟล์</p>
                   </div>
-                  <input type="file" accept=".pdf,.jpg,.png,.jpeg" className="hidden"
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.png,.jpeg"
+                    className="hidden"
                     onChange={e => {
                       const f = e.target.files?.[0] ?? null;
                       if (f) {
@@ -1499,7 +1651,8 @@ function LateTab() {
                           setEditImagePreviewUrl('');
                         }
                       }
-                    }} />
+                    }}
+                  />
                 </label>
               </div>
 
@@ -1507,14 +1660,14 @@ function LateTab() {
             </div>
 
             {/* Footer */}
-            <div className="bg-gray-50 px-5 py-3 rounded-b-xl border-t border-gray-200 space-y-2 flex-shrink-0">
-              <div className="flex gap-2">
-                <button onClick={() => setEditingId(null)} className="flex-1 px-3 py-2 font-medium text-xs border border-gray-300 text-gray-700 rounded hover:bg-gray-100 transition">ยกเลิก</button>
-                <button onClick={handleEditSubmit} disabled={submitting} className="flex-1 px-3 py-2 font-medium text-xs bg-orange-500 hover:bg-orange-600 text-white rounded transition disabled:opacity-50 disabled:cursor-not-allowed">
+            <div className="bg-linear-to-b from-white to-orange-50/70 px-5 py-4 border-t border-orange-100 shrink-0">
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setEditingId(null)} className="px-3 py-2.5 text-sm font-semibold border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onClick={handleEditSubmit} disabled={submitting} className="px-3 py-2.5 text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-xl shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
                   {submitting ? 'กำลังบันทึก...' : 'บันทึก'}
                 </button>
               </div>
-              <button onClick={() => { setEditingId(null); setShowDeleteConfirm(editingId!); }} className="w-full px-3 py-2 font-medium text-xs bg-red-500 hover:bg-red-600 text-white rounded transition">
+              <button onClick={() => { setEditingId(null); setShowDeleteConfirm(editingId!); }} className="w-full mt-3 px-3 py-2.5 text-sm font-semibold bg-red-500 hover:bg-red-600 text-white rounded-xl transition">
                 ยกเลิกคำขอมาสาย
               </button>
             </div>
@@ -1567,7 +1720,7 @@ export default function LeaveRequestPage() {
       </Card>
 
       <Tabs defaultValue="leave" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="sticky top-20 z-30 grid w-full grid-cols-2">
           <TabsTrigger value="leave">ขอลา</TabsTrigger>
           <TabsTrigger value="late">ขอมาสาย</TabsTrigger>
         </TabsList>

@@ -306,7 +306,8 @@ async function getLateRequestsByUser(
   userId: number,
   status?: ApprovalStatus,
   skip?: number,
-  take?: number
+  take?: number,
+  query?: string
 ): Promise<{ data: LateRequestWithApprover[]; total: number }> {
   const where: any = { 
     userId,
@@ -315,6 +316,23 @@ async function getLateRequestsByUser(
 
   if (status) {
     where.status = status;
+  }
+
+  const search = query?.trim();
+  if (search) {
+    const lower = search.toLowerCase();
+    const statusMatches: ApprovalStatus[] = [];
+    if (lower.includes('อนุมัติ') || lower.includes('approved')) statusMatches.push('APPROVED');
+    if (lower.includes('ไม่อนุมัติ') || lower.includes('rejected')) statusMatches.push('REJECTED');
+    if (lower.includes('รอ') || lower.includes('pending')) statusMatches.push('PENDING');
+
+    where.OR = [
+      { reason: { contains: search, mode: 'insensitive' } },
+      { rejectionReason: { contains: search, mode: 'insensitive' } },
+      { scheduledTime: { contains: search, mode: 'insensitive' } },
+      { actualTime: { contains: search, mode: 'insensitive' } },
+      ...(statusMatches.length ? [{ status: { in: statusMatches } }] : []),
+    ];
   }
 
   const [data, total] = await Promise.all([

@@ -44,7 +44,7 @@ export interface UpdateLateRequestDTO {
 }
 
 export const lateRequestService = {
-  async getMyLateRequests(params?: { status?: string; skip?: number; take?: number }) {
+  async getMyLateRequests(params?: { status?: string; query?: string; skip?: number; take?: number }) {
     const res = await api.get('/late-requests/my', { params });
     const raw = res.data.data as { data: LateRequest[]; total: number };
     return { lateRequests: raw.data ?? [], total: raw.total };

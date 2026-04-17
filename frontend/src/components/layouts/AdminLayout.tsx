@@ -18,7 +18,11 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Keep user-facing pages in the mobile shell (header + bottom navigation) for admin.
-  if (pathname.startsWith('/admin/settings') || pathname.startsWith('/admin/profile')) {
+  if (
+    pathname.startsWith('/admin/leave-request') ||
+    pathname.startsWith('/admin/settings') ||
+    pathname.startsWith('/admin/profile')
+  ) {
     return <UserLayout>{children}</UserLayout>;
   }
 

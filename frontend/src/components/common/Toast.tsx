@@ -35,7 +35,7 @@ export default function Toast({
   if (!open) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[3000] max-w-sm" role="status" aria-live="polite">
+    <div className="fixed top-4 right-4 z-[999999] max-w-sm" role="status" aria-live="polite">
       <div className={`${toastStyles[type]} text-white px-4 py-3 rounded-xl shadow-lg text-sm flex items-start gap-2`}>
         <span className="flex-1 whitespace-pre-line">{message}</span>
         {onClose && (

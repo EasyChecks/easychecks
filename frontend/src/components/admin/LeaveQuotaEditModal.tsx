@@ -64,7 +64,7 @@ function LeaveQuotaEditModal({ leaveType, currentSettings, onSave, onCancel, use
                 วัน
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">ใช้สำหรับคำนวณโควต้ารวมต่อปี (รวมวันจ่ายและไม่จ่าย)</p>
+            <p className="text-xs text-gray-500 mt-2">ใช้สำหรับคำนวณโควต้ารวมต่อปี (รวมวันได้รับค่าจ้างและไม่ได้รับค่าจ้าง)</p>
           </div>
 
           {/* Max Paid Days Per Year */}

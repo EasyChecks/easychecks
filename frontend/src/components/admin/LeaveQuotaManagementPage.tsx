@@ -364,7 +364,7 @@ export default function LeaveQuotaManagementPage() {
                           <span className="font-semibold text-orange-600">{formatQuotaValue(quota.rules.maxDaysPerYear)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>โควต้าจ่าย/ปี</span>
+                          <span>โควต้าได้รับค่าจ้าง/ปี</span>
                           <span className="font-semibold text-orange-600">{formatQuotaValue(quota.rules.maxPaidDaysPerYear)}</span>
                         </div>
                         <div className="flex justify-between">
@@ -382,7 +382,7 @@ export default function LeaveQuotaManagementPage() {
                         <div className="flex justify-between">
                           <span>สถานะค่าจ้าง</span>
                           <span className={`font-semibold ${quota.rules.paid ? 'text-green-600' : 'text-gray-500'}`}>
-                            {quota.rules.paid ? 'ได้รับค่าจ้าง' : 'ไม่จ่ายค่าจ้าง'}
+                            {quota.rules.paid ? 'ได้รับค่าจ้าง' : 'ไม่ได้รับค่าจ้าง'}
                           </span>
                         </div>
                       </div>
@@ -594,7 +594,7 @@ export default function LeaveQuotaManagementPage() {
                               <span className="font-semibold text-orange-600">{formatQuotaValue(quota.rules.maxDaysPerYear)}</span>
                             </div>
                             <div className="flex justify-between">
-                              <span>โควต้าจ่าย/ปี</span>
+                              <span>โควต้าได้รับค่าจ้าง/ปี</span>
                               <span className="font-semibold text-orange-600">{formatQuotaValue(quota.rules.maxPaidDaysPerYear)}</span>
                             </div>
                             <div className="flex justify-between">
@@ -612,7 +612,7 @@ export default function LeaveQuotaManagementPage() {
                             <div className="flex justify-between">
                               <span>สถานะค่าจ้าง</span>
                               <span className={`font-semibold ${quota.rules.paid ? 'text-green-600' : 'text-gray-500'}`}>
-                                {quota.rules.paid ? 'ได้รับค่าจ้าง' : 'ไม่จ่ายค่าจ้าง'}
+                                {quota.rules.paid ? 'ได้รับค่าจ้าง' : 'ไม่ได้รับค่าจ้าง'}
                               </span>
                             </div>
                           </div>

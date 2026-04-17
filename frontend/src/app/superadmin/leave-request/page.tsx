@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Thermometer, FileText, Plane, Heart, Shield, BookOpen, Stethoscope, Sparkles, ChevronDown, X, Trash2, Pencil } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import Toast from '@/components/common/Toast';
 import { leaveRequestService, LeaveRequest, LeaveQuotaItem } from '@/services/leaveRequestService';
 import { lateRequestService, LateRequest } from '@/services/lateRequestService';
 import { useAuth } from '@/contexts/AuthContext';
+import { getLeaveRequestErrorMessage } from '@/utils/leaveRequestErrors';
 
 const LEAVE_TYPE_MAP: Record<string, { label: string; Icon: React.ElementType; color: string; apiValue: string }> = {
   SICK:          { label: 'ลาป่วย',           Icon: Thermometer, color: 'text-red-500 bg-red-50',      apiValue: 'SICK' },
@@ -23,6 +24,8 @@ const LEAVE_TYPE_MAP: Record<string, { label: string; Icon: React.ElementType; c
   ORDINATION:    { label: 'ลาบวช',          Icon: Sparkles,    color: 'text-amber-500 bg-amber-50',  apiValue: 'ORDINATION' },
   PATERNITY:     { label: 'ลาช่วยภริยาคลอด',  Icon: Heart,       color: 'text-purple-500 bg-purple-50', apiValue: 'PATERNITY' },
 };
+
+const HISTORY_TAKE = 10;
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'APPROVED') return <Badge variant="active">อนุมัติ</Badge>;
@@ -39,7 +42,10 @@ function formatQuotaValue(value: number | null | undefined) {
 function MyLeaveTab() {
   const { user: authUser } = useAuth();
   const [quota, setQuota] = useState<LeaveQuotaItem[]>([]);
-  const [requests, setRequests] = useState<LeaveRequest[]>([]);
+  const [historyRequests, setHistoryRequests] = useState<LeaveRequest[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -53,7 +59,6 @@ function MyLeaveTab() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
-  const [medicalCertFile, setMedicalCertFile] = useState<File | null>(null);
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [isHourly, setIsHourly] = useState(false);
   const [startTime, setStartTime] = useState('');
@@ -71,9 +76,17 @@ function MyLeaveTab() {
   const [editAttachmentUrl, setEditAttachmentUrl] = useState('');
   const [editAttachmentFile, setEditAttachmentFile] = useState<File | null>(null);
   const [editAttachmentUploading, setEditAttachmentUploading] = useState(false);
-  const [editMedCertUrl, setEditMedCertUrl] = useState('');
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState('');
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('ALL');
+
+  const buildHistoryParams = useCallback((skipValue: number) => ({
+    skip: skipValue,
+    take: HISTORY_TAKE,
+    status: historyStatus === 'ALL' ? undefined : historyStatus,
+    query: historyQuery.trim() || undefined,
+  }), [historyQuery, historyStatus]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'error') => {
     setToast({ message, type });
@@ -82,26 +95,56 @@ function MyLeaveTab() {
   useEffect(() => {
     async function load() {
       try {
-        const [q, r] = await Promise.all([
+        const [q, h] = await Promise.all([
           leaveRequestService.getMyLeaveQuota(),
-          leaveRequestService.getMyLeaveRequests({ take: 5 }),
+          leaveRequestService.getMyLeaveRequests(buildHistoryParams(0)),
         ]);
         setQuota(q);
-        setRequests(r.leaveRequests);
+        setHistoryRequests(h.leaveRequests);
+        setHistoryTotal(h.total);
       } catch {
         setError('โหลดข้อมูลไม่สำเร็จ');
         showToast('โหลดข้อมูลไม่สำเร็จ');
       } finally {
         setLoading(false);
+        setHistoryLoading(false);
       }
     }
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refreshRequests = async () => {
-    const r = await leaveRequestService.getMyLeaveRequests({ take: 5 });
-    setRequests(r.leaveRequests);
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const h = await leaveRequestService.getMyLeaveRequests(buildHistoryParams(0));
+      setHistoryRequests(h.leaveRequests);
+      setHistoryTotal(h.total);
+    } catch {
+      setHistoryRequests([]);
+      setHistoryTotal(0);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [buildHistoryParams]);
+
+  const loadMoreHistory = async () => {
+    setHistoryLoadingMore(true);
+    try {
+      const h = await leaveRequestService.getMyLeaveRequests(buildHistoryParams(historyRequests.length));
+      setHistoryRequests((prev) => [...prev, ...h.leaveRequests]);
+      setHistoryTotal(h.total);
+    } finally {
+      setHistoryLoadingMore(false);
+    }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      refreshHistory();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [refreshHistory]);
 
   const openEdit = (req: LeaveRequest) => {
     setEditingReq(req);
@@ -112,14 +155,8 @@ function MyLeaveTab() {
     setEditStartTime(req.startTime ?? '');
     setEditEndTime(req.endTime ?? '');
     setEditReason(req.reason ?? '');
-    // For SICK leave, medical certificate is shown in the attachment field
-    if (req.leaveType === 'SICK' && req.medicalCertificateUrl) {
-      setEditAttachmentUrl(req.medicalCertificateUrl ?? '');
-    } else {
-      setEditAttachmentUrl(req.attachmentUrl ?? '');
-    }
+    setEditAttachmentUrl(req.medicalCertificateUrl ?? req.attachmentUrl ?? '');
     setEditAttachmentFile(null);
-    setEditMedCertUrl('');
     setEditError('');
   };
   const closeEdit = () => { setEditingReq(null); setEditError(''); };
@@ -138,34 +175,28 @@ function MyLeaveTab() {
     setEditError('');
     try {
       let finalAttachUrl = editAttachmentUrl;
-      let finalMedCertUrl = editMedCertUrl;
       
       if (editAttachmentFile) {
         setEditAttachmentUploading(true);
         const uploadedUrl = await leaveRequestService.uploadAttachment(editAttachmentFile);
         setEditAttachmentUploading(false);
         
-        // For SICK leave, attachment is stored as medical certificate
-        if (editType === 'SICK') {
-          finalMedCertUrl = uploadedUrl;
-          finalAttachUrl = '';
-        } else {
-          finalAttachUrl = uploadedUrl;
-        }
+        finalAttachUrl = uploadedUrl;
       }
       
       await leaveRequestService.updateLeaveRequest(editingReq.leaveId, {
         leaveType: editType, startDate: editStart, endDate: editIsHourly ? editStart : editEnd, reason: editReason,
         ...(editIsHourly && { isHourly: true, startTime: editStartTime, endTime: editEndTime }),
-        ...(finalAttachUrl.trim() && { attachmentUrl: finalAttachUrl.trim() }),
-        ...(finalMedCertUrl.trim() && { medicalCertificateUrl: finalMedCertUrl.trim() }),
+        ...(finalAttachUrl.trim() && {
+          attachmentUrl: finalAttachUrl.trim(),
+          medicalCertificateUrl: finalAttachUrl.trim(),
+        }),
       });
       closeEdit();
-      await refreshRequests();
+      await refreshHistory();
     } catch (err: unknown) {
       setEditAttachmentUploading(false);
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      const finalMsg = msg || 'บันทึกไม่สำเร็จ';
+      const finalMsg = getLeaveRequestErrorMessage(err, 'บันทึกไม่สำเร็จ');
       setEditError(finalMsg);
       showToast(finalMsg);
     } finally {
@@ -185,9 +216,9 @@ function MyLeaveTab() {
     try {
       await leaveRequestService.deleteLeaveRequest(editingReq.leaveId);
       closeEdit();
-      await refreshRequests();
-    } catch {
-      const finalMsg = 'ยกเลิกคำขอไม่สำเร็จ';
+      await refreshHistory();
+    } catch (err: unknown) {
+      const finalMsg = getLeaveRequestErrorMessage(err, 'ยกเลิกคำขอไม่สำเร็จ');
       setEditError(finalMsg);
       showToast(finalMsg);
     } finally {
@@ -217,37 +248,47 @@ function MyLeaveTab() {
         showToast('กรุณาเลือกช่วงวันที่');
         return;
       }
+      if (needsMedCert && !attachmentFile) {
+        setError('กรุณาแนบไฟล์ เนื่องจากลาป่วยเกิน 3 วัน');
+        showToast('กรุณาแนบไฟล์ เนื่องจากลาป่วยเกิน 3 วัน');
+        return;
+      }
     }
     
     setError('');
     setSubmitting(true);
     try {
+      let finalAttachUrl = '';
+      if (attachmentFile) {
+        finalAttachUrl = await leaveRequestService.uploadAttachment(attachmentFile);
+      }
       await leaveRequestService.createLeaveRequest({
         leaveType: selectedType,
         startDate,
         endDate: isHourly ? startDate : endDate,
         reason,
+        ...(finalAttachUrl && {
+          attachmentUrl: finalAttachUrl,
+          medicalCertificateUrl: finalAttachUrl,
+        }),
         ...(isHourly && { isHourly: true, startTime, endTime }),
       });
       setShowSuccess(true);
-      setTimeout(async () => {
-        setSelectedType('');
-        setStartDate('');
-        setEndDate('');
-        setReason('');
-        setIsHourly(false);
-        setStartTime('');
-        setEndTime('');
-        const r = await leaveRequestService.getMyLeaveRequests({ take: 5 });
-        setRequests(r.leaveRequests);
-        setShowFormModal(false);
-      }, 2500);
+      setSelectedType('');
+      setStartDate('');
+      setEndDate('');
+      setReason('');
+      setAttachmentFile(null);
+      setIsHourly(false);
+      setStartTime('');
+      setEndTime('');
+      await refreshHistory();
       setTimeout(() => {
         setShowSuccess(false);
-      }, 3000);
+        setShowFormModal(false);
+      }, 2500);
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      const finalMsg = axiosMsg || 'เกิดข้อผิดพลาด กรุณาลองใหม่';
+      const finalMsg = getLeaveRequestErrorMessage(err, 'ส่งคำขอไม่สำเร็จ');
       setError(finalMsg);
       showToast(finalMsg);
     } finally {
@@ -286,7 +327,6 @@ function MyLeaveTab() {
   });
 
   const allowedTypeList = allowedQuotaItems.map((item) => item.leaveType);
-  const allowedTypeKey = allowedTypeList.join('|');
   const allowedTypeSet = new Set(allowedTypeList);
 
   const isAllowedType = (type: string) => {
@@ -317,10 +357,10 @@ function MyLeaveTab() {
 
   useEffect(() => {
     if (!selectedType) return;
-    if (allowedTypeSet.size > 0 && !allowedTypeSet.has(selectedType)) {
+    if (allowedTypeList.length > 0 && !allowedTypeList.includes(selectedType)) {
       setSelectedType('');
     }
-  }, [selectedType, allowedTypeKey]);
+  }, [selectedType, allowedTypeList]);
 
   const today = new Date().toISOString().split('T')[0];
   const isSick = selectedType === 'SICK';
@@ -416,7 +456,7 @@ function MyLeaveTab() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">วันที่ได้รับค่าจ้าง/ปี:</span>
-                      <span className="font-semibold">{q.isPaid ? formatQuotaValue(paidPerYear) : 'ไม่จ่ายค่าจ้าง'}</span>
+                      <span className="font-semibold">{q.isPaid ? formatQuotaValue(paidPerYear) : 'ไม่ได้รับค่าจ้าง'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">ลาได้ต่อครั้งไม่เกิน:</span>
@@ -480,7 +520,7 @@ function MyLeaveTab() {
                       <X className="w-5 h-5" />
                     </button>
                   </div>
-      
+
                   {/* Form Content */}
                   <div className="flex-1 overflow-y-auto p-5 space-y-4">
                     <form id="leave-request-form" onSubmit={handleSubmit} className="space-y-4">
@@ -525,13 +565,13 @@ function MyLeaveTab() {
                               </span>
                             </div>
                             <div className="flex items-center justify-between">
-                              <span>สิทธิ์จ่าย/ปี</span>
+                              <span>สิทธิ์ได้รับค่าจ้าง/ปี</span>
                               <span className="font-semibold">
-                                {selectedQuota.isPaid ? formatQuotaValue(selectedPaidPerYear) : 'ไม่จ่ายค่าจ้าง'}
+                                {selectedQuota.isPaid ? formatQuotaValue(selectedPaidPerYear) : 'ไม่ได้รับค่าจ้าง'}
                               </span>
                             </div>
                             <div className="flex items-center justify-between">
-                              <span>คงเหลือแบบจ่าย</span>
+                              <span>คงเหลือแบบได้รับค่าจ้าง</span>
                               <span className="font-semibold">
                                 {selectedQuota.isPaid && selectedRemainingPaid !== null ? `${selectedRemainingPaid} วัน` : '—'}
                               </span>
@@ -572,7 +612,7 @@ function MyLeaveTab() {
                           <>
                             <div>
                               <label className="block text-sm text-gray-600 mb-1">วันที่</label>
-                              <DatePicker value={startDate} onChange={setStartDate} placeholder="เลือกวันที่" />
+                              <DatePicker value={startDate} onChange={setStartDate} weekdaysOnly placeholder="เลือกวันที่" />
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div>
@@ -641,14 +681,14 @@ function MyLeaveTab() {
                           style={{borderColor: needsMedCert ? '#fbbf24' : '#d1d5db', backgroundColor: needsMedCert ? '#fffbeb' : 'white'}}>
                           <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{color: needsMedCert ? '#f59e0b' : '#9ca3af'}}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                           <span className="text-sm text-gray-600 truncate flex-1">
-                            {medicalCertFile || attachmentFile ? (medicalCertFile || attachmentFile)?.name : 'คลิกเพื่อเลือกไฟล์'}
+                            {attachmentFile ? attachmentFile.name : 'คลิกเพื่อเลือกไฟล์'}
                           </span>
-                          {(medicalCertFile || attachmentFile) && (
-                            <button type="button" onClick={(e) => { e.preventDefault(); setMedicalCertFile(null); setAttachmentFile(null); }}
+                          {attachmentFile && (
+                            <button type="button" onClick={(e) => { e.preventDefault(); setAttachmentFile(null); }}
                               className="text-gray-500 hover:text-red-600 shrink-0">✕</button>
                           )}
                           <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only"
-                            onChange={e => { const f = e.target.files?.[0] ?? null; setMedicalCertFile(f); setAttachmentFile(f); }} />
+                            onChange={e => { const f = e.target.files?.[0] ?? null; setAttachmentFile(f); }} />
                         </label>
                       </div>
       
@@ -675,19 +715,43 @@ function MyLeaveTab() {
               </div>
             )}
 
-      {/* Recent Requests */}
+      {/* History Requests */}
       <div className="space-y-2">
         <div className="flex items-center justify-between px-1">
-          <h3 className="font-semibold text-gray-800">คำขอล่าสุด</h3>
-          {requests.length > 0 && <span className="text-xs text-gray-400">{requests.length} รายการ</span>}
+          <h3 className="font-semibold text-gray-800">ประวัติคำขอลา</h3>
+          {historyTotal > 0 && (
+            <span className="text-xs text-gray-400">
+              {historyRequests.length}/{historyTotal} รายการ
+            </span>
+          )}
         </div>
-        {loading ? (
+        <div className="flex flex-col gap-2">
+          <input
+            value={historyQuery}
+            onChange={(e) => setHistoryQuery(e.target.value)}
+            placeholder="ค้นหาประเภท, เหตุผล, สถานะ"
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
+          />
+          <select
+            value={historyStatus}
+            onChange={(e) => setHistoryStatus(e.target.value)}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm bg-white"
+          >
+            <option value="ALL">ทุกสถานะ</option>
+            <option value="PENDING">รอพิจารณา</option>
+            <option value="APPROVED">อนุมัติ</option>
+            <option value="REJECTED">ไม่อนุมัติ</option>
+          </select>
+        </div>
+        {historyLoading ? (
           <div className="text-sm text-gray-500 text-center py-6">กำลังโหลด...</div>
-        ) : requests.length === 0 ? (
-          <div className="text-sm text-gray-400 text-center py-6">ยังไม่มีคำขอลา</div>
+        ) : historyTotal === 0 ? (
+          <div className="text-sm text-gray-400 text-center py-6">
+            {historyQuery.trim() || historyStatus !== 'ALL' ? 'ไม่พบรายการที่ตรงกับการค้นหา' : 'ยังไม่มีประวัติคำขอลา'}
+          </div>
         ) : (
           <div className="space-y-2">
-            {requests.map((req, i) => {
+            {historyRequests.map((req, i) => {
               const info = LEAVE_TYPE_MAP[req.leaveType];
               const isPending = req.status === 'PENDING';
               const totalDays = req.numberOfDays ?? 0;
@@ -696,10 +760,10 @@ function MyLeaveTab() {
               const payText = req.isHourly
                 ? null
                 : paidDays === 0
-                ? `ไม่จ่าย ${totalDays} วัน`
+                ? `ไม่ได้รับค่าจ้าง ${totalDays} วัน`
                 : unpaidDays === 0
-                ? `จ่าย ${paidDays} วัน`
-                : `จ่าย ${paidDays} วัน / ไม่จ่าย ${unpaidDays} วัน`;
+                ? `ได้รับค่าจ้าง ${paidDays} วัน`
+                : `ได้รับค่าจ้าง ${paidDays} วัน / ไม่ได้รับค่าจ้าง ${unpaidDays} วัน`;
               return (
                 <div
                   key={req.leaveId ?? i}
@@ -730,9 +794,6 @@ function MyLeaveTab() {
                       {payText && (
                         <div className="text-xs text-gray-600 mt-0.5">{payText}</div>
                       )}
-                      {req.rejectionReason && (
-                        <div className="text-xs text-red-500 mt-1 truncate">เหตุผล: {req.rejectionReason}</div>
-                      )}
                       {req.reason && !req.rejectionReason && (
                         <div className="text-xs text-gray-600 mt-1 truncate">หมายเหตุ: {req.reason}</div>
                       )}
@@ -752,6 +813,17 @@ function MyLeaveTab() {
               );
             })}
           </div>
+        )}
+        {historyRequests.length < historyTotal && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={loadMoreHistory}
+            disabled={historyLoadingMore}
+          >
+            {historyLoadingMore ? 'กำลังโหลด...' : 'โหลดเพิ่ม'}
+          </Button>
         )}
       </div>
 
@@ -825,8 +897,8 @@ function MyLeaveTab() {
                   <label className="block font-semibold text-gray-800 mb-3">
                     ประเภทการลา <span className="text-red-500">*</span>
                   </label>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    {['SICK', 'PERSONAL', 'VACATION', 'MATERNITY'].map(key => {
+                  <div className="grid grid-cols-3 gap-3">
+                    {filteredTypes.map(key => {
                       const info = LEAVE_TYPE_MAP[key];
                       return (
                         <button key={key} type="button" onClick={() => setEditType(key)}
@@ -839,23 +911,6 @@ function MyLeaveTab() {
                       );
                     })}
                   </div>
-                  <details className="text-sm">
-                    <summary className="text-gray-500 cursor-pointer mb-2">ประเภทอื่น ▸</summary>
-                    <div className="grid grid-cols-2 gap-3 mt-2">
-                      {['MILITARY', 'TRAINING', 'STERILIZATION', 'ORDINATION', 'PATERNITY'].map(key => {
-                        const info = LEAVE_TYPE_MAP[key];
-                        return (
-                          <button key={key} type="button" onClick={() => setEditType(key)}
-                            className={`p-3 rounded-xl border-2 transition-all flex items-center gap-2 ${editType === key ? 'border-orange-500 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${info?.color ?? ''}`}>
-                              {info && <info.Icon className="w-3.5 h-3.5" />}
-                            </div>
-                            <span className="text-sm text-gray-900">{info?.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </details>
                 </div>
 
                 {/* Dates / Hours */}
@@ -886,7 +941,7 @@ function MyLeaveTab() {
                     <>
                       <div>
                         <label className="block text-sm text-gray-600 mb-1">วันที่</label>
-                        <DatePicker value={editStart} onChange={setEditStart} placeholder="เลือกวันที่" />
+                        <DatePicker value={editStart} onChange={setEditStart} weekdaysOnly placeholder="เลือกวันที่" />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -977,7 +1032,7 @@ function MyLeaveTab() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                     </svg>
                     <span className="text-sm text-gray-600 truncate flex-1">
-                      {editAttachmentFile ? editAttachmentFile.name : 'เลือกไฟล์หรือวาง'}
+                      {editAttachmentFile?.name ?? 'เลือกไฟล์หรือวาง'}
                     </span>
                     {editAttachmentFile && (
                       <button type="button" onClick={(e) => { e.preventDefault(); setEditAttachmentFile(null); }}
@@ -1014,13 +1069,24 @@ function MyLeaveTab() {
 
 // ─────────────────────────────── MY LATE TAB ────────────────────────────────
 function MyLateTab() {
-  const [requests, setRequests] = useState<LateRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [historyRequests, setHistoryRequests] = useState<LateRequest[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('ALL');
 
-  const [requestDate, setRequestDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const buildHistoryParams = useCallback((skipValue: number) => ({
+    skip: skipValue,
+    take: HISTORY_TAKE,
+    status: historyStatus === 'ALL' ? undefined : historyStatus,
+    query: historyQuery.trim() || undefined,
+  }), [historyQuery, historyStatus]);
+
+  const [requestDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [scheduledTime, setScheduledTime] = useState('');
   const [actualTime, setActualTime] = useState('');
   const [reason, setReason] = useState('');
@@ -1030,8 +1096,6 @@ function MyLateTab() {
 
   // ===== EDIT/DELETE LATE REQUEST =====
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editScheduledTime, setEditScheduledTime] = useState('');
-  const [editActualTime, setEditActualTime] = useState('');
   const [editScheduledHour, setEditScheduledHour] = useState('');
   const [editScheduledMin, setEditScheduledMin] = useState('');
   const [editActualHour, setEditActualHour] = useState('');
@@ -1043,11 +1107,51 @@ function MyLateTab() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
 
   useEffect(() => {
-    lateRequestService.getMyLateRequests({ take: 5 })
-      .then(r => setRequests(r.lateRequests))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    const refetchData = async () => {
+      try {
+        const h = await lateRequestService.getMyLateRequests(buildHistoryParams(0));
+        setHistoryRequests(h.lateRequests);
+        setHistoryTotal(h.total);
+      } catch {
+        // Silent fail
+      }
+      setHistoryLoading(false);
+    };
+    refetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const h = await lateRequestService.getMyLateRequests(buildHistoryParams(0));
+      setHistoryRequests(h.lateRequests);
+      setHistoryTotal(h.total);
+    } catch {
+      setHistoryRequests([]);
+      setHistoryTotal(0);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [buildHistoryParams]);
+
+  const loadMoreHistory = async () => {
+    setHistoryLoadingMore(true);
+    try {
+      const h = await lateRequestService.getMyLateRequests(buildHistoryParams(historyRequests.length));
+      setHistoryRequests((prev) => [...prev, ...h.lateRequests]);
+      setHistoryTotal(h.total);
+    } finally {
+      setHistoryLoadingMore(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      refreshHistory();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [refreshHistory]);
 
   const lateMinutesPreview = (() => {
     if (!scheduledTime || !actualTime) return null;
@@ -1090,8 +1194,7 @@ function MyLateTab() {
       setReason('');
       setAttachmentFile(null);
       setAttachmentPreview('');
-      const r = await lateRequestService.getMyLateRequests({ take: 5 });
-      setRequests(r.lateRequests);
+      await refreshHistory();
       setTimeout(() => setShowSuccess(false), 2500);
     } catch (err: unknown) {
       const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -1105,10 +1208,8 @@ function MyLateTab() {
     setEditingId(req.id);
     const [sh, sm] = req.scheduledTime.split(':');
     const [ah, am] = req.actualTime.split(':');
-    setEditScheduledTime(req.scheduledTime);
     setEditScheduledHour(sh || '00');
     setEditScheduledMin(sm || '00');
-    setEditActualTime(req.actualTime);
     setEditActualHour(ah || '00');
     setEditActualMin(am || '00');
     setEditReason(req.reason);
@@ -1147,8 +1248,7 @@ function MyLateTab() {
       
       await lateRequestService.updateLateRequest(editingId!, updateData);
       setEditingId(null);
-      const r = await lateRequestService.getMyLateRequests({ take: 5 });
-      setRequests(r.lateRequests);
+      await refreshHistory();
       setError('');
     } catch (err: unknown) {
       const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -1164,8 +1264,7 @@ function MyLateTab() {
     try {
       await lateRequestService.deleteLateRequest(id);
       setShowDeleteConfirm(null);
-      const r = await lateRequestService.getMyLateRequests({ take: 5 });
-      setRequests(r.lateRequests);
+      await refreshHistory();
       setError('');
     } catch (err: unknown) {
       const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -1294,13 +1393,43 @@ function MyLateTab() {
         </Button>
       </form>
 
+      {/* History Requests */}
       <Card className="p-4">
-        <h3 className="font-semibold text-gray-800 mb-3">คำขอล่าสุด</h3>
-        {loading ? <div className="text-sm text-gray-500 text-center py-4">กำลังโหลด...</div>
-          : requests.length === 0 ? <div className="text-sm text-gray-500 text-center py-4">ยังไม่มีคำขอมาสาย</div>
-          : (
-            <div className="space-y-3">
-              {requests.map(req => (
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-800">ประวัติคำขอมาสาย</h3>
+          {historyTotal > 0 && (
+            <span className="text-xs text-gray-400">
+              {historyRequests.length}/{historyTotal} รายการ
+            </span>
+          )}
+        </div>
+        <div className="flex flex-col gap-2 mb-3">
+          <input
+            value={historyQuery}
+            onChange={(e) => setHistoryQuery(e.target.value)}
+            placeholder="ค้นหาวันที่, เหตุผล, สถานะ"
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
+          />
+          <select
+            value={historyStatus}
+            onChange={(e) => setHistoryStatus(e.target.value)}
+            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm bg-white"
+          >
+            <option value="ALL">ทุกสถานะ</option>
+            <option value="PENDING">รอพิจารณา</option>
+            <option value="APPROVED">อนุมัติ</option>
+            <option value="REJECTED">ไม่อนุมัติ</option>
+          </select>
+        </div>
+        {historyLoading ? (
+          <div className="text-sm text-gray-500 text-center py-4">กำลังโหลด...</div>
+        ) : historyTotal === 0 ? (
+          <div className="text-sm text-gray-500 text-center py-4">
+            {historyQuery.trim() || historyStatus !== 'ALL' ? 'ไม่พบรายการที่ตรงกับการค้นหา' : 'ยังไม่มีประวัติคำขอมาสาย'}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {historyRequests.map((req) => (
                 <div key={req.id} onClick={() => req.status === 'PENDING' && handleEditOpen(req)} className={`p-3 bg-gray-50 rounded-lg ${ req.status === 'PENDING' ? 'cursor-pointer hover:bg-blue-50 transition' : ''}`}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-medium text-gray-900">{new Date(req.requestDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
@@ -1310,10 +1439,23 @@ function MyLateTab() {
                     กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
                     <span className="ml-2 text-orange-600 font-medium">สาย {req.lateMinutes} นาที</span>
                   </div>
+                  {req.reason && <div className="text-xs text-gray-500 mt-1">{req.reason}</div>}
+                  {req.rejectionReason && <div className="text-xs text-red-600 mt-1">เหตุผล: {req.rejectionReason}</div>}
                 </div>
               ))}
-            </div>
-          )}
+          </div>
+        )}
+        {historyRequests.length < historyTotal && (
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full mt-3"
+            onClick={loadMoreHistory}
+            disabled={historyLoadingMore}
+          >
+            {historyLoadingMore ? 'กำลังโหลด...' : 'โหลดเพิ่ม'}
+          </Button>
+        )}
       </Card>
 
       {showSuccess && (
@@ -1335,9 +1477,15 @@ function MyLateTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-sm max-h-[75vh] p-0 rounded-xl shadow-xl flex flex-col">
             {/* Header */}
-            <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-5 py-3 rounded-t-xl flex items-center justify-between flex-shrink-0">
+            <div className="bg-linear-to-r from-orange-500 to-orange-600 px-5 py-3 rounded-t-xl flex items-center justify-between shrink-0">
               <h3 className="text-xl font-bold text-white">แก้ไขคำขอมาสาย</h3>
-              <button onClick={() => setEditingId(null)} className="text-white hover:text-orange-100 text-2xl leading-none">×</button>
+              <button
+                onClick={() => setEditingId(null)}
+                className="w-9 h-9 rounded-full bg-white/15 text-white hover:bg-white/25 flex items-center justify-center"
+                aria-label="ปิด"
+              >
+                <span className="block text-2xl leading-none -translate-y-px">×</span>
+              </button>
             </div>
 
             {/* Body */}
@@ -1345,23 +1493,35 @@ function MyLateTab() {
               {/* Scheduled Time */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่กำหนด</label>
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editScheduledHour}
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="HH"
+                      value={editScheduledHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledHour(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
-                  <div className="text-2xl text-gray-400">:</div>
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editScheduledMin}
+                  <div className="text-lg text-gray-400">:</div>
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="MM"
+                      value={editScheduledMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledMin(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
                 </div>
               </div>
@@ -1369,23 +1529,35 @@ function MyLateTab() {
               {/* Actual Time */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่มาจริง</label>
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editActualHour}
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="HH"
+                      value={editActualHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualHour(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
-                  <div className="text-2xl text-gray-400">:</div>
-                  <div className="flex-1">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editActualMin}
+                  <div className="text-lg text-gray-400">:</div>
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      placeholder="MM"
+                      value={editActualMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualMin(val);
                       }}
-                      className="w-full px-2 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none text-center text-base font-medium" />
+                      className="w-full min-w-0 px-2 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-center text-base font-medium"
+                    />
                   </div>
                 </div>
               </div>
@@ -1393,22 +1565,33 @@ function MyLateTab() {
               {/* Reason */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">เหตุผล</label>
-                <textarea value={editReason} onChange={e => setEditReason(e.target.value)}
-                  placeholder="บรรยายเหตุผลการมาสาย" className="w-full px-3 py-2 border border-gray-300 rounded focus:border-orange-500 focus:outline-none resize-none text-sm" rows={3} />
+                <textarea
+                  value={editReason}
+                  onChange={e => setEditReason(e.target.value)}
+                  placeholder="บรรยายเหตุผลการมาสาย"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none resize-none text-sm"
+                  rows={3}
+                />
               </div>
 
               {/* File Upload */}
               <div>
                 <label className="block text-base font-semibold text-gray-700 mb-2">ไฟล์แนบ (PDF, JPG, PNG)</label>
-                {editImagePreviewUrl && (<img src={editImagePreviewUrl} alt="Preview" className="mb-2 max-h-40 object-contain rounded border border-gray-200" />)}
+                {editImagePreviewUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={editImagePreviewUrl} alt="Preview" className="mb-2 max-h-40 object-contain rounded-lg border border-gray-200" />
+                )}
                 {editAttachmentPreview && !editImagePreviewUrl && (
-                  <div className="mb-2 p-2 bg-orange-50 border-l-3 border-orange-500 rounded text-sm text-orange-700">{editAttachmentPreview}</div>
+                  <div className="mb-2 p-2 bg-orange-50 border-l-3 border-orange-500 rounded-lg text-sm text-orange-700">{editAttachmentPreview}</div>
                 )}
                 <label className="block cursor-pointer">
-                  <div className="border-2 border-dashed border-gray-300 rounded p-4 hover:border-orange-500 hover:bg-orange-50 transition text-center">
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-orange-500 hover:bg-orange-50 transition text-center">
                     <p className="text-base text-gray-600 font-medium">เลือกไฟล์</p>
                   </div>
-                  <input type="file" accept=".pdf,.jpg,.png,.jpeg" className="hidden"
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.png,.jpeg"
+                    className="hidden"
                     onChange={e => {
                       const f = e.target.files?.[0] ?? null;
                       if (f) {
@@ -1422,7 +1605,8 @@ function MyLateTab() {
                           setEditImagePreviewUrl('');
                         }
                       }
-                    }} />
+                    }}
+                  />
                 </label>
               </div>
 
@@ -1430,14 +1614,14 @@ function MyLateTab() {
             </div>
 
             {/* Footer */}
-            <div className="bg-gray-50 px-5 py-3 rounded-b-xl border-t border-gray-200 space-y-2 flex-shrink-0">
-              <div className="flex gap-2">
-                <button onClick={() => setEditingId(null)} className="flex-1 px-3 py-2 font-medium text-md border border-gray-300 text-gray-700 rounded hover:bg-gray-100 transition">ยกเลิก</button>
-                <button onClick={handleEditSubmit} disabled={submitting} className="flex-1 px-3 py-2 font-medium text-md bg-orange-500 hover:bg-orange-600 text-white rounded transition disabled:opacity-50 disabled:cursor-not-allowed">
+            <div className="bg-linear-to-b from-white to-orange-50/70 px-5 py-4 border-t border-orange-100 shrink-0">
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setEditingId(null)} className="px-3 py-2.5 text-sm font-semibold border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition">ยกเลิก</button>
+                <button onClick={handleEditSubmit} disabled={submitting} className="px-3 py-2.5 text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white rounded-xl shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
                   {submitting ? 'กำลังบันทึก...' : 'บันทึก'}
                 </button>
               </div>
-              <button onClick={() => { setEditingId(null); setShowDeleteConfirm(editingId!); }} className="w-full px-3 py-2 font-medium text-md bg-red-500 hover:bg-red-600 text-white rounded transition">
+              <button onClick={() => { setEditingId(null); setShowDeleteConfirm(editingId!); }} className="w-full mt-3 px-3 py-2.5 text-sm font-semibold bg-red-500 hover:bg-red-600 text-white rounded-xl transition">
                 ยกเลิกคำขอมาสาย
               </button>
             </div>
@@ -1471,7 +1655,19 @@ function ApproveLeaveTab() {
   const [actionId, setActionId] = useState<number | null>(null);
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
-  const [msg, setMsg] = useState('');
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'warning' | 'info' } | null>(null);
+  const [query, setQuery] = useState('');
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewName, setPreviewName] = useState('');
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const longPressTimer = useRef<number | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'error') => {
+    setToast({ message, type });
+  };
 
   const load = useCallback(async () => {
     try {
@@ -1479,7 +1675,7 @@ function ApproveLeaveTab() {
       // SUPERADMIN can see AND approve all requests, including their own
       setRequests(r.leaveRequests);
     } catch {
-      setMsg('โหลดข้อมูลไม่สำเร็จ');
+      showToast('โหลดข้อมูลไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
@@ -1491,13 +1687,13 @@ function ApproveLeaveTab() {
     setActionId(id);
     try {
       await leaveRequestService.approveLeaveRequest(id);
-      setMsg('อนุมัติเรียบร้อยแล้ว');
+      showToast('อนุมัติเรียบร้อยแล้ว', 'success');
       load();
-    } catch {
-      setMsg('เกิดข้อผิดพลาด');
+    } catch (err) {
+      const finalMsg = getLeaveRequestErrorMessage(err, 'เกิดข้อผิดพลาด');
+      showToast(finalMsg);
     } finally {
       setActionId(null);
-      setTimeout(() => setMsg(''), 2000);
     }
   };
 
@@ -1506,30 +1702,160 @@ function ApproveLeaveTab() {
     setActionId(rejectId);
     try {
       await leaveRequestService.rejectLeaveRequest(rejectId, rejectReason);
-      setMsg('ปฏิเสธคำขอแล้ว');
+      showToast('ปฏิเสธคำขอแล้ว', 'success');
       setRejectId(null);
       setRejectReason('');
       load();
-    } catch {
-      setMsg('เกิดข้อผิดพลาด');
+    } catch (err) {
+      const finalMsg = getLeaveRequestErrorMessage(err, 'เกิดข้อผิดพลาด');
+      showToast(finalMsg);
     } finally {
       setActionId(null);
-      setTimeout(() => setMsg(''), 2000);
     }
   };
 
+  const handleBulkApprove = async () => {
+    if (selectedIds.length === 0) return;
+    setActionId(-1);
+    try {
+      await Promise.all(selectedIds.map((id) => leaveRequestService.approveLeaveRequest(id)));
+      showToast('อนุมัติรายการที่เลือกแล้ว', 'success');
+      setSelectedIds([]);
+      setSelectionMode(false);
+      load();
+    } catch (err) {
+      const finalMsg = getLeaveRequestErrorMessage(err, 'เกิดข้อผิดพลาด');
+      showToast(finalMsg);
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleBulkReject = async () => {
+    if (selectedIds.length === 0 || !rejectReason.trim()) return;
+    setActionId(-1);
+    try {
+      await Promise.all(selectedIds.map((id) => leaveRequestService.rejectLeaveRequest(id, rejectReason)));
+      showToast('ปฏิเสธรายการที่เลือกแล้ว', 'success');
+      setSelectedIds([]);
+      setSelectionMode(false);
+      setBulkRejectOpen(false);
+      setRejectReason('');
+      load();
+    } catch (err) {
+      const finalMsg = getLeaveRequestErrorMessage(err, 'เกิดข้อผิดพลาด');
+      showToast(finalMsg);
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const toggleSelection = (id: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const startSelection = (id: number) => {
+    setSelectionMode(true);
+    setSelectedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  const handleTouchStart = (id: number) => {
+    if (selectionMode) return;
+    longPressTimer.current = window.setTimeout(() => startSelection(id), 450);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const filteredRequests = requests.filter((req) => {
+    if (!query.trim()) return true;
+    const needle = query.trim().toLowerCase();
+    const name = (req.user?.name || '').toLowerCase();
+    const employeeId = (req.user?.employeeId || '').toLowerCase();
+    const leaveLabel = (LEAVE_TYPE_MAP[req.leaveType]?.label || req.leaveType || '').toLowerCase();
+    return name.includes(needle) || employeeId.includes(needle) || leaveLabel.includes(needle);
+  });
+
+  const allVisibleIds = filteredRequests.map((req) => req.leaveId).filter(Boolean) as number[];
+  const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedIds.includes(id));
+
   return (
     <div className="space-y-4">
-      {msg && <div className="p-3 bg-green-50 text-green-800 rounded-lg text-sm text-center">{msg}</div>}
+      <Toast
+        open={Boolean(toast)}
+        type={toast?.type}
+        message={toast?.message ?? ''}
+        onClose={() => setToast(null)}
+      />
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="ค้นหาชื่อ, รหัสพนักงาน, ประเภทลา"
+            className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
+          />
+          <Button
+            type="button"
+            variant={selectionMode ? 'default' : 'outline'}
+            className="shrink-0"
+            onClick={() => {
+              setSelectionMode((prev) => !prev);
+              setSelectedIds([]);
+            }}
+          >
+            {selectionMode ? 'ยกเลิกเลือก' : 'เลือกหลายรายการ'}
+          </Button>
+        </div>
+
+        {selectionMode && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSelectedIds(allSelected ? [] : allVisibleIds)}
+              disabled={allVisibleIds.length === 0}
+            >
+              {allSelected ? 'ยกเลิกเลือกทั้งหมด' : 'เลือกทั้งหมด'}
+            </Button>
+            <Button
+              type="button"
+              className="bg-green-500 hover:bg-green-600"
+              disabled={selectedIds.length === 0 || actionId !== null}
+              onClick={handleBulkApprove}
+            >
+              อนุมัติที่เลือก ({selectedIds.length})
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-red-300 text-red-600 hover:bg-red-50"
+              disabled={selectedIds.length === 0 || actionId !== null}
+              onClick={() => {
+                setRejectId(null);
+                setRejectReason('');
+                setBulkRejectOpen(true);
+              }}
+            >
+              ไม่อนุมัติที่เลือก ({selectedIds.length})
+            </Button>
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <div className="text-sm text-gray-500 text-center py-8">กำลังโหลด...</div>
-      ) : requests.length === 0 ? (
+      ) : filteredRequests.length === 0 ? (
         <Card className="p-8 text-center">
           <h3 className="font-semibold text-gray-700">ไม่มีคำขอที่รอพิจารณา</h3>
         </Card>
       ) : (
-        requests.map(req => {
+        filteredRequests.map(req => {
           const info = LEAVE_TYPE_MAP[req.leaveType];
           const totalDays = req.numberOfDays ?? 0;
           const paidDays = typeof req.paidDays === 'number' ? req.paidDays : totalDays;
@@ -1537,12 +1863,22 @@ function ApproveLeaveTab() {
           const payText = req.isHourly
             ? null
             : paidDays === 0
-            ? `ไม่จ่าย ${totalDays} วัน`
+            ? `ไม่ได้รับค่าจ้าง ${totalDays} วัน`
             : unpaidDays === 0
-            ? `จ่าย ${paidDays} วัน`
-            : `จ่าย ${paidDays} วัน / ไม่จ่าย ${unpaidDays} วัน`;
+            ? `ได้รับค่าจ้าง ${paidDays} วัน`
+            : `ได้รับค่าจ้าง ${paidDays} วัน / ไม่ได้รับค่าจ้าง ${unpaidDays} วัน`;
+          const isSelected = selectedIds.includes(req.leaveId);
+          const attachmentUrl = req.medicalCertificateUrl || req.attachmentUrl || '';
+          const isImage = attachmentUrl ? /\.(png|jpg|jpeg|gif)$/i.test(attachmentUrl) : false;
+          const isPdf = attachmentUrl ? /\.pdf$/i.test(attachmentUrl) : false;
+          const attachmentName = attachmentUrl ? attachmentUrl.split('/').pop() : '';
           return (
-            <Card key={req.leaveId} className="p-4 border-l-4 border-orange-400">
+            <Card
+              key={req.leaveId}
+              className={`p-4 border-l-4 border-orange-400 ${selectionMode && isSelected ? 'ring-2 ring-orange-400' : ''}`}
+              onTouchStart={() => handleTouchStart(req.leaveId)}
+              onTouchEnd={handleTouchEnd}
+            >
               <div className="flex items-start justify-between mb-2">
                 <div>
                   <div className="font-semibold text-gray-900">
@@ -1552,15 +1888,75 @@ function ApproveLeaveTab() {
                 </div>
                 <Badge variant="default">รอพิจารณา</Badge>
               </div>
+              {selectionMode && (
+                <label className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelection(req.leaveId)}
+                    className="h-4 w-4 accent-orange-500"
+                  />
+                  เลือกรายการนี้
+                </label>
+              )}
               <div className="text-sm text-gray-700 mb-1">
                 <span className="flex items-center gap-1.5">
                   {info && <info.Icon className="w-4 h-4" />}
                   {info?.label || req.leaveType} · {new Date(req.startDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })} – {new Date(req.endDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
-                  {req.numberOfDays ? ` (${req.numberOfDays} วัน)` : ''}
+                  {req.isHourly && req.leaveHours ? ` (${req.leaveHours} ชั่วโมง)` : req.numberOfDays ? ` (${req.numberOfDays} วัน)` : ''}
                 </span>
               </div>
+              {req.isHourly && req.startTime && req.endTime && (
+                <div className="text-xs text-gray-600 mb-1">เวลา {req.startTime} - {req.endTime}</div>
+              )}
               {payText && <div className="text-xs text-gray-600 mb-1">{payText}</div>}
               {req.reason && <div className="text-xs text-gray-500 mb-3 bg-gray-50 p-2 rounded">เหตุผล: {req.reason}</div>}
+              {attachmentUrl && (
+                <div className="mb-3 rounded-lg border border-orange-100 bg-orange-50/60 p-2 text-xs text-gray-700">
+                  <div className="font-medium text-orange-700 mb-1">ไฟล์แนบ</div>
+                  {isImage ? (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      className="cursor-pointer"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setPreviewUrl(attachmentUrl);
+                        setPreviewName(attachmentName || 'ไฟล์แนบ');
+                        setPreviewZoom(1);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        setPreviewUrl(attachmentUrl);
+                        setPreviewName(attachmentName || 'ไฟล์แนบ');
+                        setPreviewZoom(1);
+                      }}
+                      aria-label="เปิดพรีวิวไฟล์แนบ"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={attachmentUrl}
+                        alt="attachment"
+                        className="max-h-40 w-full object-contain rounded cursor-pointer"
+                        style={{ cursor: 'pointer' }}
+                        draggable={false}
+                      />
+                    </div>
+                  ) : isPdf ? (
+                    <a href={attachmentUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-orange-700">
+                      <span className="inline-flex items-center justify-center rounded border border-orange-200 bg-white px-2 py-0.5 text-[10px] font-semibold">PDF</span>
+                      <span className="underline">{attachmentName || 'เปิดไฟล์แนบ'}</span>
+                    </a>
+                  ) : (
+                    <a href={attachmentUrl} target="_blank" rel="noopener noreferrer" className="text-orange-700 underline">
+                      {attachmentName || 'เปิดไฟล์แนบ'}
+                    </a>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2">
                 <Button size="sm" onClick={() => handleApprove(req.leaveId)} disabled={actionId === req.leaveId}
                   className="flex-1 bg-green-500 hover:bg-green-600 disabled:opacity-50">
@@ -1593,6 +1989,81 @@ function ApproveLeaveTab() {
         </div>
       )}
 
+      {bulkRejectOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="p-5 w-full max-w-sm">
+            <h3 className="font-bold text-gray-900 mb-3">เหตุผลที่ไม่อนุมัติ</h3>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+              placeholder="กรอกเหตุผล..." rows={3}
+              className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:border-red-400 focus:outline-none resize-none mb-3" />
+            <div className="flex gap-2">
+              <Button onClick={handleBulkReject} disabled={!rejectReason.trim() || actionId !== null}
+                className="flex-1 bg-red-500 hover:bg-red-600 disabled:opacity-50">ยืนยัน</Button>
+              <Button variant="outline" onClick={() => { setBulkRejectOpen(false); setRejectReason(''); }} className="flex-1">ยกเลิก</Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {previewUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setPreviewUrl('')}
+            aria-label="Close"
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <div className="text-sm font-semibold text-gray-800 truncate">{previewName}</div>
+              <button
+                type="button"
+                onClick={() => setPreviewUrl('')}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 text-sm">
+              <div className="text-gray-500">ซูม {Math.round(previewZoom * 100)}%</div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewZoom((z) => Math.max(1, Number((z - 0.25).toFixed(2))))}
+                  className="px-2 py-1 rounded border border-gray-200 text-gray-700"
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewZoom((z) => Math.min(3, Number((z + 0.25).toFixed(2))))}
+                  className="px-2 py-1 rounded border border-gray-200 text-gray-700"
+                >
+                  +
+                </button>
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-1 rounded border border-gray-200 text-gray-700"
+                >
+                  เปิดใหม่
+                </a>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl}
+                alt="attachment preview"
+                className="block h-auto"
+                style={{ width: `${previewZoom * 100}%`, maxWidth: 'none' }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Modal removed from here - it belongs in RequestLeaveTab */}
     </div>
   );
@@ -1600,13 +2071,24 @@ function ApproveLeaveTab() {
 
 // ─────────────────────────────── APPROVE LATE TAB ────────────────────────────
 function ApproveLateTab() {
-  const { user: authUser } = useAuth();
   const [requests, setRequests] = useState<LateRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState<number | null>(null);
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
-  const [msg, setMsg] = useState('');
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'warning' | 'info' } | null>(null);
+  const [query, setQuery] = useState('');
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const longPressTimer = useRef<number | null>(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewName, setPreviewName] = useState('');
+  const [previewZoom, setPreviewZoom] = useState(1);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'error') => {
+    setToast({ message, type });
+  };
 
   const load = useCallback(async () => {
     try {
@@ -1614,7 +2096,7 @@ function ApproveLateTab() {
       // SUPERADMIN can see AND approve all requests, including their own
       setRequests(r.lateRequests);
     } catch {
-      setMsg('โหลดข้อมูลไม่สำเร็จ');
+      showToast('โหลดข้อมูลไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
@@ -1626,13 +2108,12 @@ function ApproveLateTab() {
     setActionId(id);
     try {
       await lateRequestService.approveLateRequest(id);
-      setMsg('อนุมัติเรียบร้อยแล้ว');
+      showToast('อนุมัติเรียบร้อยแล้ว', 'success');
       load();
     } catch {
-      setMsg('เกิดข้อผิดพลาด');
+      showToast('เกิดข้อผิดพลาด');
     } finally {
       setActionId(null);
-      setTimeout(() => setMsg(''), 2000);
     }
   };
 
@@ -1641,31 +2122,169 @@ function ApproveLateTab() {
     setActionId(rejectId);
     try {
       await lateRequestService.rejectLateRequest(rejectId, rejectReason);
-      setMsg('ปฏิเสธคำขอแล้ว');
+      showToast('ปฏิเสธคำขอแล้ว', 'success');
       setRejectId(null);
       setRejectReason('');
       load();
     } catch {
-      setMsg('เกิดข้อผิดพลาด');
+      showToast('เกิดข้อผิดพลาด');
     } finally {
       setActionId(null);
-      setTimeout(() => setMsg(''), 2000);
     }
   };
 
+  const handleBulkApprove = async () => {
+    if (selectedIds.length === 0) return;
+    setActionId(-1);
+    try {
+      await Promise.all(selectedIds.map((id) => lateRequestService.approveLateRequest(id)));
+      showToast('อนุมัติรายการที่เลือกแล้ว', 'success');
+      setSelectedIds([]);
+      setSelectionMode(false);
+      load();
+    } catch {
+      showToast('เกิดข้อผิดพลาด');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const handleBulkReject = async () => {
+    if (selectedIds.length === 0 || !rejectReason.trim()) return;
+    setActionId(-1);
+    try {
+      await Promise.all(selectedIds.map((id) => lateRequestService.rejectLateRequest(id, rejectReason)));
+      showToast('ปฏิเสธรายการที่เลือกแล้ว', 'success');
+      setSelectedIds([]);
+      setSelectionMode(false);
+      setBulkRejectOpen(false);
+      setRejectReason('');
+      load();
+    } catch {
+      showToast('เกิดข้อผิดพลาด');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const toggleSelection = (id: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const startSelection = (id: number) => {
+    setSelectionMode(true);
+    setSelectedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  const handleTouchStart = (id: number) => {
+    if (selectionMode) return;
+    longPressTimer.current = window.setTimeout(() => startSelection(id), 450);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const filteredRequests = requests.filter((req) => {
+    if (!query.trim()) return true;
+    const needle = query.trim().toLowerCase();
+    const name = (req.user?.name || '').toLowerCase();
+    const employeeId = (req.user?.employeeId || '').toLowerCase();
+    const reason = (req.reason || '').toLowerCase();
+    return name.includes(needle) || employeeId.includes(needle) || reason.includes(needle);
+  });
+
+  const allVisibleIds = filteredRequests.map((req) => req.id).filter(Boolean) as number[];
+  const allSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedIds.includes(id));
+
   return (
     <div className="space-y-4">
-      {msg && <div className="p-3 bg-green-50 text-green-800 rounded-lg text-sm text-center">{msg}</div>}
+      <Toast
+        open={Boolean(toast)}
+        type={toast?.type}
+        message={toast?.message ?? ''}
+        onClose={() => setToast(null)}
+      />
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="ค้นหาชื่อ, รหัสพนักงาน, เหตุผล"
+            className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
+          />
+          <Button
+            type="button"
+            variant={selectionMode ? 'default' : 'outline'}
+            className="shrink-0"
+            onClick={() => {
+              setSelectionMode((prev) => !prev);
+              setSelectedIds([]);
+            }}
+          >
+            {selectionMode ? 'ยกเลิกเลือก' : 'เลือกหลายรายการ'}
+          </Button>
+        </div>
+
+        {selectionMode && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSelectedIds(allSelected ? [] : allVisibleIds)}
+              disabled={allVisibleIds.length === 0}
+            >
+              {allSelected ? 'ยกเลิกเลือกทั้งหมด' : 'เลือกทั้งหมด'}
+            </Button>
+            <Button
+              type="button"
+              className="bg-green-500 hover:bg-green-600"
+              disabled={selectedIds.length === 0 || actionId !== null}
+              onClick={handleBulkApprove}
+            >
+              อนุมัติที่เลือก ({selectedIds.length})
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-red-300 text-red-600 hover:bg-red-50"
+              disabled={selectedIds.length === 0 || actionId !== null}
+              onClick={() => {
+                setRejectId(null);
+                setRejectReason('');
+                setBulkRejectOpen(true);
+              }}
+            >
+              ไม่อนุมัติที่เลือก ({selectedIds.length})
+            </Button>
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <div className="text-sm text-gray-500 text-center py-8">กำลังโหลด...</div>
-      ) : requests.length === 0 ? (
+      ) : filteredRequests.length === 0 ? (
         <Card className="p-8 text-center">
           <h3 className="font-semibold text-gray-700">ไม่มีคำขอที่รอพิจารณา</h3>
         </Card>
       ) : (
-        requests.map(req => (
-          <Card key={req.id} className="p-4 border-l-4 border-orange-400">
+        filteredRequests.map(req => {
+          const isSelected = selectedIds.includes(req.id);
+          const attachmentUrl = req.attachmentUrl || '';
+          const isImage = attachmentUrl ? /\.(png|jpg|jpeg|gif)$/i.test(attachmentUrl) : false;
+          const isPdf = attachmentUrl ? /\.pdf$/i.test(attachmentUrl) : false;
+          const attachmentName = attachmentUrl ? attachmentUrl.split('/').pop() : '';
+          return (
+          <Card
+            key={req.id}
+            className={`p-4 border-l-4 border-orange-400 ${selectionMode && isSelected ? 'ring-2 ring-orange-400' : ''}`}
+            onTouchStart={() => handleTouchStart(req.id)}
+            onTouchEnd={handleTouchEnd}
+          >
             <div className="flex items-start justify-between mb-2">
               <div>
                 <div className="font-semibold text-gray-900">{req.user?.name || `User #${req.userId}`}</div>
@@ -1673,11 +2292,68 @@ function ApproveLateTab() {
               </div>
               <Badge variant="default">รอพิจารณา</Badge>
             </div>
+            {selectionMode && (
+              <label className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleSelection(req.id)}
+                  className="h-4 w-4 accent-orange-500"
+                />
+                เลือกรายการนี้
+              </label>
+            )}
             <div className="text-sm text-gray-700 mb-1">
               {new Date(req.requestDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })} · กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
               <span className="ml-2 text-orange-600 font-medium">สาย {req.lateMinutes} นาที</span>
             </div>
             {req.reason && <div className="text-xs text-gray-500 mb-3 bg-gray-50 p-2 rounded">เหตุผล: {req.reason}</div>}
+            {attachmentUrl && (
+              <div className="mb-3 rounded-lg border border-orange-100 bg-orange-50/60 p-2 text-xs text-gray-700">
+                <div className="font-medium text-orange-700 mb-1">ไฟล์แนบ</div>
+                {isImage ? (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer"
+                    style={{ cursor: 'pointer' }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setPreviewUrl(attachmentUrl);
+                      setPreviewName(attachmentName || 'ไฟล์แนบ');
+                      setPreviewZoom(1);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter' && event.key !== ' ') return;
+                      event.preventDefault();
+                      setPreviewUrl(attachmentUrl);
+                      setPreviewName(attachmentName || 'ไฟล์แนบ');
+                      setPreviewZoom(1);
+                    }}
+                    aria-label="เปิดพรีวิวไฟล์แนบ"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={attachmentUrl}
+                      alt="attachment"
+                      className="max-h-40 w-full object-contain rounded cursor-pointer"
+                      style={{ cursor: 'pointer' }}
+                      draggable={false}
+                    />
+                  </div>
+                ) : isPdf ? (
+                  <a href={attachmentUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-orange-700">
+                    <span className="inline-flex items-center justify-center rounded border border-orange-200 bg-white px-2 py-0.5 text-[10px] font-semibold">PDF</span>
+                    <span className="underline">{attachmentName || 'เปิดไฟล์แนบ'}</span>
+                  </a>
+                ) : (
+                  <a href={attachmentUrl} target="_blank" rel="noopener noreferrer" className="text-orange-700 underline">
+                    {attachmentName || 'เปิดไฟล์แนบ'}
+                  </a>
+                )}
+              </div>
+            )}
             <div className="flex gap-2">
               <Button size="sm" onClick={() => handleApprove(req.id)} disabled={actionId === req.id}
                 className="flex-1 bg-green-500 hover:bg-green-600 disabled:opacity-50">
@@ -1689,7 +2365,8 @@ function ApproveLateTab() {
               </Button>
             </div>
           </Card>
-        ))
+        );
+        })
       )}
 
       {rejectId && (
@@ -1707,6 +2384,81 @@ function ApproveLateTab() {
           </Card>
         </div>
       )}
+
+      {bulkRejectOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <Card className="p-5 w-full max-w-sm">
+            <h3 className="font-bold text-gray-900 mb-3">เหตุผลที่ไม่อนุมัติ</h3>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+              placeholder="กรอกเหตุผล..." rows={3}
+              className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:border-red-400 focus:outline-none resize-none mb-3" />
+            <div className="flex gap-2">
+              <Button onClick={handleBulkReject} disabled={!rejectReason.trim() || actionId !== null}
+                className="flex-1 bg-red-500 hover:bg-red-600 disabled:opacity-50">ยืนยัน</Button>
+              <Button variant="outline" onClick={() => { setBulkRejectOpen(false); setRejectReason(''); }} className="flex-1">ยกเลิก</Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {previewUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+          <button
+            type="button"
+            className="absolute inset-0"
+            onClick={() => setPreviewUrl('')}
+            aria-label="Close"
+          />
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <div className="text-sm font-semibold text-gray-800 truncate">{previewName}</div>
+              <button
+                type="button"
+                onClick={() => setPreviewUrl('')}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 text-sm">
+              <div className="text-gray-500">ซูม {Math.round(previewZoom * 100)}%</div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreviewZoom((z) => Math.max(1, Number((z - 0.25).toFixed(2))))}
+                  className="px-2 py-1 rounded border border-gray-200 text-gray-700"
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewZoom((z) => Math.min(3, Number((z + 0.25).toFixed(2))))}
+                  className="px-2 py-1 rounded border border-gray-200 text-gray-700"
+                >
+                  +
+                </button>
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-1 rounded border border-gray-200 text-gray-700"
+                >
+                  เปิดใหม่
+                </a>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl}
+                alt="attachment preview"
+                className="block h-auto"
+                style={{ width: `${previewZoom * 100}%`, maxWidth: 'none' }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1721,11 +2473,11 @@ export default function SuperAdminLeaveRequestPage() {
       </Card>
 
       <Tabs defaultValue="my-leave" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 text-xs">
+        <TabsList className="sticky top-20 z-30 grid w-full grid-cols-4 text-xs">
           <TabsTrigger value="approve-leave">อนุมัติลา</TabsTrigger>
           <TabsTrigger value="approve-late">อนุมัติสาย</TabsTrigger>
           <TabsTrigger value="my-leave">ขอลา</TabsTrigger>
-          <TabsTrigger value="my-late">ขอสาย</TabsTrigger>
+          <TabsTrigger value="my-late">ขอมาสาย</TabsTrigger>
         </TabsList>
         <TabsContent value="approve-leave" className="mt-4">
           <ApproveLeaveTab />

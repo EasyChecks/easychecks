@@ -93,6 +93,7 @@ export const getMyLeaveRequests = asyncHandler(async (req: Request, res: Respons
   }
 
   const status = req.query.status as 'PENDING' | 'APPROVED' | 'REJECTED' | undefined;
+  const query = req.query.query ? String(req.query.query) : undefined;
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 10;
 
@@ -100,7 +101,8 @@ export const getMyLeaveRequests = asyncHandler(async (req: Request, res: Respons
     userId,
     status,
     skip,
-    take
+    take,
+    query
   );
 
   sendSuccess(res, result, 'ดึงใบลาสำเร็จ');

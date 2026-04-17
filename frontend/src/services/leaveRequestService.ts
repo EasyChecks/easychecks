@@ -58,7 +58,7 @@ export interface CreateLeaveRequestDTO {
   leaveHours?: number;
 }
 export const leaveRequestService = {
-  async getMyLeaveRequests(params?: { status?: string; skip?: number; take?: number }) {
+  async getMyLeaveRequests(params?: { status?: string; query?: string; skip?: number; take?: number }) {
     const res = await api.get('/leave-requests/my', { params });
     const raw = res.data.data as { data: LeaveRequest[]; total: number };
     return { leaveRequests: raw.data ?? [], total: raw.total };

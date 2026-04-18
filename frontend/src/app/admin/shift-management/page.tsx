@@ -50,6 +50,7 @@ export default function ShiftManagementPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<Shift | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [editingShiftGroup, setEditingShiftGroup] = useState<ShiftGroup | null>(null);
   const [searchText, setSearchText] = useState('');
   const [filterShiftType, setFilterShiftType] = useState<'ALL' | 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM'>('ALL');
   const [filterActive, setFilterActive] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
@@ -134,6 +135,7 @@ export default function ShiftManagementPage() {
 
   const handleCreateShift = () => {
     setEditingShift(null);
+    setEditingShiftGroup(null);
     setEmployeeSearchText('');
     setEmployeeBranchFilter('ALL');
     setFormData({
@@ -151,8 +153,10 @@ export default function ShiftManagementPage() {
     setShowCreateModal(true);
   };
 
-  const handleEditShift = (shift: Shift) => {
+  const handleEditShift = (group: ShiftGroup) => {
+    const shift = group.representative;
     setEditingShift(shift);
+    setEditingShiftGroup(group);
     setEmployeeSearchText('');
     setEmployeeBranchFilter('ALL');
     setFormData({
@@ -165,7 +169,7 @@ export default function ShiftManagementPage() {
       specificDays: shift.specificDays || [],
       customDate: shift.customDate || '',
       locationId: shift.locationId ?? shift.location?.id,
-      userIds: shift.userId ? [shift.userId] : [],
+      userIds: group.assignees.map((assignee) => assignee.id),
     });
     setShowCreateModal(true);
   };
@@ -254,17 +258,10 @@ export default function ShiftManagementPage() {
       return;
     }
 
-    if (editingShift && formData.userIds.length > 1) {
-      setFeedbackModal({ type: 'error', message: 'การแก้ไขกะรองรับพนักงานได้ครั้งละ 1 คน' });
-      return;
-    }
-
     setLoading(true);
     try {
       if (editingShift) {
-        // Update existing shift
-        const targetUserId = formData.userIds[0];
-        const updateData: UpdateShiftRequest = {
+        const bulkUpdateData: CreateShiftRequest = {
           name: formData.name,
           shiftType: formData.shiftType,
           startTime: formData.startTime,
@@ -272,28 +269,31 @@ export default function ShiftManagementPage() {
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
           locationId: formData.locationId,
-          userId: targetUserId,
+          userIds: formData.userIds,
+          replaceExisting: true,
         };
 
         if (formData.shiftType === 'SPECIFIC_DAY') {
-          updateData.specificDays = formData.specificDays;
+          bulkUpdateData.specificDays = formData.specificDays;
         } else if (formData.shiftType === 'CUSTOM') {
-          updateData.customDate = formData.customDate;
+          bulkUpdateData.customDate = formData.customDate;
         }
 
-        try {
-          await shiftService.update(editingShift.id, updateData);
-        } catch (error: any) {
-          const message = error?.response?.data?.message || error?.message || '';
-          if (!isActiveShiftConflictError(message)) throw error;
+        await shiftService.create(bulkUpdateData);
 
-          setReassignModal({
-            mode: 'edit',
-            message,
-            shiftId: editingShift.id,
-            updateData,
-          });
-          return;
+        if (editingShiftGroup) {
+          const selectedSet = new Set(formData.userIds);
+          const removedShiftIds = editingShiftGroup.shifts
+            .filter((shift) => typeof shift.userId === 'number' && !selectedSet.has(shift.userId))
+            .map((shift) => shift.id);
+
+          if (removedShiftIds.length > 0) {
+            await Promise.all(
+              removedShiftIds.map((shiftId) =>
+                shiftService.delete(shiftId, 'ปรับปรุงรายชื่อพนักงานในกะ'),
+              ),
+            );
+          }
         }
       } else {
         // Create new shifts in one bulk request (all-or-nothing)
@@ -868,7 +868,7 @@ export default function ShiftManagementPage() {
                       ดูรายละเอียด
                     </Button>
                     <Button
-                      onClick={() => handleEditShift(shift)}
+                      onClick={() => handleEditShift(group)}
                       variant="outline"
                       size="sm"
                       disabled={loading}
@@ -902,7 +902,7 @@ export default function ShiftManagementPage() {
 
               <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-gray-600">
-                  ทั้งหมด {filteredShifts.length} รายการ | หน้า {page} / {totalPages}
+                  ทั้งหมด {groupedFilteredShifts.length} รายการ | หน้า {page} / {totalPages}
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -1128,56 +1128,34 @@ export default function ShiftManagementPage() {
                     </select>
                   </div>
 
-                  {editingShift ? (
-                    <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
-                      {assignableUsers.map((user) => (
+                  <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
+                    {assignableUsers.map((user) => {
+                      const checked = formData.userIds.includes(user.id);
+                      return (
                         <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
                           <span className="text-sm text-gray-800">{formatAssigneeLabel(user)}</span>
                           <input
-                            type="radio"
-                            name="edit-shift-user"
-                            checked={formData.userIds[0] === user.id}
-                            onChange={() => setFormData({ ...formData, userIds: [user.id] })}
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setFormData((prev) => ({
+                                ...prev,
+                                userIds: checked
+                                  ? prev.userIds.filter((id) => id !== user.id)
+                                  : [...prev.userIds, user.id],
+                              }));
+                            }}
                             className="h-4 w-4"
                           />
                         </label>
-                      ))}
-                      {assignableUsers.length === 0 && (
-                        <p className="text-sm text-center text-gray-500">ไม่พบพนักงานตามเงื่อนไขที่กรอง</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
-                      {assignableUsers.map((user) => {
-                        const checked = formData.userIds.includes(user.id);
-                        return (
-                          <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                            <span className="text-sm text-gray-800">{formatAssigneeLabel(user)}</span>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setFormData((prev) => ({
-                                  ...prev,
-                                  userIds: checked
-                                    ? prev.userIds.filter((id) => id !== user.id)
-                                    : [...prev.userIds, user.id],
-                                }));
-                              }}
-                              className="h-4 w-4"
-                            />
-                          </label>
-                        );
-                      })}
-                      {assignableUsers.length === 0 && (
-                        <p className="text-sm text-center text-gray-500">ไม่พบพนักงานตามเงื่อนไขที่กรอง</p>
-                      )}
-                    </div>
-                  )}
+                      );
+                    })}
+                    {assignableUsers.length === 0 && (
+                      <p className="text-sm text-center text-gray-500">ไม่พบพนักงานตามเงื่อนไขที่กรอง</p>
+                    )}
+                  </div>
                   <p className="mt-2 text-xs text-gray-500">
-                    {editingShift
-                      ? 'แก้ไขได้ครั้งละ 1 พนักงาน'
-                      : `เลือกแล้ว ${formData.userIds.length} คน (สามารถสร้างกะเดียวกันให้หลายคนได้)`}
+                    เลือกแล้ว {formData.userIds.length} คน (สามารถ{editingShift ? 'เพิ่ม/ลดรายชื่อพนักงานในกะได้' : 'สร้างกะเดียวกันให้หลายคนได้'})
                   </p>
                   {selectedAssignedUsers.length > 0 && (
                     <p className="mt-1 text-xs text-gray-600">

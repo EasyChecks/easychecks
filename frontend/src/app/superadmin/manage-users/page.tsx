@@ -69,6 +69,7 @@ export default function AdminManageUser() {
   
   // CSV Import
   const [csvData, setCsvData] = useState<CsvUserData[]>([]);
+  const [csvText, setCsvText] = useState<string>('');
   
   // Grouped: UI States (3 → 1)
   const [ui, setUi] = useState<{
@@ -350,20 +351,52 @@ export default function AdminManageUser() {
   };
 
   // Create new user
-  const handleCreateUser = (newUser: User) => {
-    const updatedUsers = [...users, newUser];
-    setUsers(updatedUsers);
-    
-    setUi(prev => ({
-      ...prev,
-      alertDialog: {
-        isOpen: true,
-        type: 'success',
-        title: 'เพิ่มผู้ใช้สำเร็จ',
-        message: `เพิ่ม ${newUser.name} เข้าระบบเรียบร้อยแล้ว\n\nรหัสพนักงาน: ${newUser.employeeId}\nรหัสผ่าน: ${newUser.password}`,
-        autoClose: false
-      }
-    }));
+  const handleCreateUser = async (newUser: User) => {
+    try {
+      const created = await userService.createUser({
+        name: newUser.name,
+        email: newUser.email,
+        phone: newUser.phone,
+        department: newUser.department,
+        position: newUser.position,
+        role: newUser.role,
+        title: newUser.title,
+        gender: newUser.gender,
+        branchCode: newUser.provinceCode || newUser.branch,
+        nationalId: newUser.nationalId,
+        birthDate: newUser.birthDate,
+        address: newUser.address,
+        bloodType: newUser.bloodType,
+        emergencyContact: newUser.emergencyContact,
+      });
+
+      setUsers(prev => [...prev, created]);
+
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'success',
+          title: 'เพิ่มผู้ใช้สำเร็จ',
+          message: `เพิ่ม ${created.name} เข้าระบบเรียบร้อยแล้ว\n\nรหัสพนักงาน: ${created.employeeId}`,
+          autoClose: false
+        }
+      }));
+    } catch (err: unknown) {
+      const axiosMsg = (err as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message
+        ?? (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const message = axiosMsg || (err instanceof Error ? err.message : 'ไม่สามารถสร้างผู้ใช้ได้');
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: 'เกิดข้อผิดพลาด',
+          message,
+          autoClose: true
+        }
+      }));
+    }
   };
 
   // CSV Import
@@ -394,9 +427,9 @@ export default function AdminManageUser() {
     reader.readAsText(file);
   };
 
-  const handleParseCsvData = (csvText: string) => {
+  const handleParseCsvData = (text: string) => {
     try {
-      const data = parseCsvData(csvText);
+      const data = parseCsvData(text);
       
       if (data.length === 0) {
         setUi(prev => ({
@@ -412,6 +445,7 @@ export default function AdminManageUser() {
       }
 
       setCsvData(data);
+      setCsvText(text);
       setModals(prev => ({ ...prev, csv: true }));
     } catch {
       setUi(prev => ({
@@ -426,44 +460,56 @@ export default function AdminManageUser() {
     }
   };
 
-  const confirmCsvImport = () => {
-    const processedUsers = processCsvUsers(csvData, users);
-    const validationErrors = validateUserData(processedUsers, users);
-    
-    if (validationErrors.length > 0) {
+  const confirmCsvImport = async () => {
+    try {
       setUi(prev => ({
         ...prev,
         alertDialog: {
           isOpen: true,
-          type: 'error',
-          title: `พบข้อมูลซ้ำ (${validationErrors.length} รายการ)`,
-          message: validationErrors.slice(0, 5).join('\n')
+          type: 'info',
+          title: 'กำลังนำเข้าข้อมูล',
+          message: 'กรุณารอสักครู่...',
+          autoClose: false
         }
       }));
-      return;
-    }
 
-    const updatedUsers = [...users, ...processedUsers];
-    setUsers(updatedUsers);
-    
-    setModals(prev => ({ ...prev, csv: false }));
-    setCsvData([]);
+      const result = await userService.bulkCreateUsers(csvText);
 
-    setUi(prev => ({
-      ...prev,
-      alertDialog: {
-        isOpen: true,
-        type: 'success',
-        title: 'นำเข้าสำเร็จ',
-        message: `นำเข้าข้อมูลพนักงาน ${processedUsers.length} บัญชี เรียบร้อยแล้ว`,
-        autoClose: true
+      // Reload users from server
+      if (currentUser) {
+        const loadedUsers = await userService.getManageUsers(currentUser);
+        setUsers(loadedUsers.users);
       }
-    }));
+
+      setModals(prev => ({ ...prev, csv: false }));
+      setCsvData([]);
+      setCsvText('');
+
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'success',
+          title: 'นำเข้าสำเร็จ',
+          message: `นำเข้าข้อมูลพนักงาน ${result.success} บัญชี เรียบร้อยแล้ว${result.failed > 0 ? `\nล้มเหลว ${result.failed} บัญชี` : ''}`,
+          autoClose: true
+        }
+      }));
+    } catch (err: unknown) {
+      const axiosMsg = (err as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message
+        ?? (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const msg = axiosMsg || (err instanceof Error ? err.message : 'ไม่สามารถนำเข้าข้อมูลได้');
+      setUi(prev => ({
+        ...prev,
+        alertDialog: { isOpen: true, type: 'error', title: 'เกิดข้อผิดพลาด', message: msg, autoClose: false }
+      }));
+    }
   };
 
   const closeCsvModal = () => {
     setModals(prev => ({ ...prev, csv: false }));
     setCsvData([]);
+    setCsvText('');
   };
 
   const handleAttendanceEdit = (editData: AttendanceEditData | null) => {
@@ -521,20 +567,22 @@ export default function AdminManageUser() {
             <p className="mt-1 text-sm text-gray-500">จัดการสิทธิ์การใช้งานและข้อมูลผู้ใช้ในระบบ</p>
           </div>
           <div className="flex items-center gap-2">
-            <label className="cursor-pointer">
-              <Button className="flex items-center gap-2 bg-gray-900 hover:bg-gray-700">
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                นำเข้าไฟล์ CSV
-              </Button>
-              <input 
-                type="file" 
-                accept=".csv" 
-                onChange={handleCsvFileChange}
-                className="hidden"
-              />
-            </label>
+            <input 
+              id="csv-file-input-super"
+              type="file" 
+              accept=".csv" 
+              onChange={handleCsvFileChange}
+              className="hidden"
+            />
+            <Button 
+              onClick={() => document.getElementById('csv-file-input-super')?.click()}
+              className="flex items-center gap-2 bg-gray-900 hover:bg-gray-700"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              นำเข้าไฟล์ CSV
+            </Button>
             <Button 
               onClick={() => setModals(prev => ({ ...prev, createUser: true }))}
               className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700"

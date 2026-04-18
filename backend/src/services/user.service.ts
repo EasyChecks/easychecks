@@ -68,6 +68,10 @@ export interface CreateUserDTO {
   branchId: number;               // ← สาขา (บังคับ — ใช้สร้าง employeeId)
   role?: Role;                    // ← role (optional — default = USER)
   status?: UserStatus;            // ← status (optional — default = ACTIVE)
+  department?: string;            // ← แผนก (optional)
+  position?: string;              // ← ตำแหน่ง (optional)
+  bloodType?: string;             // ← กรุ๊ปเลือด (optional)
+  address?: string;               // ← ที่อยู่ (optional)
   createdByUserId?: number;       // ← ID ของ Admin/SuperAdmin ที่สร้าง (สำหรับ audit log)
   creatorRole?: string;           // ← role ของผู้สร้าง (ADMIN/SUPERADMIN)
   creatorBranchId?: number;       // ← สาขาของผู้สร้าง (สำหรับตรวจสิทธิ์)
@@ -223,7 +227,7 @@ async function generateEmployeeId(branchId: number): Promise<string> {
 
   // ✅ STEP 3: สร้าง running number (userCount + 1, pad 3 หลัก)
   // ═══════════════════════════════════════════════════════════
-  const runningNumber = (userCount + 1).toString().padStart(3, '0');  // ← 1 → "001", 10 → "010"
+  const runningNumber = (userCount + 1).toString().padStart(4, '0');  // ← 1 → "0001", 10 → "0010"
 
   // ✅ STEP 4: รวมเป็น employeeId
   // ══════════════════════════════
@@ -246,7 +250,7 @@ async function generateEmployeeId(branchId: number): Promise<string> {
 
     if (maxUser) {
       const maxNumber = parseInt(maxUser.employeeId.replace(branchCode, ''), 10);  // ← ดึงตัวเลขออก
-      return `${branchCode}${(maxNumber + 1).toString().padStart(3, '0')}`;        // ← +1 แล้ว pad 3 หลัก
+      return `${branchCode}${(maxNumber + 1).toString().padStart(4, '0')}`;        // ← +1 แล้ว pad 4 หลัก
     }
   }
 
@@ -439,6 +443,10 @@ export const createUser = async (data: CreateUserDTO) => {
       branchId: data.branchId,                       // ← สาขา
       role: data.role || 'USER',                     // ← role (default = USER)
       status: data.status || 'ACTIVE',               // ← status (default = ACTIVE)
+      department: data.department || null,            // ← แผนก
+      position: data.position || null,               // ← ตำแหน่ง
+      bloodType: data.bloodType || null,             // ← กรุ๊ปเลือด
+      address: data.address || null,                 // ← ที่อยู่
     },
     include: {
       branch: {

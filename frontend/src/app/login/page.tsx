@@ -10,7 +10,7 @@
  *   ผู้ใช้กรอกฟอร์ม → handleSubmit → AuthContext.login() → ได้ role → redirect
  */
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
@@ -25,6 +25,15 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+
+  // โหลด username ที่จำไว้จาก localStorage (ถ้ามี)
+  useEffect(() => {
+    const saved = localStorage.getItem('rememberedUsername');
+    if (saved) {
+      setUsername(saved);
+      setRememberMe(true);
+    }
+  }, []);
   const [showPassword, setShowPassword] = useState(false); // toggle ดูรหัสผ่าน
   const [isLoading, setIsLoading] = useState(false);       // แสดง spinner ระหว่าง login
   const [error, setError] = useState('');                  // ข้อความผิดพลาดจาก API

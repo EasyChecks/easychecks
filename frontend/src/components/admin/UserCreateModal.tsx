@@ -33,6 +33,8 @@ export default function UserCreateModal({
     department: '',
     position: '',
     role: 'user' as 'user' | 'manager' | 'admin' | 'superadmin',
+    title: 'MR' as 'MR' | 'MRS' | 'MISS',
+    gender: 'MALE' as 'MALE' | 'FEMALE',
     provinceCode: 'BKK',
     branchCode: '001',
     nationalId: '',
@@ -71,6 +73,8 @@ export default function UserCreateModal({
       birthDate: formData.birthDate,
       address: formData.address,
       bloodType: formData.bloodType,
+      title: formData.title,
+      gender: formData.gender,
       emergencyContact: {
         name: formData.emergencyContactName,
         phone: formData.emergencyContactPhone,
@@ -135,6 +139,31 @@ export default function UserCreateModal({
               onChange={(value) => setFormData({ ...formData, position: value })}
               required
             />
+            <div>
+              <label className="block mb-2 text-sm font-semibold text-gray-700">คำนำหน้า *</label>
+              <select
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value as 'MR' | 'MRS' | 'MISS' })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none"
+                required
+              >
+                <option value="MR">นาย</option>
+                <option value="MRS">นาง</option>
+                <option value="MISS">นางสาว</option>
+              </select>
+            </div>
+            <div>
+              <label className="block mb-2 text-sm font-semibold text-gray-700">เพศ *</label>
+              <select
+                value={formData.gender}
+                onChange={(e) => setFormData({ ...formData, gender: e.target.value as 'MALE' | 'FEMALE' })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none"
+                required
+              >
+                <option value="MALE">ชาย</option>
+                <option value="FEMALE">หญิง</option>
+              </select>
+            </div>
             <div>
               <label className="block mb-2 text-sm font-semibold text-gray-700">บทบาท *</label>
               <select

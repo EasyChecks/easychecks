@@ -47,6 +47,8 @@ export interface User {
   role: 'user' | 'manager' | 'admin' | 'superadmin';
   department: string;
   position: string;
+  title?: string;
+  gender?: string;
   status: 'active' | 'leave' | 'suspended' | 'pending';
   branch?: string;
   branchCode?: string;

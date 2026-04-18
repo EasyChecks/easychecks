@@ -28,6 +28,7 @@ model User {
   department                                              String?              @map("department")
   position                                                String?              @map("position")
   bloodType                                               String?              @map("blood_type")
+  address                                                 String?              @map("address")
   branchId                                                Int?                 @map("branch_id")
   role                                                    Role                 @default(USER)
   status                                                  UserStatus           @default(ACTIVE)

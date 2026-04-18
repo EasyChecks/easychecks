@@ -79,9 +79,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // บันทึก username ถ้าผู้ใช้ติ๊ก "จดจำฉันไว้"
       if (credentials.rememberMe) {
-        sessionStorage.setItem('rememberedUsername', credentials.username);
+        localStorage.setItem('rememberedUsername', credentials.username);
       } else {
-        sessionStorage.removeItem('rememberedUsername');
+        localStorage.removeItem('rememberedUsername');
       }
 
       return response.dashboardMode as UserRole; // dashboardMode บอก redirect target ที่ถูกต้อง
@@ -103,7 +103,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     sessionStorage.removeItem('authUser');
     sessionStorage.removeItem('token');
-    sessionStorage.removeItem('rememberedUsername');
     setError(null);
   };
 

@@ -19,6 +19,7 @@ function mapShift(raw: any): Shift {
     location: raw.location ? {
       ...raw.location,
       id: raw.location.locationId ?? raw.location.id,
+      name: raw.location.name ?? raw.location.locationName ?? '',
     } : undefined,
     user: raw.user ? {
       ...raw.user,

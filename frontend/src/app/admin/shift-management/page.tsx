@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { shiftService } from '@/services/shift';
 import { userService, type UserServiceUser } from '@/services/user';
+import { locationService, type LocationItem } from '@/services/locationService';
 import {
   Shift,
   CreateShiftRequest,
@@ -31,6 +32,7 @@ const shiftTypes = [
 export default function ShiftManagementPage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [users, setUsers] = useState<UserServiceUser[]>([]);
+  const [locations, setLocations] = useState<LocationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<Shift | null>(null);
@@ -79,6 +81,7 @@ export default function ShiftManagementPage() {
     lateThresholdMinutes: number;
     specificDays: ('MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY')[];
     customDate: string;
+    locationId?: number;
     userIds: number[];
   }>({
     name: '',
@@ -89,6 +92,7 @@ export default function ShiftManagementPage() {
     lateThresholdMinutes: 30,
     specificDays: [],
     customDate: '',
+    locationId: undefined,
     userIds: [],
   });
 
@@ -99,12 +103,14 @@ export default function ShiftManagementPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [shiftsData, usersData] = await Promise.all([
+      const [shiftsData, usersData, locationsData] = await Promise.all([
         shiftService.getAll(),
         userService.getAll(),
+        locationService.getAll({ isActive: true, take: 200 }),
       ]);
       setShifts(shiftsData);
       setUsers(usersData.filter(isUserActive));
+      setLocations(locationsData.data ?? []);
     } catch (error) {
       console.error('Error loading data:', error);
       setFeedbackModal({ type: 'error', message: 'เกิดข้อผิดพลาดในการโหลดข้อมูล' });
@@ -126,6 +132,7 @@ export default function ShiftManagementPage() {
       lateThresholdMinutes: 30,
       specificDays: [],
       customDate: '',
+      locationId: undefined,
       userIds: [],
     });
     setShowCreateModal(true);
@@ -144,6 +151,7 @@ export default function ShiftManagementPage() {
       lateThresholdMinutes: shift.lateThresholdMinutes,
       specificDays: shift.specificDays || [],
       customDate: shift.customDate || '',
+      locationId: shift.locationId ?? shift.location?.id,
       userIds: shift.userId ? [shift.userId] : [],
     });
     setShowCreateModal(true);
@@ -244,6 +252,7 @@ export default function ShiftManagementPage() {
           endTime: formData.endTime,
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
+          locationId: formData.locationId,
           userId: targetUserId,
         };
 
@@ -276,6 +285,7 @@ export default function ShiftManagementPage() {
           endTime: formData.endTime,
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
+          locationId: formData.locationId,
           userIds: formData.userIds,
         };
 
@@ -976,6 +986,25 @@ export default function ShiftManagementPage() {
                   </div>
                 )}
 
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">สถานที่</label>
+                  <select
+                    value={formData.locationId ?? ''}
+                    onChange={(e) => {
+                      const nextLocationId = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                      setFormData({ ...formData, locationId: nextLocationId });
+                    }}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                  >
+                    <option value="">-- ไม่ระบุสถานที่ --</option>
+                    {locations.map((location) => (
+                      <option key={location.locationId} value={location.locationId}>
+                        {location.locationName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Employee Assignment */}
                 <div>
                   <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -1002,21 +1031,23 @@ export default function ShiftManagementPage() {
                   </div>
 
                   {editingShift ? (
-                    <select
-                      value={formData.userIds[0] || ''}
-                      onChange={(e) => {
-                        const nextId = e.target.value ? parseInt(e.target.value) : undefined;
-                        setFormData({ ...formData, userIds: nextId ? [nextId] : [] });
-                      }}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
-                    >
-                      <option value="">-- เลือกพนักงาน --</option>
+                    <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
                       {assignableUsers.map((user) => (
-                        <option key={user.id} value={user.id}>
-                          {user.name} ({user.employeeId}) - {getUserBranchName(user)}
-                        </option>
+                        <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
+                          <span className="text-sm text-gray-800">{user.name} ({user.employeeId}) - {getUserBranchName(user)}</span>
+                          <input
+                            type="radio"
+                            name="edit-shift-user"
+                            checked={formData.userIds[0] === user.id}
+                            onChange={() => setFormData({ ...formData, userIds: [user.id] })}
+                            className="h-4 w-4"
+                          />
+                        </label>
                       ))}
-                    </select>
+                      {assignableUsers.length === 0 && (
+                        <p className="text-sm text-center text-gray-500">ไม่พบพนักงานตามเงื่อนไขที่กรอง</p>
+                      )}
+                    </div>
                   ) : (
                     <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
                       {assignableUsers.map((user) => {

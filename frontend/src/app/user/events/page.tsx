@@ -132,7 +132,7 @@ export default function UserEventsPage() {
                         <Badge variant="active">กำลังดำเนินการ</Badge>
                       )}
                       {status === 'upcoming' && (
-                        <Badge variant="pending">กำลังจะมาถึง</Badge>
+                        <Badge variant="info">กำลังจะมาถึง</Badge>
                       )}
                       {getAttendanceBadge(event.eventId)}
                     </div>

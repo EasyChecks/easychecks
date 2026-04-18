@@ -26,6 +26,7 @@ export interface EmployeeToday {
   checkIn: string | null;
   checkOut: string | null;
   lateMinutes: number;
+  eventId: number | null;
 }
 
 export interface BranchMapItem {
@@ -45,6 +46,26 @@ export interface LocationEvent {
   actualDistance: number;
   allowedRadius: number;
   timestamp: string;
+}
+
+export interface EventStatsPerson {
+  userId: number;
+  employeeId: string;
+  name: string;
+  branch: string;
+  checkIn?: string;
+  status?: string;
+}
+
+export interface EventStatsResponse {
+  eventId: number;
+  eventName: string;
+  participantType: string;
+  isOpenEvent: boolean;
+  joined: EventStatsPerson[];
+  notJoined: EventStatsPerson[];
+  joinedCount: number;
+  notJoinedCount: number;
 }
 
 
@@ -94,6 +115,15 @@ export const dashboardService = {
     if (date) params.date = date;
     const res = await api.get('/dashboard/location-events', { params });
     return { data: res.data.data, total: res.data.total };
+  },
+
+  /**
+   * GET /api/dashboard/event-stats/:eventId
+   * สถิติการเข้าร่วม / ยังไม่เข้าร่วมของกิจกรรม
+   */
+  async getEventStats(eventId: number): Promise<EventStatsResponse> {
+    const res = await api.get(`/dashboard/event-stats/${eventId}`);
+    return res.data.data;
   },
 };
 

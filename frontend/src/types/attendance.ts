@@ -75,6 +75,7 @@ export interface Attendance {
 export interface CheckInRequest {
   shiftId?: number;
   locationId?: number;
+  eventId?: number;
   photo?: string;
   latitude: number;
   longitude: number;

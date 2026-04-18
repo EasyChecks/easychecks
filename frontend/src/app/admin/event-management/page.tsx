@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, Suspense } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import eventService, { EventItem as ApiEventItem, ParticipantType, EventStatistics, EventListParams, CreateEventRequest } from '@/services/eventService';
 import locationService, { LocationItem } from '@/services/locationService';
 import dashboardService, { BranchMapItem } from '@/services/dashboardService';
+import { userService, UserServiceUser } from '@/services/user';
 import { EventData, LocationData, DialogState } from '@/types/event';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -64,6 +65,7 @@ const apiEventToEventData = (e: ApiEventItem): EventData => {
       : '',
     teams: '',
     status,
+    creatorRole: e.creator?.role,
     createdAt: e.createdAt,
   };
 };
@@ -85,9 +87,12 @@ const toISO = (date: string, time: string) => {
   return d.toISOString();
 };
 
-export default function EventManagement() {
+export default function EventManagement({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
   const { user } = useAuth();
+  const mapFlySeq = useRef(0);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const [mapFlyTo, setMapFlyTo] = useState<{ lat: number; lng: number; zoom?: number; seq: number } | undefined>();
   
   // ── API data state ──
   const [events, setEvents] = useState<EventData[]>([]);
@@ -119,15 +124,27 @@ export default function EventManagement() {
           dashboardService.getBranchesMap(),
         ]);
         // Filter out deleted locations
-        const nonDeletedLocations = locsResp.data.filter(loc => !loc.deletedAt);
+        const nonDeletedLocations = locsResp.data.filter(loc => !loc.deletedAt && loc.locationType !== 'EVENT' && loc.isActive);
         setLocations(nonDeletedLocations.map(apiLocationToLocationData));
         setBranches(branchesResp.data);
+        // Load users in admin's branch only
+        if (user?.branchId) {
+          const usersResp = await userService.getManageUsers({} as never, { branchId: user.branchId, limit: 500 });
+          setAllUsers(usersResp.users.map(u => ({
+            id: Number(u.id),
+            name: u.name,
+            employeeId: u.employeeId || '',
+            email: u.email || '',
+            role: u.role as UserServiceUser['role'],
+            isActive: u.isActive ?? true,
+          })));
+        }
       } catch (err) {
         console.error('[EventManagement] load static error:', err);
       }
     };
     loadStatic();
-  }, []);
+  }, [user?.branchId]);
 
   // ── Fetch events with filters ──
   const isFirstLoad = events.length === 0 && !searchQuery && !filterParticipantType && !filterStatus && !filterStartDate && !filterEndDate;
@@ -143,6 +160,10 @@ export default function EventManagement() {
       if (filterParticipantType) params.participantType = filterParticipantType;
       if (filterStartDate) params.startDate = new Date(filterStartDate).toISOString();
       if (filterEndDate) params.endDate = new Date(filterEndDate).toISOString();
+      // Let the backend filter by branch: returns ALL-type events + BRANCH events for this branch
+      if (user?.role === 'admin' && user?.branchId) {
+        params.branchId = user.branchId;
+      }
 
       const eventsResp = await eventService.getAll(params);
       
@@ -150,23 +171,6 @@ export default function EventManagement() {
       
       // Map to EventData format
       let filteredEvents = nonDeletedEvents.map(apiEventToEventData);
-      
-      // ADMIN can only see events created by users in their branch
-      if (user?.role === 'admin' && user?.branchId) {
-        filteredEvents = filteredEvents.filter(e => {
-          // Get event from non-deleted data to check creator's branch
-          const eventData = nonDeletedEvents.find(ev => String(ev.eventId) === e.id);
-          if (!eventData || !eventData.creator) return false;
-          
-          return eventData.creator.branchId === user.branchId;
-        });
-      }
-      
-      // Filter by status (frontend filter since API doesn't support it)
-      if (filterStatus) {
-        filteredEvents = filteredEvents.filter(e => e.status === filterStatus);
-      }
-      
       // Sort: upcoming events first (nearest date), then ongoing, then completed
       const now = new Date();
       filteredEvents.sort((a, b) => {
@@ -249,6 +253,9 @@ export default function EventManagement() {
   const [participantType, setParticipantType] = useState<ParticipantType>('ALL');
   const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [allUsers, setAllUsers] = useState<UserServiceUser[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
 
   const [editFormData, setEditFormData] = useState<Partial<EventData>>({});
 
@@ -400,6 +407,9 @@ export default function EventManagement() {
         if (participantType === 'ROLE' && selectedRoles.length > 0) {
           payload.participants.roles = selectedRoles;
         }
+        if (participantType === 'INDIVIDUAL' && selectedUserIds.length > 0) {
+          payload.participants.userIds = selectedUserIds;
+        }
       }
 
       await eventService.create(payload);
@@ -410,12 +420,14 @@ export default function EventManagement() {
       setParticipantType('ALL');
       setSelectedBranchIds([]);
       setSelectedRoles([]);
+      setSelectedUserIds([]);
+      setUserSearchQuery('');
       setIsAddingEvent(false);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setAlertDialog({ isOpen: true, type: 'error', title: 'ผิดพลาด', message: e.response?.data?.error || 'เวลาสร้างกิจกรรมล้มเหลว' });
     }
-  }, [formData, participantType, selectedBranchIds, selectedRoles, fetchEvents]);
+  }, [formData, participantType, selectedBranchIds, selectedRoles, selectedUserIds, fetchEvents]);
 
   const handleEditEvent = useCallback((event: EventData) => {
     setEditingEventId(event.id);
@@ -496,9 +508,8 @@ export default function EventManagement() {
     );
   }
 
-  return (
-    <div className="min-h-screen p-4 bg-slate-50 sm:p-6">
-      <Card className="p-6 border border-orange-100 shadow-sm">
+  const content = (
+    <>
         {/* Header */}
         <div className="flex flex-col items-start justify-between gap-4 mb-6 sm:flex-row sm:items-center">
           <div>
@@ -562,12 +573,11 @@ export default function EventManagement() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 mb-6">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4 mb-6">
                   {[
                     { label: 'ทั้งหมด', value: eventStats.totalEvents, bg: '#f3f4f6', text: '#374151', border: '#d1d5db' },
-                    { label: 'ใช้งานอยู่', value: eventStats.activeEvents, bg: '#dcfce7', text: '#15803d', border: '#86efac' },
+                    { label: 'กำลังดำเนินการ', value: eventStats.ongoingEvents, bg: '#dcfce7', text: '#15803d', border: '#86efac' },
                     { label: 'กำลังจะมาถึง', value: eventStats.upcomingEvents, bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' },
-                    { label: 'กำลังดำเนินการ', value: eventStats.ongoingEvents, bg: '#ffedd5', text: '#c2410c', border: '#fdba74' },
                     { label: 'สิ้นสุดแล้ว', value: eventStats.pastEvents, bg: '#e5e7eb', text: '#374151', border: '#9ca3af' },
                   ].map(stat => (
                     <Card key={stat.label} className="p-4 text-center">
@@ -672,7 +682,7 @@ export default function EventManagement() {
                   <option value="ALL">ทุกคน</option>
                   <option value="BRANCH">ตามสาขา</option>
                   <option value="ROLE">ตามบทบาท</option>
-                  <option value="INDIVIDUAL" disabled>ระบุคน (ยังไม่พร้อมใช้งาน)</option>
+                  <option value="INDIVIDUAL">ระบุคน</option>
                 </select>
               </div>
 
@@ -707,6 +717,56 @@ export default function EventManagement() {
                   </div>
                   {selectedBranchIds.length > 0 && (
                     <p className="mt-1 text-xs text-gray-500">เลือกแล้ว {selectedBranchIds.length} สาขา</p>
+                  )}
+                </div>
+              )}
+
+              {/* Individual User Selector (when INDIVIDUAL selected) */}
+              {participantType === 'INDIVIDUAL' && (
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">
+                    เลือกพนักงาน (เฉพาะสาขาของคุณ) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    placeholder="ค้นหาชื่อหรือรหัสพนักงาน..."
+                    className="w-full px-3 py-2 mb-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  <div className="space-y-1 p-2 border border-gray-300 rounded-lg max-h-48 overflow-y-auto">
+                    {allUsers.length === 0 ? (
+                      <p className="text-sm text-gray-500 p-2">กำลังโหลดรายชื่อพนักงาน...</p>
+                    ) : (
+                      allUsers
+                        .filter(u => {
+                          const q = userSearchQuery.toLowerCase();
+                          const name = (u.name || '').toLowerCase();
+                          const empId = (u.employeeId || '').toLowerCase();
+                          return !q || name.includes(q) || empId.includes(q);
+                        })
+                        .map((u) => (
+                          <label key={u.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                            <input
+                              type="checkbox"
+                              checked={selectedUserIds.includes(u.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedUserIds(prev => [...prev, u.id]);
+                                } else {
+                                  setSelectedUserIds(prev => prev.filter(id => id !== u.id));
+                                }
+                              }}
+                              className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                            />
+                            <span className="text-sm text-gray-700">{u.name}</span>
+                            {u.employeeId && <span className="text-xs text-gray-400">({u.employeeId})</span>}
+                          </label>
+                        ))
+                    )}
+                  </div>
+                  {selectedUserIds.length > 0 && (
+                    <p className="mt-1 text-xs text-gray-500">เลือกแล้ว {selectedUserIds.length} คน</p>
                   )}
                 </div>
               )}
@@ -769,14 +829,15 @@ export default function EventManagement() {
         )}
 
         {/* Map */}
-        <div className="mb-6">
+        <div className="mb-6" ref={mapRef}>
           <Suspense fallback={<div className="h-125 bg-gray-100 rounded-2xl animate-pulse" />}>
             <EventMap 
-              events={events}
+              events={events.filter(e => e.status !== 'completed')}
               locations={locations}
               onMapClick={isAddingEvent || editingEventId ? handleMapClick : undefined}
               selectedPosition={selectedPosition}
               defaultCenter={defaultCenter}
+              flyTo={mapFlyTo}
             />
           </Suspense>
         </div>
@@ -842,6 +903,7 @@ export default function EventManagement() {
               <input
                 type="date"
                 value={filterStartDate}
+                max={new Date().toISOString().split('T')[0]}
                 onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
                 onChange={(e) => {
                   setFilterStartDate(e.target.value);
@@ -857,6 +919,7 @@ export default function EventManagement() {
               <input
                 type="date"
                 value={filterEndDate}
+                max={new Date().toISOString().split('T')[0]}
                 onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
                 onChange={(e) => {
                   setFilterEndDate(e.target.value);
@@ -921,10 +984,17 @@ export default function EventManagement() {
                   isEditing={editingEventId === event.id}
                   editFormData={editFormData}
                   onViewDetail={() => router.push(`/admin/event-management/${event.id}`)}
+                  onLocate={() => {
+                    if (event.status === 'completed') return;
+                    setMapFlyTo({ lat: event.latitude, lng: event.longitude, zoom: 16, seq: ++mapFlySeq.current });
+                    mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
                   onEdit={() => handleEditEvent(event)}
                   onSave={handleSaveEdit}
                   onCancel={handleCancelEdit}
                   onDelete={() => handleDeleteEvent(event)}
+                  disableEdit={event.status === 'completed' || event.creatorRole?.toUpperCase() === 'SUPERADMIN'}
+                  disableDelete={event.creatorRole?.toUpperCase() === 'SUPERADMIN'}
                   onInputChange={handleInputChange}
                   showEditStartTimePicker={timePickers.editStart}
                   showEditEndTimePicker={timePickers.editEnd}
@@ -998,7 +1068,6 @@ export default function EventManagement() {
         </div>
 
         </>)}
-      </Card>
 
       {/* Alert Dialog */}
       <AlertDialog
@@ -1028,6 +1097,14 @@ export default function EventManagement() {
           </Card>
         </div>
       )}
+    </>
+  );
+  if (embedded) return content;
+  return (
+    <div className="min-h-screen p-4 bg-slate-50 sm:p-6">
+      <Card className="p-6 border border-orange-100 shadow-sm">
+        {content}
+      </Card>
     </div>
   );
 }
@@ -1154,10 +1231,13 @@ interface EventCardProps {
   isEditing: boolean;
   editFormData: Partial<EventData>;
   onViewDetail: () => void;
+  onLocate?: () => void;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
   onDelete: () => void;
+  disableEdit?: boolean;
+  disableDelete?: boolean;
   onInputChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => void;
   showEditStartTimePicker: boolean;
   showEditEndTimePicker: boolean;
@@ -1173,10 +1253,13 @@ function EventCard({
   isEditing, 
   editFormData, 
   onViewDetail,
+  onLocate,
   onEdit, 
   onSave, 
   onCancel, 
   onDelete,
+  disableEdit,
+  disableDelete,
   onInputChange,
   showEditStartTimePicker,
   showEditEndTimePicker,
@@ -1240,27 +1323,17 @@ function EventCard({
   }
 
   return (
-    <Card 
-      className="p-4 transition-shadow hover:shadow-md"
-      style={{ borderLeft: `4px solid ${
-        event.status === 'ongoing' ? '#16a34a' :
-        event.status === 'upcoming' ? '#2563eb' :
-        '#9ca3af'
-      }` }}
-    >
+    <Card className="p-4 cursor-pointer group transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(37,99,235,0.18)] hover:border-blue-300" onClick={onLocate}>
       <div className="flex items-start justify-between mb-3">
-        <h3 className="text-lg font-bold text-gray-900">{event.name}</h3>
+        <h3 className="text-base font-bold text-gray-900 leading-tight group-hover:text-blue-700 transition-colors">{event.name}</h3>
         {event.status && (
-          <Badge 
-            variant={getStatusVariant(event.status)}
-            style={
-              event.status === 'ongoing' ? { backgroundColor: '#16a34a', color: '#fff', borderColor: '#16a34a' } :
-              event.status === 'upcoming' ? { backgroundColor: '#2563eb', color: '#fff', borderColor: '#2563eb' } :
-              { backgroundColor: '#6b7280', color: '#fff', borderColor: '#6b7280' }
-            }
-          >
+          <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
+            event.status === 'ongoing' ? 'bg-green-100 text-green-700' :
+            event.status === 'upcoming' ? 'bg-blue-100 text-blue-700' :
+            'bg-gray-100 text-gray-500'
+          }`}>
             {event.status === 'ongoing' ? 'กำลังดำเนินการ' : event.status === 'upcoming' ? 'กำลังจะมาถึง' : 'เสร็จสิ้นแล้ว'}
-          </Badge>
+          </span>
         )}
       </div>
       
@@ -1302,13 +1375,13 @@ function EventCard({
           </svg>
           ดูรายละเอียด
         </Button>
-        <Button size="sm" variant="outline" onClick={onEdit}>
+        <Button size="sm" variant="outline" onClick={onEdit} disabled={disableEdit} title={disableEdit ? 'ไม่สามารถแก้ไขกิจกรรมที่สิ้นสุดแล้ว' : undefined}>
           <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
           </svg>
           แก้ไข
         </Button>
-        <Button size="sm" variant="destructive" onClick={onDelete}>
+        <Button size="sm" variant="destructive" onClick={onDelete} disabled={disableDelete} title={disableDelete ? 'ไม่สามารถลบกิจกรรมที่สร้างโดย Super Admin' : undefined}>
           <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>

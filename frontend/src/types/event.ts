@@ -11,6 +11,7 @@ export interface EventData {
   endTime?: string;
   teams?: string;
   status: 'ongoing' | 'completed' | 'upcoming';
+  creatorRole?: string;
   createdAt?: string;
   updatedAt?: string;
 }

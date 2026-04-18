@@ -4,6 +4,7 @@ import {
   getEmployeesToday,
   getBranchesMap,
   getLocationEvents,
+  getEventStats,
 } from '../services/dashboard.service.js';
 
 /**
@@ -221,6 +222,31 @@ export async function handleLocationEvents(req: Request, res: Response): Promise
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Internal server error';
     console.error('❌ Error:', message);
+    res.status(500).json({ success: false, error: message });
+  }
+}
+
+/**
+ * GET /api/dashboard/event-stats/:eventId
+ * ดึงสถิติการเข้าร่วม / ยังไม่เข้าร่วมของกิจกรรม
+ */
+export async function handleEventStats(req: Request, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+    const eventId = parseInt(req.params.eventId);
+    if (isNaN(eventId)) {
+      res.status(400).json({ success: false, error: 'Invalid eventId' });
+      return;
+    }
+    const stats = await getEventStats(user, eventId);
+    res.status(200).json({ success: true, data: stats });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    console.error('❌ Error fetching event stats:', message);
     res.status(500).json({ success: false, error: message });
   }
 }

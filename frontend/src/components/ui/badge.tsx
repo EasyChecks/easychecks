@@ -9,16 +9,17 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default:
-          "border-transparent bg-primaryMain text-white hover:bg-primaryMain/80",
+          "border-transparent bg-primary-main text-white hover:bg-primary-main/80",
         secondary:
-          "border-transparent bg-secondaryMain text-textMain hover:bg-secondaryMain/80",
+          "border-transparent bg-secondary-main text-text-main hover:bg-secondary-main/80",
         destructive:
           "border-transparent bg-red-500 text-white hover:bg-red-500/80",
-        outline: "text-textMain border-borderMain",
+        outline: "text-text-main border-border-main",
         active: "border-transparent bg-status-active-bg text-status-active-text",
-        suspend: "border-transparent bg-status-suspend-bg text-status-suspend-text",
-        pending: "border-transparent bg-status-pending-bg text-status-pending-text",
+        suspend: "border border-amber-300 bg-status-suspend-bg text-status-suspend-text",
+        pending: "border border-slate-300 bg-status-pending-bg text-status-pending-text",
         leave: "border-transparent bg-status-leave-bg text-status-leave-text",
+        info: "border-transparent bg-blue-100 text-blue-700",
       },
     },
     defaultVariants: {
@@ -29,7 +30,9 @@ const badgeVariants = cva(
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  children?: React.ReactNode;
+}
 
 function Badge({ className, variant, ...props }: BadgeProps) {
   return (

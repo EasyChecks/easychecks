@@ -49,11 +49,19 @@ function mapAttendance(raw: any): Attendance {
     shift: raw.shift ? {
       ...raw.shift,
       id: raw.shift.shiftId ?? raw.shift.id,
-      location: raw.shift.location ? { ...raw.shift.location, id: raw.shift.location.locationId ?? raw.shift.location.id } : undefined,
+      name: raw.shift.name ?? raw.shift.shiftName ?? '',
+      location: raw.shift.location
+        ? {
+            ...raw.shift.location,
+            id: raw.shift.location.locationId ?? raw.shift.location.id,
+            name: raw.shift.location.name ?? raw.shift.location.locationName ?? '',
+          }
+        : undefined,
     } : undefined,
     location: raw.location ? {
       ...raw.location,
       id: raw.location.locationId ?? raw.location.id,
+      name: raw.location.name ?? raw.location.locationName ?? '',
     } : undefined,
     user: raw.user ? {
       ...raw.user,

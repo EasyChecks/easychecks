@@ -49,7 +49,7 @@ export default function AttendancePage() {
   const [ui, setUi] = useState({ loading: false, showSuccess: false, isCameraActive: false, permissionGranted: false });
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [selectedShift, setSelectedShift] = useState<number | null>(null);
-  const [successResult, setSuccessResult] = useState<{ time: string; status: string } | null>(null);
+  const [successResult, setSuccessResult] = useState<{ time: string; status: string; shiftName?: string } | null>(null);
   const [countdown, setCountdown] = useState(0); // นับถอยหลังก่อน redirect กลับ dashboard
   const [messageModal, setMessageModal] = useState<{ open: boolean; message: string }>({
     open: false,
@@ -275,9 +275,15 @@ export default function AttendancePage() {
         EARLY_LEAVE: 'ออกก่อนเวลา',
         ABSENT: 'ขาดงาน',
       };
+      const shiftName =
+        result?.shift?.name
+        ?? (selectedShift
+          ? (shifts.find((s) => (typeof s.id === 'string' ? parseInt(s.id, 10) : s.id) === selectedShift)?.name)
+          : (shifts.length === 1 ? shifts[0]?.name : undefined));
       setSuccessResult({
         time: timeStr,
         status: result?.status ? (statusMap[result.status] ?? result.status) : '',
+        shiftName,
       });
 
       setUi({ loading: false, showSuccess: true, isCameraActive: false, permissionGranted: false });
@@ -505,6 +511,7 @@ export default function AttendancePage() {
                     {mode === 'checkIn' ? 'เข้างาน' : 'ออกงาน'}
                     {successResult.time ? ` เวลา ${successResult.time} น.` : ''}
                     {successResult.status ? ` · ${successResult.status}` : ''}
+                    {successResult.shiftName ? ` · กะ ${successResult.shiftName}` : ''}
                   </p>
                 )}
                 {countdown > 0 && (

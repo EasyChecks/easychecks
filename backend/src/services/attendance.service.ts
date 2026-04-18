@@ -92,6 +92,131 @@ function calculateDistance(
   );
 }
 
+const THAI_DAY_ENUMS = [
+  'SUNDAY',
+  'MONDAY',
+  'TUESDAY',
+  'WEDNESDAY',
+  'THURSDAY',
+  'FRIDAY',
+  'SATURDAY',
+] as const;
+
+type ThaiDayEnum = (typeof THAI_DAY_ENUMS)[number];
+
+function toThaiDate(date: Date): Date {
+  return new Date(date.getTime() + THAI_OFFSET_MS);
+}
+
+function toThaiDateKey(date: Date): string {
+  const thai = toThaiDate(date);
+  const year = thai.getUTCFullYear();
+  const month = String(thai.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(thai.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toThaiHHMM(date: Date): string {
+  const thai = toThaiDate(date);
+  const hour = String(thai.getUTCHours()).padStart(2, '0');
+  const minute = String(thai.getUTCMinutes()).padStart(2, '0');
+  return `${hour}:${minute}`;
+}
+
+function shiftMatchesAttendanceDate(shift: Shift, checkIn: Date): boolean {
+  if (shift.shiftType === 'REGULAR') return true;
+
+  const thaiDay = THAI_DAY_ENUMS[toThaiDate(checkIn).getUTCDay()] as ThaiDayEnum;
+
+  if (shift.shiftType === 'SPECIFIC_DAY') {
+    return (shift.specificDays ?? []).includes(thaiDay);
+  }
+
+  if (shift.shiftType === 'CUSTOM') {
+    if (!shift.customDate) return false;
+    return toThaiDateKey(shift.customDate) === toThaiDateKey(checkIn);
+  }
+
+  return true;
+}
+
+function inferShiftForAttendance(checkIn: Date, userShifts: Shift[]): Shift | null {
+  if (userShifts.length === 0) return null;
+
+  const checkInHHMM = toThaiHHMM(checkIn);
+  const candidates = userShifts.filter((shift) => shiftMatchesAttendanceDate(shift, checkIn));
+  if (candidates.length === 0) return null;
+
+  let bestShift: Shift | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const shift of candidates) {
+    const score = Math.abs(calculateTimeDifference(checkInHHMM, shift.startTime));
+    if (score < bestScore) {
+      bestScore = score;
+      bestShift = shift;
+      continue;
+    }
+
+    if (score === bestScore && bestShift && shift.isActive && !bestShift.isActive) {
+      bestShift = shift;
+    }
+  }
+
+  return bestShift;
+}
+
+type AttendanceRowWithShift = {
+  userId: number;
+  checkIn: Date;
+  checkOut: Date | null;
+  shift: Shift | null;
+};
+
+async function attachMissingShiftRelations<T extends AttendanceRowWithShift>(rows: T[]): Promise<T[]> {
+  if (rows.length === 0 || rows.every((row) => row.shift !== null)) {
+    return rows;
+  }
+
+  const missingUserIds = Array.from(
+    new Set(rows.filter((row) => row.shift === null).map((row) => row.userId)),
+  );
+
+  if (missingUserIds.length === 0) {
+    return rows;
+  }
+
+  const userShifts = await prisma.shift.findMany({
+    where: {
+      userId: { in: missingUserIds },
+      isDeleted: false,
+    },
+    orderBy: [
+      { isActive: 'desc' },
+      { updatedAt: 'desc' },
+    ],
+  });
+
+  const shiftsByUserId = new Map<number, Shift[]>();
+  for (const shift of userShifts) {
+    const existing = shiftsByUserId.get(shift.userId) ?? [];
+    existing.push(shift);
+    shiftsByUserId.set(shift.userId, existing);
+  }
+
+  return rows.map((row) => {
+    if (row.shift !== null) return row;
+
+    const inferredShift = inferShiftForAttendance(row.checkIn, shiftsByUserId.get(row.userId) ?? []);
+    if (!inferredShift) return row;
+
+    return {
+      ...row,
+      shift: inferredShift,
+    };
+  });
+}
+
 function getShiftEndDateFromCheckIn(checkIn: Date, shiftEndTime: string): Date {
   const [endHour, endMinute] = shiftEndTime.split(':').map((v) => Number(v));
 
@@ -587,7 +712,8 @@ export const getTodayAttendance = async (userId: number) => {
     orderBy: { checkIn: 'desc' },
   });
 
-  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
+  const rowsWithShift = await attachMissingShiftRelations(rows);
+  return Promise.all(rowsWithShift.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -616,7 +742,8 @@ export const getAttendanceHistory = async (
     orderBy: { checkIn: 'desc' },
   });
 
-  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
+  const rowsWithShift = await attachMissingShiftRelations(rows);
+  return Promise.all(rowsWithShift.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -657,7 +784,8 @@ export const getAllAttendances = async (filters?: {
     orderBy: { checkIn: 'desc' },
   });
 
-  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
+  const rowsWithShift = await attachMissingShiftRelations(rows);
+  return Promise.all(rowsWithShift.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**

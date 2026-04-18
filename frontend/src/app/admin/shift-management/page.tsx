@@ -258,6 +258,15 @@ export default function ShiftManagementPage() {
       return;
     }
 
+    const [startHour, startMinute] = formData.startTime.split(':').map((v) => Number(v));
+    const [endHour, endMinute] = formData.endTime.split(':').map((v) => Number(v));
+    const startMinutes = (startHour ?? 0) * 60 + (startMinute ?? 0);
+    const endMinutes = (endHour ?? 0) * 60 + (endMinute ?? 0);
+    if (endMinutes <= startMinutes) {
+      setFeedbackModal({ type: 'error', message: 'เวลาออกต้องหลังเวลาเข้า (เวลาเลิกงานต้องมากกว่าเวลาเริ่มงาน)' });
+      return;
+    }
+
     setLoading(true);
     try {
       if (editingShift) {
@@ -354,7 +363,7 @@ export default function ShiftManagementPage() {
       console.error('Error saving shift:', error);
       setFeedbackModal({
         type: 'error',
-        message: error.response?.data?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล',
+        message: error?.response?.data?.error || error?.response?.data?.message || error?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล',
       });
     } finally {
       setLoading(false);

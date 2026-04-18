@@ -151,8 +151,8 @@ async function downloadAttendanceReport(
 
     // จัดรูปแบบข้อมูลให้เป็นตารางที่เม่าเอกสาร (Excel/PDF)
     const data: Record<string, unknown>[] = attendances.map((att) => ({
-      'Employee ID': att.user.employeeId,
-      'Name': `${att.user.firstName} ${att.user.lastName}`,
+      'Employee ID': att.user?.employeeId ?? '-',
+      'Name': att.user ? `${att.user.firstName} ${att.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
       'Check In': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
       'Check Out': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'Not yet',
       'Status': att.status,
@@ -240,6 +240,15 @@ async function downloadShiftReport(
             },
           },
         ],
+      },
+      include: {
+        user: {
+          select: {
+            employeeId: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
       }, // Limit for faster query
     });
 
@@ -247,8 +256,8 @@ async function downloadShiftReport(
 
     // แปลงข้อมูลให้พร้อม export
     const data: Record<string, unknown>[] = shifts.map((shift) => ({
-      'Employee ID': shift.user.employeeId,
-      'Name': `${shift.user.firstName} ${shift.user.lastName}`,
+      'Employee ID': shift.user?.employeeId ?? '-',
+      'Name': shift.user ? `${shift.user.firstName} ${shift.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
       'Shift Name': shift.name,
       'Shift Type': shift.shiftType,
       'Start Time': shift.startTime,
@@ -348,8 +357,8 @@ export async function previewReport(
     });
 
     const rows = attendances.map((att) => ({
-      'Employee ID': att.user.employeeId,
-      'Name': `${att.user.firstName} ${att.user.lastName}`,
+      'Employee ID': att.user?.employeeId ?? '-',
+      'Name': att.user ? `${att.user.firstName} ${att.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
       'Check In': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
       'Check Out': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'ยังไม่ออก',
       'Status': att.status,
@@ -388,8 +397,8 @@ export async function previewReport(
   });
 
   const rows = shifts.map((shift) => ({
-    'Employee ID': shift.user.employeeId,
-    'Name': `${shift.user.firstName} ${shift.user.lastName}`,
+    'Employee ID': shift.user?.employeeId ?? '-',
+    'Name': shift.user ? `${shift.user.firstName} ${shift.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
     'Shift Name': shift.name,
     'Shift Type': shift.shiftType,
     'Start Time': shift.startTime,

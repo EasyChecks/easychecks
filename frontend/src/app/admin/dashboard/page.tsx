@@ -44,6 +44,22 @@ const Popup = dynamic(
   () => import("react-leaflet").then((mod) => mod.Popup),
   { ssr: false }
 );
+const MapController = dynamic(
+  async () => {
+    const { useMap } = await import('react-leaflet');
+    const { useEffect } = await import('react');
+    function Controller({ center, zoom }: { center: [number, number] | null; zoom: number }) {
+      const map = useMap();
+      useEffect(() => {
+        if (!center) return;
+        map.flyTo(center, zoom, { duration: 1.5 });
+      }, [center, zoom, map]);
+      return null;
+    }
+    return Controller;
+  },
+  { ssr: false }
+);
 
 
 // Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
@@ -155,6 +171,7 @@ export default function AdminDashboard() {
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
   const [perEventStats, setPerEventStats] = useState<EventStatsResponse | null>(null);
   const [perEventStatsLoading, setPerEventStatsLoading] = useState(false);
+  const [mapFlyTarget, setMapFlyTarget] = useState<{ center: [number, number]; zoom: number } | null>(null);
 
   // ── Fetch dashboard data ──
   useEffect(() => {
@@ -325,7 +342,7 @@ export default function AdminDashboard() {
     statusColor: "text-green-600",
   }));
 
-  const eventLocations: LocationWithStatus[] = apiEvents
+  const eventLocations: LocationWithStatus[] = displayedEvents
     .filter(evt => evt.location?.latitude != null || evt.venueLatitude != null)
     .map((evt) => ({
       id: `event-${evt.eventId}`,
@@ -556,6 +573,7 @@ export default function AdminDashboard() {
                 ref={mapRef}
               >
                 <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
+                <MapController center={mapFlyTarget?.center ?? null} zoom={mapFlyTarget?.zoom ?? 16} />
                 {filteredLocations.map((location) => (
                   <React.Fragment key={location.id}>
                     <Marker position={[location.latitude, location.longitude]}>
@@ -717,7 +735,14 @@ export default function AdminDashboard() {
                             return (
                               <tr
                                 key={evt.eventId}
-                                onClick={() => setSelectedEventId(isSelected ? null : evt.eventId)}
+                                onClick={() => {
+                                  setSelectedEventId(isSelected ? null : evt.eventId);
+                                  const lat = evt.location?.latitude ?? evt.venueLatitude;
+                                  const lng = evt.location?.longitude ?? evt.venueLongitude;
+                                  if (!isSelected && lat != null && lng != null) {
+                                    setMapFlyTarget({ center: [lat, lng], zoom: 16 });
+                                  }
+                                }}
                                 className={`cursor-pointer transition-colors ${isSelected ? 'bg-primaryMain/10 border-l-2 border-primaryMain' : 'hover:bg-gray-50'}`}
                               >
                                 <td className="px-3 py-2 text-textMain font-medium">{evt.eventName}</td>
@@ -895,12 +920,8 @@ export default function AdminDashboard() {
             {statsType === 'attendance' ? (
               <>
                 <div className="flex justify-between text-xs">
-                  <span className="text-textMain/60">พนักงานทั้งหมด</span>
-                  <span className="font-bold text-primaryMain">{attendanceStats.totalEmployees} คน</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-textMain/60">คิดรวมอัตราการสถิติ</span>
-                  <span className="font-bold text-emerald-600">{totalChartSum} คน</span>
+                  <span className="text-textMain/60">สรุปยอดพนักงาน (ตามสถิติ)</span>
+                  <span className="font-bold text-primaryMain">{totalChartSum} คน</span>
                 </div>
               </>
             ) : (

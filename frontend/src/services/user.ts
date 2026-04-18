@@ -32,21 +32,82 @@ export interface GetUsersResponse {
 }
 
 function normalizeUserArray(data: unknown): UserServiceUser[] {
-  if (Array.isArray(data)) {
-    return data as UserServiceUser[];
-  }
+  let rawUsers: unknown[] = [];
 
-  if (data && typeof data === 'object') {
+  if (Array.isArray(data)) {
+    rawUsers = data;
+  } else if (data && typeof data === 'object') {
     const record = data as Record<string, unknown>;
     if (Array.isArray(record.users)) {
-      return record.users as UserServiceUser[];
-    }
-    if (Array.isArray(record.data)) {
-      return record.data as UserServiceUser[];
+      rawUsers = record.users;
+    } else if (Array.isArray(record.data)) {
+      rawUsers = record.data;
     }
   }
 
-  return [];
+  return rawUsers
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item, index) => mapBackendUserToServiceUser(item, index));
+}
+
+function mapBackendUserToServiceUser(backendUser: Record<string, unknown>, index: number): UserServiceUser {
+  const roleMap: Record<string, UserServiceUser['role']> = {
+    USER: 'user',
+    MANAGER: 'manager',
+    ADMIN: 'admin',
+    SUPERADMIN: 'superadmin',
+    user: 'user',
+    manager: 'manager',
+    admin: 'admin',
+    superadmin: 'superadmin',
+  };
+
+  const idRaw = backendUser.userId ?? backendUser.id;
+  const parsedId = typeof idRaw === 'number' ? idRaw : Number.parseInt(String(idRaw ?? ''), 10);
+  const safeId = Number.isFinite(parsedId) ? parsedId : index + 1;
+
+  const firstName = String(backendUser.firstName ?? backendUser.first_name ?? '').trim();
+  const lastName = String(backendUser.lastName ?? backendUser.last_name ?? '').trim();
+  const fullName = `${firstName} ${lastName}`.trim();
+  const fallbackName = String(backendUser.name ?? '').trim();
+  const employeeId = String(backendUser.employeeId ?? backendUser.employee_id ?? '').trim();
+
+  const branchObj = backendUser.branch && typeof backendUser.branch === 'object'
+    ? (backendUser.branch as Record<string, unknown>)
+    : undefined;
+  const branch =
+    (typeof branchObj?.name === 'string' && branchObj.name.trim())
+    || (typeof backendUser.branchName === 'string' && backendUser.branchName.trim())
+    || (typeof branchObj?.code === 'string' && branchObj.code.trim())
+    || (typeof backendUser.branchCode === 'string' && backendUser.branchCode.trim())
+    || (typeof backendUser.branch === 'string' && backendUser.branch.trim())
+    || undefined;
+
+  const isActiveValue = backendUser.isActive ?? backendUser.is_active;
+  const isDeletedValue = backendUser.isDeleted ?? backendUser.is_deleted;
+  const statusValue = String(backendUser.status ?? '').toUpperCase();
+
+  let isActive = true;
+  if (typeof isActiveValue === 'boolean') {
+    isActive = isActiveValue;
+  } else if (statusValue) {
+    isActive = statusValue === 'ACTIVE';
+  } else if (typeof isDeletedValue === 'boolean') {
+    isActive = !isDeletedValue;
+  }
+
+  return {
+    id: safeId,
+    name: fullName || fallbackName || employeeId || `User #${safeId}`,
+    employeeId,
+    email: String(backendUser.email ?? '').trim(),
+    role: roleMap[String(backendUser.role ?? '')] ?? 'user',
+    department: String(backendUser.department ?? '').trim() || undefined,
+    position: String(backendUser.position ?? '').trim() || undefined,
+    branch,
+    provinceCode: String(backendUser.provinceCode ?? '').trim() || undefined,
+    isActive,
+  };
 }
 
 /**

@@ -176,6 +176,12 @@ export default function ShiftManagementPage() {
     return raw.branch?.name || raw.branchName || raw.branch?.code || raw.branchCode || 'ไม่ระบุสาขา';
   };
 
+  const formatAssigneeLabel = (user: UserServiceUser): string => {
+    const employeeCode = user.employeeId || '-';
+    const fullName = user.name?.trim() || 'ไม่พบชื่อ';
+    return `(${employeeCode}) ${fullName} - ${getUserBranchName(user)}`;
+  };
+
   const isUserActive = (user: UserServiceUser): boolean => {
     if (typeof user.isActive === 'boolean') {
       return user.isActive;
@@ -481,6 +487,12 @@ export default function ShiftManagementPage() {
       return haystack.includes(q);
     });
   }, [users, employeeSearchText, employeeBranchFilter]);
+
+  const selectedAssignedUsers = useMemo(() => {
+    if (!formData.userIds.length) return [];
+    const selectedSet = new Set(formData.userIds);
+    return users.filter((user) => selectedSet.has(user.id));
+  }, [users, formData.userIds]);
 
   const filteredShifts = useMemo(() => {
     const q = searchText.trim().toLowerCase();
@@ -1034,7 +1046,7 @@ export default function ShiftManagementPage() {
                     <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
                       {assignableUsers.map((user) => (
                         <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                          <span className="text-sm text-gray-800">{user.name} ({user.employeeId}) - {getUserBranchName(user)}</span>
+                          <span className="text-sm text-gray-800">{formatAssigneeLabel(user)}</span>
                           <input
                             type="radio"
                             name="edit-shift-user"
@@ -1054,7 +1066,7 @@ export default function ShiftManagementPage() {
                         const checked = formData.userIds.includes(user.id);
                         return (
                           <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                            <span className="text-sm text-gray-800">{user.name} ({user.employeeId}) - {getUserBranchName(user)}</span>
+                            <span className="text-sm text-gray-800">{formatAssigneeLabel(user)}</span>
                             <input
                               type="checkbox"
                               checked={checked}
@@ -1081,6 +1093,14 @@ export default function ShiftManagementPage() {
                       ? 'แก้ไขได้ครั้งละ 1 พนักงาน'
                       : `เลือกแล้ว ${formData.userIds.length} คน (สามารถสร้างกะเดียวกันให้หลายคนได้)`}
                   </p>
+                  {selectedAssignedUsers.length > 0 && (
+                    <p className="mt-1 text-xs text-gray-600">
+                      {editingShift ? 'พนักงานที่เลือก: ' : 'รายชื่อที่เลือก: '}
+                      {selectedAssignedUsers
+                        .map((user) => `${user.employeeId || '-'} ${user.name || 'ไม่พบชื่อ'}`)
+                        .join(', ')}
+                    </p>
+                  )}
                 </div>
 
                 {/* Submit Buttons */}

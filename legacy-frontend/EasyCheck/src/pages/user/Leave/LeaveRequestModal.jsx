@@ -131,7 +131,12 @@ function LeaveRequestModal({ closeModal }) {
   // ลาป่วย and ลากิจ สามารถเลือกย้อนหลังได้
   // การลาอื่นๆ เลือกได้ตั้งแต่วันปัจจุบันเป็นต้นไป
   const getMinDate = () => {
-    if (formData.leaveType === 'ลาป่วย' || formData.leaveType === 'ลากิจ') {
+    if (
+      formData.leaveType === 'ลาป่วย' ||
+      formData.leaveType === 'ลากิจ' ||
+      formData.leaveType === 'ลากิจธุระ' ||
+      formData.leaveType === 'PERSONAL'
+    ) {
       return '';
     }
     return getTodayDate();

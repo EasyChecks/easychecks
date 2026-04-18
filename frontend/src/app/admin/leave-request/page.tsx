@@ -364,6 +364,7 @@ function MyLeaveTab() {
 
   const today = new Date().toISOString().split('T')[0];
   const isSick = selectedType === 'SICK';
+  const allowPastDaily = selectedType === 'PERSONAL';
   const weekdayCount = (() => {
     if (!startDate || !endDate) return 0;
     let count = 0;
@@ -648,11 +649,11 @@ function MyLeaveTab() {
                             <div>
                               <label className="block text-sm text-gray-600 mb-1">วันที่เริ่มต้น</label>
                               <DatePicker value={startDate} onChange={setStartDate} placeholder="เลือกวันเริ่มต้น"
-                                weekdaysOnly={selectedType !== 'MATERNITY'} min={isSick ? undefined : today} />
+                                weekdaysOnly={selectedType !== 'MATERNITY'} min={isSick || allowPastDaily ? undefined : today} />
                             </div>
                             <div>
                               <label className="block text-sm text-gray-600 mb-1">วันที่สิ้นสุด</label>
-                              <DatePicker value={endDate} min={startDate || (isSick ? undefined : today)} onChange={setEndDate} placeholder="เลือกวันสิ้นสุด"
+                              <DatePicker value={endDate} min={startDate || (isSick || allowPastDaily ? undefined : today)} onChange={setEndDate} placeholder="เลือกวันสิ้นสุด"
                                 weekdaysOnly={selectedType !== 'MATERNITY'} />
                             </div>
                           </>

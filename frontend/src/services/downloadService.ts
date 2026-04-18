@@ -46,6 +46,14 @@ export interface DownloadHistoryResponse {
   };
 }
 
+export interface PreviewResult {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+}
+
+export type PreviewParams = Omit<DownloadReportParams, 'format'>;
+
 // ── Service Methods ──
 
 export const downloadService = {
@@ -58,6 +66,13 @@ export const downloadService = {
       params,
       responseType: 'blob',
     });
+
+    // ถ้า backend ส่ง JSON error กลับมาแทนไฟล์ ให้โยน error ออกไป
+    if (res.data.type === 'application/json') {
+      const text = await (res.data as Blob).text();
+      const json = JSON.parse(text) as { error?: string };
+      throw new Error(json.error || 'เกิดข้อผิดพลาดในการสร้างไฟล์');
+    }
 
     // อ่านชื่อไฟล์จาก Content-Disposition header
     const disposition = res.headers['content-disposition'] || '';
@@ -84,6 +99,15 @@ export const downloadService = {
   async getHistory(params?: DownloadHistoryParams): Promise<DownloadHistoryResponse> {
     const res = await api.get('/download/history', { params });
     return { data: res.data.data, pagination: res.data.pagination };
+  },
+
+  /**
+   * GET /api/download/preview
+   * ดึงข้อมูลตัวอย่าง (JSON) ก่อนดาวน์โหลด — max 20 rows
+   */
+  async previewReport(params: PreviewParams): Promise<PreviewResult> {
+    const res = await api.get('/download/preview', { params });
+    return res.data.data as PreviewResult;
   },
 };
 

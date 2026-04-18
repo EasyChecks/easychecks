@@ -434,31 +434,51 @@ export default function LeaveQuotaManagementPage() {
                 {scope === 'USER' && (
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">แผนก</label>
-                    <select
-                      value={filterDepartment}
-                      onChange={(e) => setFilterDepartment(e.target.value)}
-                      className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none"
-                    >
-                      <option value="">ทุกแผนก</option>
-                      {departments.map((dept) => (
-                        <option key={dept} value={dept}>{dept}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={filterDepartment}
+                        onChange={(e) => setFilterDepartment(e.target.value)}
+                        className="w-full pl-3 pr-10 py-2 border-2 border-gray-200 rounded-lg focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none appearance-none bg-white"
+                      >
+                        <option value="">ทุกแผนก</option>
+                        {departments.map((dept) => (
+                          <option key={dept} value={dept}>{dept}</option>
+                        ))}
+                      </select>
+                      <svg
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
                   </div>
                 )}
                 {scope === 'USER' && isSuperAdmin && (
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">สาขา</label>
-                    <select
-                      value={filterBranch}
-                      onChange={(e) => setFilterBranch(e.target.value)}
-                      className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none"
-                    >
-                      <option value="">ทุกสาขา</option>
-                      {branches.map((branch) => (
-                        <option key={branch} value={branch}>{branch} {branchNames[branch] ? `(${branchNames[branch]})` : ''}</option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <select
+                        value={filterBranch}
+                        onChange={(e) => setFilterBranch(e.target.value)}
+                        className="w-full pl-3 pr-10 py-2 border-2 border-gray-200 rounded-lg focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none appearance-none bg-white"
+                      >
+                        <option value="">ทุกสาขา</option>
+                        {branches.map((branch) => (
+                          <option key={branch} value={branch}>{branch} {branchNames[branch] ? `(${branchNames[branch]})` : ''}</option>
+                        ))}
+                      </select>
+                      <svg
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
                   </div>
                 )}
               </div>

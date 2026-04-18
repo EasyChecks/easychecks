@@ -26,6 +26,7 @@ export interface CheckInDTO {
   userId: number;       // รหัสพนักงาน — ดึงจาก req.user หลัง authenticate
   shiftId?: number;     // บังคับต้องส่งสำหรับ check-in ปกติ
   locationId?: number;  // ถ้าไม่ส่งมา ระบบจะไม่ตรวจสอบพิกัด
+  eventId?: number;     // ถ้า check-in ผ่านกิจกรรม จะมี eventId มาด้วย
   photo?: string;       // Base64/DataURL selfie (อัปโหลด Supabase แล้วเก็บ URL)
   latitude?: number;    // GPS จาก frontend — ใช้คู่กับ locationId
   longitude?: number;
@@ -391,7 +392,7 @@ function calculateAttendanceStatus(
  */
 export const checkIn = async (data: CheckInDTO) => {
   // [A] Destructure ทุก field จาก DTO ที่ controller ส่งมา
-  const { userId, shiftId, locationId, photo, latitude, longitude, address } = data;
+  const { userId, shiftId, locationId, eventId, photo, latitude, longitude, address } = data;
 
   // ===== 0.5 Validate shift selection =====
   // บังคับให้ check-in ต้องอิงกะเสมอ เพื่อใช้ location ของกะและป้องกันความคลุมเครือ
@@ -551,6 +552,7 @@ export const checkIn = async (data: CheckInDTO) => {
       userId,
       shiftId,                                     // check-in ปกติบังคับต้องมีกะ
       locationId: targetLocationId ?? null,         // ← บันทึก locationId FK เสมอ (ไม่ NULL ถ้ามี shift.location)
+      eventId: eventId ?? null,                     // ← บันทึก eventId ถ้า check-in ผ่านกิจกรรม
       checkInPhoto: checkInPhotoUrl,                // URL รูปจาก Supabase Storage
       checkInLat: latitude,                         // ← บังคับบันทึก GPS (ไม่ใช่ null)
       checkInLng: longitude,

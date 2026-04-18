@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from '@/components/ui/card';
 import LocationManagement from '@/components/admin/LocationManagement';
-import EventManagementTab from '@/components/admin/EventManagementTab';
+import EventManagement from '../event-management/page';
 
 export default function MappingAndEventsPage() {
   const [activeTab, setActiveTab] = useState<'locations' | 'events'>('locations');
@@ -46,7 +46,7 @@ export default function MappingAndEventsPage() {
           </TabsContent>
 
           <TabsContent value="events" className="mt-0">
-            <EventManagementTab />
+            <EventManagement embedded />
           </TabsContent>
         </Tabs>
       </Card>

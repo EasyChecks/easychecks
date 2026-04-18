@@ -33,6 +33,7 @@ import * as userService from '../services/user.service.js';              // ← 
 import { broadcastUserUpdate } from '../websocket/attendance.websocket.js';  // ← WebSocket broadcast
 import { sendSuccess, sendError } from '../utils/response.js';          // ← Standard response helpers
 import { parse } from 'csv-parse/sync';                                 // ← CSV parser (synchronous)
+import { prisma } from '../lib/prisma.js';                              // ← Prisma ORM client
 
 // ═══════════════════════════════════════════════════════════════
 // 1️⃣ createUser() — สร้างพนักงานใหม่
@@ -54,7 +55,18 @@ export const createUser = async (req: Request, res: Response) => {
 
     const { ...userData } = req.body;  // ← ดึงข้อมูลทั้งหมดจาก body
 
-    // ✅ STEP 2: Validate required fields
+    // ✅ STEP 2a: Resolve branchCode → branchId (ถ้าส่ง branchCode มาแทน branchId)
+    if (!userData.branchId && userData.branchCode) {
+      const branch = await prisma.branch.findUnique({
+        where: { code: userData.branchCode },
+      });
+      if (!branch) {
+        return sendError(res, `ไม่พบสาขา: ${userData.branchCode}`, 400);
+      }
+      userData.branchId = branch.branchId;
+    }
+
+    // ✅ STEP 2b: Validate required fields
     const requiredFields = ['title', 'firstName', 'lastName', 'gender', 'nationalId', 
                            'emergent_tel', 'emergent_first_name', 'emergent_last_name', 'emergent_relation',
                            'phone', 'email', 'birthDate', 'branchId'];  // ← ไม่มี employeeId (auto-generate)

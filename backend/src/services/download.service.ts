@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma.js';
 import type { Role } from '@prisma/client';
 import { generateExcel } from '../utils/excel.generator.js';
 import { generatePDF } from '../utils/pdf.generator.js';
+import { toThaiIso } from '../utils/timezone.js';
 
 /**
  * 📥 DownloadService - บริหารจัดการดาวน์โหลดเอกสาร
@@ -152,10 +153,12 @@ async function downloadAttendanceReport(
     const data: Record<string, unknown>[] = attendances.map((att) => ({
       'Employee ID': att.user.employeeId,
       'Name': `${att.user.firstName} ${att.user.lastName}`,
-      'Check In': new Date(att.checkIn).toLocaleString('th-TH'),
-      'Check Out': att.checkOut ? new Date(att.checkOut).toLocaleString('th-TH') : 'Not yet',
+      'Check In': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
+      'Check Out': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'Not yet',
       'Status': att.status,
       'Late Minutes': att.lateMinutes || '-',
+      'Type': att.eventId ? 'Event (กิจกรรม)' : 'Shift (กะงาน)',
+      'Note': att.note || '-',
     }));
 
     const fileName = `attendance_${new Date().getTime()}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
@@ -175,6 +178,8 @@ async function downloadAttendanceReport(
           { header: 'Check Out', key: 'Check Out', width: 18 },
           { header: 'Status', key: 'Status', width: 12 },
           { header: 'Late Minutes', key: 'Late Minutes', width: 12 },
+          { header: 'Type', key: 'Type', width: 15 },
+          { header: 'Note', key: 'Note', width: 30 },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ] as any,
         data,
@@ -189,6 +194,8 @@ async function downloadAttendanceReport(
           'Check In',
           'Check Out',
           'Status',
+          'Type',
+          'Note',
         ],
         data,
       });
@@ -213,8 +220,6 @@ async function downloadShiftReport(
   branchId?: number
 ): Promise<{ buffer: Buffer; fileName: string }> {
   console.log('📋 Fetching shift data...');
-  void startDate;
-  void endDate;
   
   try {
     // Query data - simplified
@@ -226,18 +231,16 @@ async function downloadShiftReport(
             ? { branchId: user.branchId }
             : {},
         isDeleted: false,
-      },
-      include: {
-        user: {
-          select: {
-            employeeId: true,
-            firstName: true,
-            lastName: true,
+        OR: [
+          { customDate: null },
+          {
+            customDate: {
+              gte: startDate || new Date(new Date().getFullYear(), 0, 1),
+              lte: endDate || new Date(),
+            },
           },
-        },
-      },
-      orderBy: { shiftId: 'desc' },
-      take: 100, // Limit for faster query
+        ],
+      }, // Limit for faster query
     });
 
     console.log(`✓ Found ${shifts.length} shift records`);
@@ -297,5 +300,107 @@ async function downloadShiftReport(
     console.error('❌ Error in downloadShiftReport:', error);
     throw error;
   }
+}
+
+// ── Preview Types ──────────────────────────────────────────────────────────
+
+export interface PreviewResult {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+}
+
+export interface PreviewQuery {
+  type: 'attendance' | 'shift';
+  startDate?: Date;
+  endDate?: Date;
+  branchId?: number;
+}
+
+/**
+ * ดึงข้อมูลตัวอย่างก่อนดาวน์โหลด (ไม่สร้างไฟล์)
+ */
+export async function previewReport(
+  user: User,
+  query: PreviewQuery
+): Promise<PreviewResult> {
+  const { type, startDate, endDate } = query;
+  const branchId = user.role === 'SUPERADMIN' ? query.branchId : user.branchId;
+
+  if (user.role === 'ADMIN' && query.branchId && query.branchId !== user.branchId) {
+    throw new Error('Unauthorized: You can only preview your own branch data');
+  }
+
+  if (type === 'attendance') {
+    const attendances = await prisma.attendance.findMany({
+      where: {
+        user: branchId ? { branchId } : {},
+        checkIn: {
+          gte: startDate || new Date(new Date().getFullYear(), 0, 1),
+          lte: endDate || new Date(),
+        },
+      },
+      include: {
+        user: { select: { employeeId: true, firstName: true, lastName: true } },
+      },
+      orderBy: { checkIn: 'desc' },
+      take: 20,
+    });
+
+    const rows = attendances.map((att) => ({
+      'Employee ID': att.user.employeeId,
+      'Name': `${att.user.firstName} ${att.user.lastName}`,
+      'Check In': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
+      'Check Out': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'ยังไม่ออก',
+      'Status': att.status,
+      'Late Minutes': att.lateMinutes ?? '-',
+      'Type': att.eventId ? 'Event (กิจกรรม)' : 'Shift (กะงาน)',
+      'Note': att.note || '-',
+    }));
+
+    return {
+      columns: ['Employee ID', 'Name', 'Check In', 'Check Out', 'Status', 'Late Minutes', 'Type', 'Note'],
+      rows,
+      total: rows.length,
+    };
+  }
+
+  // shift
+  const shifts = await prisma.shift.findMany({
+    where: {
+      user: branchId ? { branchId } : {},
+      isDeleted: false,
+      OR: [
+        { customDate: null },
+        {
+          customDate: {
+            gte: startDate || new Date(new Date().getFullYear(), 0, 1),
+            lte: endDate || new Date(),
+          },
+        },
+      ],
+    },
+    include: {
+      user: { select: { employeeId: true, firstName: true, lastName: true } },
+    },
+    orderBy: { shiftId: 'desc' },
+    take: 20,
+  });
+
+  const rows = shifts.map((shift) => ({
+    'Employee ID': shift.user.employeeId,
+    'Name': `${shift.user.firstName} ${shift.user.lastName}`,
+    'Shift Name': shift.name,
+    'Shift Type': shift.shiftType,
+    'Start Time': shift.startTime,
+    'End Time': shift.endTime,
+    'Active': shift.isActive ? 'Yes' : 'No',
+  }));
+
+  return {
+    columns: ['Employee ID', 'Name', 'Shift Name', 'Shift Type', 'Start Time', 'End Time', 'Active'],
+    rows,
+    total: rows.length,
+  };
 }
 

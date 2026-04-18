@@ -12,13 +12,14 @@ import {
   Satellite,
   AlertTriangle,
   CalendarIcon,
+  ChevronDown,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
-import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem, LocationEvent } from "@/services/dashboardService";
+import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem, LocationEvent, EventStatsResponse } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
 
@@ -97,6 +98,7 @@ interface EventStats {
   notParticipatedUsers: User[];
   leaveEventUsers: User[];
   lateEventUsers: User[];
+  joinedUsers: User[];
 }
 
 interface LocationWithStatus {
@@ -116,7 +118,7 @@ interface LocationWithStatus {
 type StatsType = "attendance" | "event";
 type MapType = "default" | "satellite";
 type FilterType = "all" | "location" | "event";
-type DetailType = "absent" | "leave" | "late" | "notParticipated";
+type DetailType = "absent" | "leave" | "late" | "notParticipated" | "onTime" | "joined";
 
 // Donut Chart Colors
 const CHART_COLORS = {
@@ -152,14 +154,21 @@ export default function AdminDashboard() {
   const [locationEvents, setLocationEvents] = useState<LocationEvent[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [tablePage, setTablePage] = useState(1);
 
-  // Branch options: dynamic from API
+  // Per-event stats
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [perEventStats, setPerEventStats] = useState<EventStatsResponse | null>(null);
+  const [perEventStatsLoading, setPerEventStatsLoading] = useState(false);
+
+  // Branch options: dynamic from API (filter out seed data branches matching "สาขา BR...")
   const branchOptions: BranchOption[] = useMemo(() => [
     { code: "all", name: "สาขา: ทั้งหมด" },
-    ...branchesMap.map(b => ({ code: String(b.branchId), name: b.name })),
+    ...branchesMap
+      .filter(b => !/^สาขา\s+BR/i.test(b.name))
+      .map(b => ({ code: String(b.branchId), name: b.name })),
   ], [branchesMap]);
 
   // ── Fetch dashboard data when branch or date changes ──
@@ -171,13 +180,10 @@ export default function AdminDashboard() {
     const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
     const dateParam = isToday ? undefined : dateStr;
 
+    setSelectedEventId(null);
+
     const fetchData = async () => {
-      // ครั้งแรกแสดง spinner เต็มหน้า, ครั้งหลังไม่ unmount หน้า
-      if (!dashboardSummary) {
-        setIsLoading(true);
-      } else {
-        setIsRefreshing(true);
-      }
+      setIsLoading(true);
       try {
         // ดึงข้อมูลหลัก (ถ้าพังจะไม่แสดงอะไรเลย)
         const [summary, employees, branches, eventsResp, locations] = await Promise.all([
@@ -202,13 +208,27 @@ export default function AdminDashboard() {
         console.error('[Dashboard] Failed to fetch data:', err);
       } finally {
         setIsLoading(false);
-        setIsRefreshing(false);
       }
     };
 
     fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranch, selectedDate]);
+
+  // ── Fetch per-event stats when selectedEventId changes ──
+  useEffect(() => {
+    if (selectedEventId === null) {
+      setPerEventStats(null);
+      return;
+    }
+    let cancelled = false;
+    setPerEventStatsLoading(true);
+    dashboardService.getEventStats(selectedEventId)
+      .then((data) => { if (!cancelled) setPerEventStats(data); })
+      .catch((err) => console.error('[Dashboard] event stats error:', err))
+      .finally(() => { if (!cancelled) setPerEventStatsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedEventId]);
 
   // ── Map API employees → AttendanceStats ──
   const attendanceStats = useMemo((): AttendanceStats => {
@@ -247,9 +267,20 @@ export default function AdminDashboard() {
       return d.toDateString() === now.toDateString();
     });
     const completedEvts = apiEvents.filter(e => new Date(e.endDateTime) < now);
+    const joinedUsers = employeesToday
+      .filter(e => e.eventId != null)
+      .map((e, idx) => ({
+        id: String(e.employeeId || idx),
+        name: e.name,
+        department: e.branch || '',
+        position: '',
+        avatar: '',
+        time: e.checkIn || '',
+        status: e.status,
+      }));
     return {
       totalEvents:          apiEvents.length,
-      activeEvents:         activeEvts.length,
+      activeEvents:         joinedUsers.length,
       todayEvents:          todayEvts.length,
       completedEvents:      completedEvts.length,
       notParticipatedCount: 0,
@@ -258,8 +289,9 @@ export default function AdminDashboard() {
       notParticipatedUsers: [],
       leaveEventUsers:      [],
       lateEventUsers:       [],
+      joinedUsers,
     };
-  }, [apiEvents]);
+  }, [apiEvents, employeesToday]);
 
   // ── Filter events for display (date + branch) ──
   // วันนี้ → แสดงเฉพาะ ongoing/upcoming เรียงใกล้สุด
@@ -286,24 +318,15 @@ export default function AdminDashboard() {
       });
     }
 
-    // กรองตามสาขาที่เลือก โดยเทียบจาก location ของกิจกรรมกับชื่อสาขา
-    if (selectedBranch !== 'all') {
-      const branch = branchesMap.find(b => String(b.branchId) === selectedBranch);
-      if (branch) {
-        filtered = filtered.filter(e => {
-          const locName = e.location?.locationName || '';
-          return locName.includes(branch.name) || branch.name.includes(locName);
-        });
-      }
-    }
-
     return filtered.sort(
       (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
     );
   }, [apiEvents, selectedDate, selectedBranch, branchesMap]);
 
   // Combine locations from API data
-  const mappingLocations: LocationWithStatus[] = apiLocations.map((loc) => ({
+  const mappingLocations: LocationWithStatus[] = apiLocations
+    .filter((loc) => loc.isActive)
+    .map((loc) => ({
     id: String(loc.locationId),
     name: loc.locationName,
     description: loc.address,
@@ -318,14 +341,14 @@ export default function AdminDashboard() {
   }));
 
   const eventLocations: LocationWithStatus[] = apiEvents
-    .filter(evt => evt.location?.latitude != null)
+    .filter(evt => evt.location?.latitude != null || evt.venueLatitude != null)
     .map((evt) => ({
       id: `event-${evt.eventId}`,
-      name: evt.location!.locationName,
+      name: evt.location?.locationName ?? evt.venueName ?? 'พื้นที่กำหนดเอง',
       description: `งาน: ${evt.eventName}`,
-      latitude: evt.location!.latitude,
-      longitude: evt.location!.longitude,
-      radius: evt.location!.radius,
+      latitude: evt.location?.latitude ?? evt.venueLatitude!,
+      longitude: evt.location?.longitude ?? evt.venueLongitude!,
+      radius: evt.location?.radius ?? 500,
       type: "event" as const,
       team: "",
       time: evt.startDateTime
@@ -355,7 +378,9 @@ export default function AdminDashboard() {
         if (matchedLoc) return [matchedLoc.latitude, matchedLoc.longitude] as [number, number];
       }
     }
-    // fallback: กรุงเทพ (สำนักงานใหญ่)
+    // ทั้งหมด: ใช้ location สำนักงานใหญ่ถ้าเจอ
+    const hq = apiLocations.find(loc => loc.locationName.includes('สำนักงานใหญ่'));
+    if (hq) return [hq.latitude, hq.longitude] as [number, number];
     return [13.7563, 100.5018] as [number, number];
   }, [selectedBranch, branchesMap, apiLocations]);
 
@@ -369,14 +394,22 @@ export default function AdminDashboard() {
         { name: "ขาดงาน", value: attendanceStats.absentCount, color: CHART_COLORS.absent },
       ];
     } else {
+      if (perEventStats) {
+        if (perEventStats.isOpenEvent) {
+          return [
+            { name: "เข้าร่วม", value: perEventStats.joinedCount, color: CHART_COLORS.onTime },
+          ];
+        }
+        return [
+          { name: "เข้าร่วม", value: perEventStats.joinedCount, color: CHART_COLORS.onTime },
+          { name: "ยังไม่เข้าร่วม", value: perEventStats.notJoinedCount, color: CHART_COLORS.absent },
+        ];
+      }
       return [
         { name: "เข้าร่วม", value: eventStats.activeEvents, color: CHART_COLORS.onTime },
-        { name: "มาสาย", value: eventStats.lateEventCount, color: CHART_COLORS.late },
-        { name: "ลางาน", value: eventStats.leaveEventCount, color: CHART_COLORS.leave },
-        { name: "ยังไม่เข้าร่วม", value: eventStats.notParticipatedCount, color: CHART_COLORS.absent },
       ];
     }
-  }, [statsType, attendanceStats, eventStats]);
+  }, [statsType, attendanceStats, eventStats, perEventStats]);
 
   // Handlers
   const handleDetailClick = (type: DetailType, users: User[]) => {
@@ -388,6 +421,7 @@ export default function AdminDashboard() {
   const getDetailTitle = () => {
     if (statsType === "attendance") {
       switch (detailType) {
+        case "onTime": return "รายชื่อพนักงานที่มาตรงเวลา";
         case "absent": return "รายชื่อพนักงานที่ขาดงาน";
         case "leave": return "รายชื่อพนักงานที่ลางาน";
         case "late": return "รายชื่อพนักงานที่มาสาย";
@@ -395,6 +429,7 @@ export default function AdminDashboard() {
       }
     } else {
       switch (detailType) {
+        case "joined": return "รายชื่อผู้เข้าร่วมกิจกรรม";
         case "notParticipated": return "รายชื่อผู้ที่ยังไม่เข้าร่วมกิจกรรม";
         case "leave": return "รายชื่อผู้ที่ลางานกิจกรรม";
         case "late": return "รายชื่อผู้ที่มาสายกิจกรรม";
@@ -441,13 +476,14 @@ export default function AdminDashboard() {
     }
   };
 
-  const totalChart = donutChartData.reduce((a, b) => a + b.value, 0) || 1;
+  const totalChartSum = donutChartData.reduce((a, b) => a + b.value, 0);
+  const totalChart = totalChartSum || 1;
 
   return (
     <div className="min-h-screen bg-secondaryMain">
       {/* Detail Modal */}
       {showDetailModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
           <Card className="max-w-2xl w-full max-h-[80vh] overflow-hidden">
             <CardHeader className="border-b border-borderMain flex-row items-center justify-between py-4">
               <CardTitle className="text-primaryMain">{getDetailTitle()}</CardTitle>
@@ -499,18 +535,19 @@ export default function AdminDashboard() {
             <h1 className="text-2xl font-bold text-primaryMain">ภาพรวมการปฏิบัติงาน</h1>
             <p className="text-sm text-textMain/70 mt-0.5">ข้อมูลเรียลไทม์ · ระบบตรวจสอบการเข้างาน</p>
           </div>
-          <select
-            value={selectedBranch}
-            onChange={(e) => setSelectedBranch(e.target.value)}
-            className="appearance-none pl-4 pr-10 py-2.5 border-2 border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain focus:border-accentMain focus:ring-2 focus:ring-accentMain/20 outline-none cursor-pointer bg-white min-w-48"
-          >
-            {branchOptions.map((b) => (
-              <option key={b.code} value={b.code}>{b.name}</option>
-            ))}
-          </select>
-          {isRefreshing && (
-            <div className="w-5 h-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
-          )}
+          <div className="relative">
+            <select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value)}
+              className="appearance-none pl-4 pr-10 py-2.5 border-2 border-borderMain rounded-lg text-sm font-medium text-primaryMain hover:border-accentMain focus:border-accentMain focus:ring-2 focus:ring-accentMain/20 outline-none cursor-pointer bg-white min-w-48"
+            >
+              {branchOptions.map((b) => (
+                <option key={b.code} value={b.code}>{b.name}</option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primaryMain" />
+          </div>
+
         </div>
       </div>
 
@@ -562,7 +599,7 @@ export default function AdminDashboard() {
               <MapContainer
                 key={`map-${selectedBranch}`}
                 center={mapCenter}
-                zoom={selectedBranch !== "all" ? 15 : 13}
+                zoom={selectedBranch !== "all" ? 15 : 11}
                 className="h-full w-full"
               >
                 <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
@@ -630,87 +667,131 @@ export default function AdminDashboard() {
               </span>
             </div>
             <div className="overflow-y-auto flex-1">
-              {statsType === 'attendance' ? (
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-borderMain/50">
-                    {employeesToday.length === 0 ? (
-                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
-                    ) : (
-                      employeesToday.map((emp) => {
-                        const nameParts = emp.name.split(' ');
-                        const firstName = nameParts[0] ?? emp.name;
-                        const lastName  = nameParts.slice(1).join(' ');
-                        const sl = statusLabel(emp.status);
-                        return (
-                          <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
-                            <td className="px-3 py-2 text-textMain">{firstName}</td>
-                            <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
-                            <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
-                            <td className="px-3 py-2">
-                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
-                                {sl.text}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })
+              {statsType === 'attendance' ? (() => {
+                const PAGE_SIZE = 10;
+                const totalPages = Math.max(1, Math.ceil(employeesToday.length / PAGE_SIZE));
+                const safePage = Math.min(tablePage, totalPages);
+                const pageItems = employeesToday.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+                return (
+                  <>
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">ประเภท</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-borderMain/50">
+                        {employeesToday.length === 0 ? (
+                          <tr><td colSpan={6} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
+                        ) : (
+                          pageItems.map((emp) => {
+                            const nameParts = emp.name.split(' ');
+                            const firstName = nameParts[0] ?? emp.name;
+                            const lastName  = nameParts.slice(1).join(' ');
+                            const sl = statusLabel(emp.status);
+                            const isEvent = emp.eventId != null;
+                            return (
+                              <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
+                                <td className="px-3 py-2 text-textMain">{firstName}</td>
+                                <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
+                                <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    isEvent ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                                  }`}>
+                                    {isEvent ? 'กิจกรรม' : 'ปกติ'}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
+                                    {sl.text}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-2 py-2 border-t border-borderMain text-xs">
+                        <button onClick={() => setTablePage(p => Math.max(1, p - 1))} disabled={safePage === 1} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">‹</button>
+                        <span className="text-textMain/70">{safePage} / {totalPages}</span>
+                        <button onClick={() => setTablePage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">›</button>
+                      </div>
                     )}
-                  </tbody>
-                </table>
-              ) : (
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อกิจกรรม</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานที่</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">เริ่ม</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สิ้นสุด</th>
-                      <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-borderMain/50">
-                    {displayedEvents.length === 0 ? (
-                      <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบกิจกรรม</td></tr>
-                    ) : (
-                      displayedEvents.map((evt) => {
-                        const now = new Date();
-                        const start = new Date(evt.startDateTime);
-                        const end = new Date(evt.endDateTime);
-                        const isOngoing = evt.isActive && start <= now && end >= now;
-                        const isUpcoming = start > now;
-                        const evtStatus = isOngoing
-                          ? { text: 'กำลังดำเนินการ', cls: 'bg-green-100 text-green-700' }
-                          : isUpcoming
-                            ? { text: 'กำลังจะมาถึง', cls: 'bg-blue-100 text-blue-700' }
-                            : { text: 'สิ้นสุดแล้ว', cls: 'bg-gray-100 text-gray-600' };
-                        return (
-                          <tr key={evt.eventId} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-3 py-2 text-textMain font-medium">{evt.eventName}</td>
-                            <td className="px-3 py-2 text-textMain/70">{evt.location?.locationName || '-'}</td>
-                            <td className="px-3 py-2 text-textMain/70">{format(start, 'd MMM yy HH:mm', { locale: th })}</td>
-                            <td className="px-3 py-2 text-textMain/70">{format(end, 'd MMM yy HH:mm', { locale: th })}</td>
-                            <td className="px-3 py-2">
-                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${evtStatus.cls}`}>
-                                {evtStatus.text}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })
+                  </>
+                );
+              })() : (() => {
+                const PAGE_SIZE = 10;
+                const totalPages = Math.max(1, Math.ceil(displayedEvents.length / PAGE_SIZE));
+                const safePage = Math.min(tablePage, totalPages);
+                const pageItems = displayedEvents.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+                return (
+                  <>
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อกิจกรรม</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานที่</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">เริ่ม</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สิ้นสุด</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-borderMain/50">
+                        {displayedEvents.length === 0 ? (
+                          <tr><td colSpan={5} className="text-center py-6 text-gray-400">ไม่พบกิจกรรม</td></tr>
+                        ) : (
+                          pageItems.map((evt) => {
+                            const now = new Date();
+                            const start = new Date(evt.startDateTime);
+                            const end = new Date(evt.endDateTime);
+                            const isOngoing = evt.isActive && start <= now && end >= now;
+                            const isUpcoming = start > now;
+                            const evtStatus = isOngoing
+                              ? { text: 'กำลังดำเนินการ', cls: 'bg-green-100 text-green-700' }
+                              : isUpcoming
+                                ? { text: 'กำลังจะมาถึง', cls: 'bg-blue-100 text-blue-700' }
+                                : { text: 'สิ้นสุดแล้ว', cls: 'bg-gray-100 text-gray-600' };
+                            const isSelected = selectedEventId === evt.eventId;
+                            return (
+                              <tr
+                                key={evt.eventId}
+                                onClick={() => setSelectedEventId(isSelected ? null : evt.eventId)}
+                                className={`cursor-pointer transition-colors ${isSelected ? 'bg-primaryMain/10 border-l-2 border-primaryMain' : 'hover:bg-gray-50'}`}
+                              >
+                                <td className="px-3 py-2 text-textMain font-medium">{evt.eventName}</td>
+                                <td className="px-3 py-2 text-textMain/70">{evt.location?.locationName || '-'}</td>
+                                <td className="px-3 py-2 text-textMain/70">{format(start, 'd MMM yy HH:mm', { locale: th })}</td>
+                                <td className="px-3 py-2 text-textMain/70">{format(end, 'd MMM yy HH:mm', { locale: th })}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${evtStatus.cls}`}>
+                                    {evtStatus.text}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-2 py-2 border-t border-borderMain text-xs">
+                        <button onClick={() => setTablePage(p => Math.max(1, p - 1))} disabled={safePage === 1} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">‹</button>
+                        <span className="text-textMain/70">{safePage} / {totalPages}</span>
+                        <button onClick={() => setTablePage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">›</button>
+                      </div>
                     )}
-                  </tbody>
-                </table>
-              )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -721,7 +802,7 @@ export default function AdminDashboard() {
           {/* Tabs */}
           <div className="flex shrink-0 border-b-2 border-borderMain">
             <button
-              onClick={() => setStatsType('attendance')}
+              onClick={() => { setStatsType('attendance'); setTablePage(1); }}
               className={`flex-1 py-3 text-sm font-semibold transition-colors ${
                 statsType === 'attendance'
                   ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
@@ -731,7 +812,7 @@ export default function AdminDashboard() {
               การเข้างาน
             </button>
             <button
-              onClick={() => setStatsType('event')}
+              onClick={() => { setStatsType('event'); setTablePage(1); }}
               className={`flex-1 py-3 text-sm font-semibold transition-colors border-l border-borderMain ${
                 statsType === 'event'
                   ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
@@ -769,6 +850,18 @@ export default function AdminDashboard() {
 
           {/* Donut Chart */}
           <div className="px-4 py-3 shrink-0">
+            {statsType === 'event' && selectedEventId && (
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-primaryMain truncate max-w-[200px]">
+                  {perEventStats?.eventName || '...'}
+                  {perEventStats?.isOpenEvent && <span className="ml-1 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">เปิดทั่วไป</span>}
+                </span>
+                <button onClick={() => setSelectedEventId(null)} className="text-textMain/40 hover:text-textMain/80 text-xs">✕</button>
+              </div>
+            )}
+            {statsType === 'event' && !selectedEventId && (
+              <p className="text-xs text-textMain/50 mb-2 text-center">คลิกที่กิจกรรมเพื่อดูสถิติ</p>
+            )}
             <div className="h-52">
               {donutChartData.every(d => d.value === 0) ? (
                 <div className="h-full flex flex-col items-center justify-center text-textMain/40">
@@ -805,13 +898,20 @@ export default function AdminDashboard() {
             {donutChartData.map((item) => {
               let detailFn: (() => void) | undefined;
               if (statsType === 'attendance') {
+                if (item.name === 'ตรงเวลา') detailFn = () => handleDetailClick('onTime', attendanceStats.onTimeUsers);
                 if (item.name === 'ขาดงาน') detailFn = () => handleDetailClick('absent', attendanceStats.absentUsers);
                 if (item.name === 'ลางาน')  detailFn = () => handleDetailClick('leave',  attendanceStats.leaveUsers);
                 if (item.name === 'มาสาย')  detailFn = () => handleDetailClick('late',   attendanceStats.lateUsers);
               } else {
-                if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', eventStats.notParticipatedUsers);
-                if (item.name === 'ลางาน')      detailFn = () => handleDetailClick('leave', eventStats.leaveEventUsers);
-                if (item.name === 'มาสาย')      detailFn = () => handleDetailClick('late',  eventStats.lateEventUsers);
+                if (perEventStats) {
+                  if (item.name === 'เข้าร่วม') detailFn = () => handleDetailClick('joined', perEventStats.joined.map((p, i) => ({ id: String(i), name: p.name, department: p.branch, position: '', avatar: '', time: p.checkIn || '', status: p.status || '' })));
+                  if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', perEventStats.notJoined.map((p, i) => ({ id: String(i), name: p.name, department: p.branch, position: '', avatar: '', time: '', status: '' })));
+                } else {
+                  if (item.name === 'เข้าร่วม')    detailFn = () => handleDetailClick('joined', eventStats.joinedUsers);
+                  if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', eventStats.notParticipatedUsers);
+                  if (item.name === 'ลางาน')      detailFn = () => handleDetailClick('leave', eventStats.leaveEventUsers);
+                  if (item.name === 'มาสาย')      detailFn = () => handleDetailClick('late',  eventStats.lateEventUsers);
+                }
               }
               const pct = ((item.value / totalChart) * 100).toFixed(0);
               return (
@@ -839,14 +939,44 @@ export default function AdminDashboard() {
 
           {/* Summary totals */}
           <div className="px-4 py-3 space-y-1">
-            <div className="flex justify-between text-xs">
-              <span className="text-textMain/60">พนักงานทั้งหมด</span>
-              <span className="font-bold text-primaryMain">{attendanceStats.totalEmployees} คน</span>
-            </div>
-            <div className="flex justify-between text-xs">
-              <span className="text-textMain/60">คิดรวมอัตราการสถิติ</span>
-              <span className="font-bold text-emerald-600">{totalChart} คน</span>
-            </div>
+            {statsType === 'attendance' ? (
+              <>
+                <div className="flex justify-between text-xs">
+                  <span className="text-textMain/60">พนักงานทั้งหมด</span>
+                  <span className="font-bold text-primaryMain">{attendanceStats.totalEmployees} คน</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-textMain/60">คิดรวมอัตราการสถิติ</span>
+                  <span className="font-bold text-emerald-600">{totalChartSum} คน</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between text-xs">
+                  <span className="text-textMain/60">กิจกรรมทั้งหมด</span>
+                  <span className="font-bold text-primaryMain">{displayedEvents.length} รายการ</span>
+                </div>
+                {perEventStats ? (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-textMain/60">เข้าร่วม</span>
+                      <span className="font-bold text-emerald-600">{perEventStatsLoading ? '...' : perEventStats.joinedCount} คน</span>
+                    </div>
+                    {!perEventStats.isOpenEvent && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-textMain/60">ยังไม่เข้าร่วม</span>
+                        <span className="font-bold text-red-500">{perEventStatsLoading ? '...' : perEventStats.notJoinedCount} คน</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-textMain/60">ผู้เข้าร่วมวันนี้</span>
+                    <span className="font-bold text-emerald-600">{eventStats.activeEvents} คน</span>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       </main>

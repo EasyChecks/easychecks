@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import {
   downloadReport,
+  previewReport,
 } from '../services/download.service.js';
 
 /**
@@ -99,7 +100,11 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
       type: type as 'attendance' | 'shift',
       format: format as 'excel',
       ...(startDate && { startDate: new Date(startDate as string) }),
-      ...(endDate && { endDate: new Date(endDate as string) }),
+      ...(endDate && (() => {
+        const d = new Date(endDate as string);
+        d.setUTCHours(23, 59, 59, 999);
+        return { endDate: d };
+      })()),
       ...(branchId && { branchId: parseInt(branchId as string) }),
     };
 
@@ -133,6 +138,42 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
       success: false,
       error: message,
     });
+  }
+}
+
+/**
+ * GET /api/download/preview - ดึงข้อมูลตัวอย่างก่อนดาวน์โหลด (ส่งกลับ JSON)
+ */
+export async function handlePreviewReport(req: Request, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const { type, startDate, endDate, branchId } = req.query;
+
+    if (!type || !['attendance', 'shift'].includes(type as string)) {
+      res.status(400).json({ success: false, error: 'Invalid type. Must be "attendance" or "shift"' });
+      return;
+    }
+
+    const result = await previewReport(user, {
+      type: type as 'attendance' | 'shift',
+      ...(startDate && { startDate: new Date(startDate as string) }),
+      ...(endDate && (() => {
+        const d = new Date(endDate as string);
+        d.setUTCHours(23, 59, 59, 999);
+        return { endDate: d };
+      })()),
+      ...(branchId && { branchId: parseInt(branchId as string) }),
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    res.status(500).json({ success: false, error: message });
   }
 }
 

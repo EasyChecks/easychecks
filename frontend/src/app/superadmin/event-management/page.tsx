@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, Suspense } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import eventService, { EventItem as ApiEventItem, ParticipantType, CreateEventRequest, EventListParams, EventStatistics } from '@/services/eventService';
 import locationService, { LocationItem } from '@/services/locationService';
+import { userService, UserServiceUser } from '@/services/user';
 import dashboardService, { BranchMapItem } from '@/services/dashboardService';
 import { EventData, LocationData, DialogState } from '@/types/event';
 import { Button } from '@/components/ui/button';
@@ -83,8 +84,11 @@ const toISO = (date: string, time: string) => {
   return d.toISOString();
 };
 
-export default function EventManagement() {
+export default function EventManagement({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
+  const mapFlySeq = useRef(0);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const [mapFlyTo, setMapFlyTo] = useState<{ lat: number; lng: number; zoom?: number; seq: number } | undefined>();
   
   // ── API data state ──
   const [events, setEvents] = useState<EventData[]>([]);
@@ -111,14 +115,16 @@ export default function EventManagement() {
   useEffect(() => {
     const loadStatic = async () => {
       try {
-        const [locsResp, branchesResp] = await Promise.all([
+        const [locsResp, branchesResp, usersData] = await Promise.all([
           locationService.getAll(),
           dashboardService.getBranchesMap(),
+          userService.getAll(),
         ]);
-        // Filter out deleted locations
-        const nonDeletedLocations = locsResp.data.filter(loc => !loc.deletedAt);
+        // Filter out deleted + EVENT-type locations (EVENT locations are event pins themselves)
+        const nonDeletedLocations = locsResp.data.filter(loc => !loc.deletedAt && loc.locationType !== 'EVENT' && loc.isActive);
         setLocations(nonDeletedLocations.map(apiLocationToLocationData));
         setBranches(branchesResp.data);
+        setAllUsers(usersData);
       } catch (err) {
         console.error('[EventManagement] load static error:', err);
       }
@@ -227,6 +233,9 @@ export default function EventManagement() {
   const [participantType, setParticipantType] = useState<ParticipantType>('ALL');
   const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [allUsers, setAllUsers] = useState<UserServiceUser[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
 
   const [editFormData, setEditFormData] = useState<Partial<EventData>>({});
 
@@ -356,6 +365,9 @@ export default function EventManagement() {
         if (participantType === 'ROLE' && selectedRoles.length > 0) {
           payload.participants.roles = selectedRoles;
         }
+        if (participantType === 'INDIVIDUAL' && selectedUserIds.length > 0) {
+          payload.participants.userIds = selectedUserIds;
+        }
       }
 
       await eventService.create(payload);
@@ -366,6 +378,8 @@ export default function EventManagement() {
       setParticipantType('ALL');
       setSelectedBranchIds([]);
       setSelectedRoles([]);
+      setSelectedUserIds([]);
+      setUserSearchQuery('');
       setIsAddingEvent(false);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -452,9 +466,8 @@ export default function EventManagement() {
     );
   }
 
-  return (
-    <div className="min-h-screen p-4 bg-slate-50 sm:p-6">
-      <Card className="p-6 border border-orange-100 shadow-sm">
+  const content = (
+    <>
         {/* Header */}
         <div className="flex flex-col items-start justify-between gap-4 mb-6 sm:flex-row sm:items-center">
           <div>
@@ -518,12 +531,11 @@ export default function EventManagement() {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6 mb-6">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4 mb-6">
                   {[
                     { label: 'ทั้งหมด', value: eventStats.totalEvents, bg: '#f3f4f6', text: '#374151', border: '#d1d5db' },
-                    { label: 'ใช้งานอยู่', value: eventStats.activeEvents, bg: '#dcfce7', text: '#15803d', border: '#86efac' },
+                    { label: 'กำลังดำเนินการ', value: eventStats.ongoingEvents, bg: '#dcfce7', text: '#15803d', border: '#86efac' },
                     { label: 'กำลังจะมาถึง', value: eventStats.upcomingEvents, bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' },
-                    { label: 'กำลังดำเนินการ', value: eventStats.ongoingEvents, bg: '#ffedd5', text: '#c2410c', border: '#fdba74' },
                     { label: 'สิ้นสุดแล้ว', value: eventStats.pastEvents, bg: '#e5e7eb', text: '#374151', border: '#9ca3af' },
                   ].map(stat => (
                     <Card key={stat.label} className="p-4 text-center">
@@ -628,7 +640,7 @@ export default function EventManagement() {
                   <option value="ALL">ทุกคน</option>
                   <option value="BRANCH">ตามสาขา</option>
                   <option value="ROLE">ตามบทบาท</option>
-                  <option value="INDIVIDUAL" disabled>ระบุคน (ยังไม่พร้อมใช้งาน)</option>
+                  <option value="INDIVIDUAL">ระบุคน</option>
                 </select>
               </div>
 
@@ -663,6 +675,56 @@ export default function EventManagement() {
                   </div>
                   {selectedBranchIds.length > 0 && (
                     <p className="mt-1 text-xs text-gray-500">เลือกแล้ว {selectedBranchIds.length} สาขา</p>
+                  )}
+                </div>
+              )}
+
+              {/* Individual User Selector (when INDIVIDUAL selected) */}
+              {participantType === 'INDIVIDUAL' && (
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">
+                    เลือกพนักงาน <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    placeholder="ค้นหาชื่อหรือรหัสพนักงาน..."
+                    className="w-full px-3 py-2 mb-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                  <div className="space-y-1 p-2 border border-gray-300 rounded-lg max-h-48 overflow-y-auto">
+                    {allUsers.length === 0 ? (
+                      <p className="text-sm text-gray-500 p-2">กำลังโหลดรายชื่อพนักงาน...</p>
+                    ) : (
+                      allUsers
+                        .filter(u => {
+                          const q = userSearchQuery.toLowerCase();
+                          const name = (u.name || '').toLowerCase();
+                          const empId = (u.employeeId || '').toLowerCase();
+                          return !q || name.includes(q) || empId.includes(q);
+                        })
+                        .map((u) => (
+                          <label key={u.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded">
+                            <input
+                              type="checkbox"
+                              checked={selectedUserIds.includes(u.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedUserIds(prev => [...prev, u.id]);
+                                } else {
+                                  setSelectedUserIds(prev => prev.filter(id => id !== u.id));
+                                }
+                              }}
+                              className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-orange-500"
+                            />
+                            <span className="text-sm text-gray-700">{u.name}</span>
+                            {u.employeeId && <span className="text-xs text-gray-400">({u.employeeId})</span>}
+                          </label>
+                        ))
+                    )}
+                  </div>
+                  {selectedUserIds.length > 0 && (
+                    <p className="mt-1 text-xs text-gray-500">เลือกแล้ว {selectedUserIds.length} คน</p>
                   )}
                 </div>
               )}
@@ -725,13 +787,14 @@ export default function EventManagement() {
         )}
 
         {/* Map */}
-        <div className="mb-6">
+        <div className="mb-6" ref={mapRef}>
           <Suspense fallback={<div className="h-125 bg-gray-100 rounded-2xl animate-pulse" />}>
             <EventMap 
-              events={events}
+              events={events.filter(e => e.status !== 'completed')}
               locations={locations}
               onMapClick={isAddingEvent || editingEventId ? handleMapClick : undefined}
               selectedPosition={selectedPosition}
+              flyTo={mapFlyTo}
             />
           </Suspense>
         </div>
@@ -797,6 +860,7 @@ export default function EventManagement() {
               <input
                 type="date"
                 value={filterStartDate}
+                max={new Date().toISOString().split('T')[0]}
                 onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
                 onChange={(e) => {
                   setFilterStartDate(e.target.value);
@@ -812,6 +876,7 @@ export default function EventManagement() {
               <input
                 type="date"
                 value={filterEndDate}
+                max={new Date().toISOString().split('T')[0]}
                 onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
                 onChange={(e) => {
                   setFilterEndDate(e.target.value);
@@ -876,6 +941,11 @@ export default function EventManagement() {
                   isEditing={editingEventId === event.id}
                   editFormData={editFormData}
                   onViewDetail={() => router.push(`/superadmin/event-management/${event.id}`)}
+                  onLocate={() => {
+                    if (event.status === 'completed') return;
+                    setMapFlyTo({ lat: event.latitude, lng: event.longitude, zoom: 16, seq: ++mapFlySeq.current });
+                    mapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
                   onEdit={() => handleEditEvent(event)}
                   onSave={handleSaveEdit}
                   onCancel={handleCancelEdit}
@@ -953,7 +1023,6 @@ export default function EventManagement() {
         </div>
 
         </>)}
-      </Card>
 
       {/* Alert Dialog */}
       <AlertDialog
@@ -983,6 +1052,14 @@ export default function EventManagement() {
           </Card>
         </div>
       )}
+    </>
+  );
+  if (embedded) return content;
+  return (
+    <div className="min-h-screen p-4 bg-slate-50 sm:p-6">
+      <Card className="p-6 border border-orange-100 shadow-sm">
+        {content}
+      </Card>
     </div>
   );
 }
@@ -1109,6 +1186,7 @@ interface EventCardProps {
   isEditing: boolean;
   editFormData: Partial<EventData>;
   onViewDetail: () => void;
+  onLocate?: () => void;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
@@ -1128,6 +1206,7 @@ function EventCard({
   isEditing, 
   editFormData, 
   onViewDetail,
+  onLocate,
   onEdit, 
   onSave, 
   onCancel, 
@@ -1195,27 +1274,17 @@ function EventCard({
   }
 
   return (
-    <Card 
-      className="p-4 transition-shadow hover:shadow-md"
-      style={{ borderLeft: `4px solid ${
-        event.status === 'ongoing' ? '#16a34a' :
-        event.status === 'upcoming' ? '#2563eb' :
-        '#9ca3af'
-      }` }}
-    >
+    <Card className="p-4 cursor-pointer group transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgba(37,99,235,0.18)] hover:border-blue-300" onClick={onLocate}>
       <div className="flex items-start justify-between mb-3">
-        <h3 className="text-lg font-bold text-gray-900">{event.name}</h3>
+        <h3 className="text-base font-bold text-gray-900 leading-tight group-hover:text-blue-700 transition-colors">{event.name}</h3>
         {event.status && (
-          <Badge 
-            variant={getStatusVariant(event.status)}
-            style={
-              event.status === 'ongoing' ? { backgroundColor: '#16a34a', color: '#fff', borderColor: '#16a34a' } :
-              event.status === 'upcoming' ? { backgroundColor: '#2563eb', color: '#fff', borderColor: '#2563eb' } :
-              { backgroundColor: '#6b7280', color: '#fff', borderColor: '#6b7280' }
-            }
-          >
+          <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
+            event.status === 'ongoing' ? 'bg-green-100 text-green-700' :
+            event.status === 'upcoming' ? 'bg-blue-100 text-blue-700' :
+            'bg-gray-100 text-gray-500'
+          }`}>
             {event.status === 'ongoing' ? 'กำลังดำเนินการ' : event.status === 'upcoming' ? 'กำลังจะมาถึง' : 'เสร็จสิ้นแล้ว'}
-          </Badge>
+          </span>
         )}
       </div>
       

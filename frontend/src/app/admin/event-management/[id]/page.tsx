@@ -15,6 +15,7 @@ export default function EventDetailPage() {
 
   const [event, setEvent] = useState<EventItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [attendeesOpen, setAttendeesOpen] = useState(false);
   const [alertDialog, setAlertDialog] = useState({
     isOpen: false,
     type: 'info' as 'info' | 'success' | 'error' | 'warning',
@@ -68,7 +69,7 @@ export default function EventDetailPage() {
     } else if (start <= now && now <= end) {
       return <Badge variant="active">กำลังดำเนินการ</Badge>;
     } else {
-      return <Badge variant="default">กำลังจะมาถึง</Badge>;
+      return <Badge variant="info">กำลังจะมาถึง</Badge>;
     }
   };
 
@@ -112,7 +113,7 @@ export default function EventDetailPage() {
           </svg>
           <h2 className="text-xl font-bold text-gray-900 mb-2">ไม่พบกิจกรรม</h2>
           <p className="text-gray-500 mb-4">กิจกรรมที่คุณค้นหาอาจถูกลบหรือไม่มีอยู่ในระบบ</p>
-          <Button onClick={() => router.push('/admin/event-management')}>
+          <Button onClick={() => router.push('/admin/mapping-events')}>
             กลับไปหน้ารายการ
           </Button>
         </Card>
@@ -127,7 +128,7 @@ export default function EventDetailPage() {
         <div className="flex items-center gap-4 mb-6">
           <Button
             variant="outline"
-            onClick={() => router.push('/admin/event-management')}
+            onClick={() => router.push('/admin/mapping-events')}
             className="flex items-center gap-2"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -145,12 +146,12 @@ export default function EventDetailPage() {
               <h2 className="text-3xl font-bold text-gray-900 mb-2">{event.eventName}</h2>
               <div className="flex items-center gap-3">
                 {getStatusBadge()}
-                {event.isActive ? (
+                {event.isActive && new Date(event.endDateTime) >= new Date() ? (
                   <Badge variant="active">ใช้งาน</Badge>
                 ) : (
                   <Badge variant="suspend">ไม่ใช้งาน</Badge>
                 )}
-                <Badge variant="default">{getParticipantTypeLabel(event.participantType)}</Badge>
+                <Badge variant="secondary">{getParticipantTypeLabel(event.participantType)}</Badge>
               </div>
             </div>
           </div>
@@ -292,6 +293,60 @@ export default function EventDetailPage() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Creator & Meta Info */}
+        <Card className="p-6 mb-6">
+          <button
+            className="w-full flex items-center justify-between text-left"
+            onClick={() => setAttendeesOpen(prev => !prev)}
+          >
+            <h3 className="text-lg font-bold text-gray-900">
+              ผู้เช็คอินแล้ว ({event.attendance?.length ?? event._count?.attendance ?? 0} คน)
+            </h3>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${attendeesOpen ? 'rotate-180' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {attendeesOpen && (
+            <div className="mt-4">
+              {!event.attendance || event.attendance.length === 0 ? (
+                <p className="text-sm text-gray-500 py-4 text-center">ยังไม่มีผู้เช็คอิน</p>
+              ) : (
+                <div className="space-y-2 max-h-80 overflow-y-auto">
+                  {event.attendance.map((a, idx) => (
+                    <div key={a.attendanceId} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                      <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center shrink-0">
+                        <span className="text-orange-600 text-sm font-medium">{idx + 1}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 truncate">
+                          {a.user.firstName} {a.user.lastName}
+                        </p>
+                        {a.user.email && (
+                          <p className="text-xs text-gray-500 truncate">{a.user.email}</p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs text-gray-500">
+                          {new Date(a.checkIn).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                        {a.checkOut && (
+                          <p className="text-xs text-gray-400">
+                            → {new Date(a.checkOut).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </Card>

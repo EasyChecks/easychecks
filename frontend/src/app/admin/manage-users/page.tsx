@@ -351,20 +351,52 @@ export default function AdminManageUser() {
   };
 
   // Create new user
-  const handleCreateUser = (newUser: User) => {
-    const updatedUsers = [...users, newUser];
-    setUsers(updatedUsers);
-    
-    setUi(prev => ({
-      ...prev,
-      alertDialog: {
-        isOpen: true,
-        type: 'success',
-        title: 'เพิ่มผู้ใช้สำเร็จ',
-        message: `เพิ่ม ${newUser.name} เข้าระบบเรียบร้อยแล้ว\n\nรหัสพนักงาน: ${newUser.employeeId}\nรหัสผ่าน: ${newUser.password}`,
-        autoClose: false
-      }
-    }));
+  const handleCreateUser = async (newUser: User) => {
+    try {
+      const created = await userService.createUser({
+        name: newUser.name,
+        email: newUser.email,
+        phone: newUser.phone,
+        department: newUser.department,
+        position: newUser.position,
+        role: newUser.role,
+        title: newUser.title,
+        gender: newUser.gender,
+        branchCode: newUser.provinceCode || newUser.branch,
+        nationalId: newUser.nationalId,
+        birthDate: newUser.birthDate,
+        address: newUser.address,
+        bloodType: newUser.bloodType,
+        emergencyContact: newUser.emergencyContact,
+      });
+
+      setUsers(prev => [...prev, created]);
+
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'success',
+          title: 'เพิ่มผู้ใช้สำเร็จ',
+          message: `เพิ่ม ${created.name} เข้าระบบเรียบร้อยแล้ว\n\nรหัสพนักงาน: ${created.employeeId}`,
+          autoClose: false
+        }
+      }));
+    } catch (err: unknown) {
+      const axiosMsg = (err as { response?: { data?: { message?: string; error?: string } } })?.response?.data?.message
+        ?? (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const message = axiosMsg || (err instanceof Error ? err.message : 'ไม่สามารถสร้างผู้ใช้ได้');
+      setUi(prev => ({
+        ...prev,
+        alertDialog: {
+          isOpen: true,
+          type: 'error',
+          title: 'เกิดข้อผิดพลาด',
+          message,
+          autoClose: true
+        }
+      }));
+    }
   };
 
   // CSV Import

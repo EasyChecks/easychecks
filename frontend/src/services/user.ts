@@ -279,6 +279,57 @@ export const userService = {
   },
 
   /**
+   * สร้างผู้ใช้ใหม่ — แปลง frontend form data → backend format แล้วส่ง POST /users
+   */
+  async createUser(data: Record<string, unknown>): Promise<User> {
+    const payload: Record<string, unknown> = {};
+
+    // ชื่อ-นามสกุล: split เป็น firstName / lastName
+    if (data.name) {
+      const parts = String(data.name).trim().split(' ');
+      payload.firstName = parts[0] ?? '';
+      payload.lastName = parts.slice(1).join(' ') || parts[0];
+    }
+
+    // คำนำหน้า & เพศ (backend บังคับ)
+    if (data.title) payload.title = String(data.title).toUpperCase();
+    if (data.gender) payload.gender = String(data.gender).toUpperCase();
+
+    // ข้อมูลพื้นฐาน
+    if (data.email !== undefined) payload.email = data.email;
+    if (data.phone !== undefined) payload.phone = data.phone;
+    if (data.nationalId !== undefined) payload.nationalId = data.nationalId;
+    if (data.birthDate !== undefined) payload.birthDate = data.birthDate;
+    if (data.department !== undefined) payload.department = data.department;
+    if (data.position !== undefined) payload.position = data.position;
+    if (data.bloodType !== undefined) payload.bloodType = data.bloodType;
+    if (data.address !== undefined) payload.address = data.address;
+    if (data.role !== undefined) payload.role = String(data.role).toUpperCase();
+    if (data.password && String(data.password).trim()) payload.password = data.password;
+
+    // สาขา: branchId หรือ branchCode
+    if (data.branchId !== undefined) {
+      payload.branchId = data.branchId;
+    }
+    if (data.branchCode !== undefined) {
+      payload.branchCode = data.branchCode;
+    }
+
+    // ผู้ติดต่อฉุกเฉิน
+    if (data.emergencyContact && typeof data.emergencyContact === 'object') {
+      const ec = data.emergencyContact as Record<string, unknown>;
+      payload.emergent_first_name = String(ec.name ?? '').split(' ')[0] ?? '';
+      payload.emergent_last_name = String(ec.name ?? '').split(' ').slice(1).join(' ') || String(ec.name ?? '');
+      payload.emergent_tel = ec.phone || '';
+      payload.emergent_relation = ec.relation || '';
+    }
+
+    const response = await api.post('/users', payload);
+    const backendUser = response.data.data ?? response.data;
+    return mapBackendUserToFrontend(backendUser);
+  },
+
+  /**
    * Bulk import users from CSV data
    */
   async bulkCreateUsers(csvData: string): Promise<{ success: number; failed: number; errors: string[] }> {

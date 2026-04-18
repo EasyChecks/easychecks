@@ -9,6 +9,7 @@ import { uploadAttendancePhotoToSupabase } from '../utils/supabase-storage.js';
 const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
 const AUTO_CHECKOUT_GRACE_MINUTES = 30;
 const MIN_CHECKOUT_MINUTES_AFTER_CHECKIN = 1;
+const MAX_EARLY_CHECKIN_MINUTES = 30;
 
 /**
  * 📋 Attendance Service — บริการจัดการการเข้า-ออกงาน
@@ -480,6 +481,11 @@ export const checkIn = async (data: CheckInDTO) => {
   //
   // SQL เทียบเท่า: ไม่มี — เป็น business logic ฝั่ง application
   const currentTimeHHMM = getThaiTimeHHMM();
+  const diffFromStart = calculateTimeDifference(currentTimeHHMM, shift.startTime);
+  if (diffFromStart < -MAX_EARLY_CHECKIN_MINUTES) {
+    throw new Error(`คุณต้องเข้างานก่อนเวลาได้ไม่เกิน ${MAX_EARLY_CHECKIN_MINUTES} นาที`);
+  }
+
   const diffFromEnd = calculateTimeDifference(currentTimeHHMM, shift.endTime);
   if (diffFromEnd > 0) {
     throw new Error(`ไม่สามารถเข้างานได้ — เลยเวลาออกงาน (${shift.endTime}) แล้ว`);
@@ -624,7 +630,7 @@ export const checkOut = async (data: CheckOutDTO) => {
     // WHERE "attendanceId"=$1 AND "userId"=$2 AND "checkOut" IS NULL AND "isDeleted"=false
     attendance = await prisma.attendance.findFirst({
       where: { attendanceId, userId, checkOut: null, isDeleted: false },
-      include: { location: true }, // ต้องการ location.radius สำหรับตรวจ GPS
+      include: { location: true, shift: true }, // ต้องการ location.radius และเวลาเลิกกะสำหรับตรวจเวลา
     });
   } else {
     // ไม่มี attendanceId → หา record ล่าสุดที่ยังไม่ check-out ของ user นี้
@@ -637,7 +643,7 @@ export const checkOut = async (data: CheckOutDTO) => {
         isDeleted: false,
       },
       orderBy: { checkIn: 'desc' }, // เอาล่าสุดก่อนเสมอ
-      include: { location: true },
+      include: { location: true, shift: true },
     });
   }
 
@@ -650,6 +656,14 @@ export const checkOut = async (data: CheckOutDTO) => {
   const minutesSinceCheckIn = (now.getTime() - attendance.checkIn.getTime()) / 60000;
   if (minutesSinceCheckIn < MIN_CHECKOUT_MINUTES_AFTER_CHECKIN) {
     throw new Error(`เพิ่งเข้างานเมื่อสักครู่ กรุณารออย่างน้อย ${MIN_CHECKOUT_MINUTES_AFTER_CHECKIN} นาทีจึงจะออกงานได้`);
+  }
+
+  if (attendance.shift !== null) {
+    const shiftEndDate = getShiftEndDateFromCheckIn(attendance.checkIn, attendance.shift.endTime);
+    if (now.getTime() < shiftEndDate.getTime()) {
+      const remainingMinutes = Math.ceil((shiftEndDate.getTime() - now.getTime()) / 60000);
+      throw new Error(`คุณต้องออกงานหลังเวลาเลิกกะ (${attendance.shift.endTime}) หรือรออีกประมาณ ${remainingMinutes} นาที`);
+    }
   }
 
   // ===== 2. ตรวจสอบ GPS (ถ้ามี location ผูกอยู่) =====
@@ -831,6 +845,12 @@ export const updateAttendance = async (
   );
   if (isTimeChanged && (!data.editReason || data.editReason.trim().length === 0)) {
     throw new Error('การแก้เวลาเข้างาน/ออกงานต้องระบุเหตุผล (editReason)');
+  }
+
+  const effectiveCheckIn = data.checkIn ?? attendance.checkIn;
+  const effectiveCheckOut = data.checkOut ?? attendance.checkOut;
+  if (effectiveCheckOut !== null && effectiveCheckOut.getTime() < effectiveCheckIn.getTime()) {
+    throw new Error('เวลาออกงานต้องไม่น้อยกว่าเวลาเข้างาน');
   }
 
   const { editReason, ...updatePayload } = data;

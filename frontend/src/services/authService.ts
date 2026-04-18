@@ -17,7 +17,7 @@
  */
 
 import api from './api';
-import { AuthUser } from '@/types/auth';
+import { AuthUser, UserRole } from '@/types/auth';
 
 // ── Types สำหรับ request / response ──
 export interface LoginRequest {

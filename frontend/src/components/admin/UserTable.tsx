@@ -1,11 +1,12 @@
 "use client";
 
 import { User, AttendanceEditData, AttendanceCheckData } from "@/types/user";
+import type { AuthUser } from '@/types/auth';
 import { Badge } from "@/components/ui/badge";
 
 interface UserTableProps {
   users: User[];
-  currentUser: User | null;
+  currentUser: User | AuthUser | null;
   onSelectUser: (user: User) => void;
   getStatusBadge: (status: string) => string;
   onAttendanceEdit?: (editData: AttendanceEditData | null) => void;

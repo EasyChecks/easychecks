@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types/user';
+import type { AuthUser } from '@/types/auth';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -12,7 +13,7 @@ interface UserCreateModalProps {
   onSubmit: (user: User) => void;
   generateEmployeeId: (provinceCode: string, branchCode: string) => string;
   users: User[];
-  currentUser?: User | null;
+  currentUser?: User | AuthUser | null;
 }
 
 export default function UserCreateModal({

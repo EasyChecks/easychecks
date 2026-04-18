@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { User } from '@/types/user';
+import type { AuthUser } from '@/types/auth';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -10,7 +11,7 @@ type FormState = Record<string, string | number | boolean | null>;
 interface UserEditModalProps {
   show: boolean;
   editingUser: User;
-  currentUser: User | null;
+  currentUser: User | AuthUser | null;
   onClose: () => void;
   onSave: (form: FormState) => Promise<void>;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { User, AttendanceRecord } from '@/types/user';
+import type { AuthUser } from '@/types/auth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -10,9 +11,10 @@ interface UserDetailModalProps {
   showDetail: boolean;
   showAttendance: boolean;
   selectedDate: string;
-  currentUser: User | null;
+  currentUser: User | AuthUser | null;
   onClose: () => void;
   onEdit: (user?: User) => void;
+  onDownloadPDF?: () => void;
   onDelete: (user: User) => void;
   onToggleAttendance: () => void;
   getStatusBadge: (status: string) => string;

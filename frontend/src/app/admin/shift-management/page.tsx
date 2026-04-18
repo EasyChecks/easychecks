@@ -26,7 +26,6 @@ const weekDays = [
 const shiftTypes = [
   { value: 'REGULAR', label: 'ทุกวัน', description: 'ทำงานทุกวันตามที่กำหนด' },
   { value: 'SPECIFIC_DAY', label: 'เฉพาะวัน', description: 'เลือกวันที่ทำงาน (จ-อา)' },
-  { value: 'CUSTOM', label: 'กำหนดเอง', description: 'ระบุวันที่เฉพาะเจาะจง' },
 ];
 
 export default function ShiftManagementPage() {
@@ -105,7 +104,7 @@ export default function ShiftManagementPage() {
         userService.getAll(),
       ]);
       setShifts(shiftsData);
-      setUsers(usersData.filter(u => u.isActive));
+      setUsers(usersData.filter(isUserActive));
     } catch (error) {
       console.error('Error loading data:', error);
       setFeedbackModal({ type: 'error', message: 'เกิดข้อผิดพลาดในการโหลดข้อมูล' });
@@ -167,6 +166,27 @@ export default function ShiftManagementPage() {
     };
 
     return raw.branch?.name || raw.branchName || raw.branch?.code || raw.branchCode || 'ไม่ระบุสาขา';
+  };
+
+  const isUserActive = (user: UserServiceUser): boolean => {
+    if (typeof user.isActive === 'boolean') {
+      return user.isActive;
+    }
+
+    const raw = user as unknown as {
+      status?: string;
+      isDeleted?: boolean;
+    };
+
+    if (typeof raw.status === 'string') {
+      return raw.status.toUpperCase() === 'ACTIVE';
+    }
+
+    if (typeof raw.isDeleted === 'boolean') {
+      return !raw.isDeleted;
+    }
+
+    return true;
   };
 
   const finalizeSaveSuccess = async (message: string) => {
@@ -591,7 +611,6 @@ export default function ShiftManagementPage() {
               <option value="ALL">ทุกประเภทกะ</option>
               <option value="REGULAR">ทุกวัน</option>
               <option value="SPECIFIC_DAY">เฉพาะวัน</option>
-              <option value="CUSTOM">กำหนดเอง</option>
             </select>
 
             <select

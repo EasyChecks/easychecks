@@ -29,6 +29,19 @@ const shiftTypes = [
   { value: 'SPECIFIC_DAY', label: 'เฉพาะวัน', description: 'เลือกวันที่ทำงาน (จ-อา)' },
 ];
 
+type ShiftAssignee = {
+  id: number;
+  name: string;
+  employeeId: string;
+};
+
+type ShiftGroup = {
+  key: string;
+  representative: Shift;
+  shifts: Shift[];
+  assignees: ShiftAssignee[];
+};
+
 export default function ShiftManagementPage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [users, setUsers] = useState<UserServiceUser[]>([]);
@@ -453,6 +466,22 @@ export default function ShiftManagementPage() {
     return weekDays.find(d => d.en === day)?.th || day;
   };
 
+  const getShiftGroupKey = (shift: Shift): string => {
+    const sortedDays = [...(shift.specificDays ?? [])].sort().join(',');
+    return [
+      shift.name,
+      shift.shiftType,
+      shift.startTime,
+      shift.endTime,
+      String(shift.gracePeriodMinutes),
+      String(shift.lateThresholdMinutes),
+      shift.customDate ?? '',
+      String(shift.locationId ?? shift.location?.id ?? ''),
+      sortedDays,
+      shift.isActive ? '1' : '0',
+    ].join('|');
+  };
+
   const branchOptions = useMemo(() => {
     const names = shifts
       .map((s) => s.user?.branch?.name)
@@ -523,6 +552,52 @@ export default function ShiftManagementPage() {
     filterBranchName,
   ]);
 
+  const groupedFilteredShifts = useMemo<ShiftGroup[]>(() => {
+    const groups = new Map<string, ShiftGroup>();
+
+    filteredShifts.forEach((shift) => {
+      const key = getShiftGroupKey(shift);
+      const existing = groups.get(key);
+      const assignee = shift.user
+        ? {
+            id: shift.user.id,
+            name: shift.user.name,
+            employeeId: shift.user.employeeId,
+          }
+        : null;
+
+      if (!existing) {
+        groups.set(key, {
+          key,
+          representative: shift,
+          shifts: [shift],
+          assignees: assignee ? [assignee] : [],
+        });
+        return;
+      }
+
+      existing.shifts.push(shift);
+      if (assignee && !existing.assignees.some((item) => item.id === assignee.id)) {
+        existing.assignees.push(assignee);
+      }
+    });
+
+    return Array.from(groups.values());
+  }, [filteredShifts]);
+
+  const groupedAssigneesByKey = useMemo(() => {
+    const map = new Map<string, ShiftAssignee[]>();
+    groupedFilteredShifts.forEach((group) => {
+      map.set(group.key, group.assignees);
+    });
+    return map;
+  }, [groupedFilteredShifts]);
+
+  const detailAssignees = useMemo<ShiftAssignee[]>(() => {
+    if (!showDetailModal) return [];
+    return groupedAssigneesByKey.get(getShiftGroupKey(showDetailModal)) ?? [];
+  }, [showDetailModal, groupedAssigneesByKey]);
+
   const hasActiveFilters = useMemo(() => {
     return Boolean(
       searchText.trim()
@@ -540,15 +615,15 @@ export default function ShiftManagementPage() {
       total,
       active,
       inactive,
-      filtered: filteredShifts.length,
+      filtered: groupedFilteredShifts.length,
     };
-  }, [shifts, filteredShifts]);
+  }, [shifts, groupedFilteredShifts]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredShifts.length / pageSize));
-  const paginatedShifts = useMemo(() => {
+  const totalPages = Math.max(1, Math.ceil(groupedFilteredShifts.length / pageSize));
+  const paginatedShiftGroups = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return filteredShifts.slice(start, start + pageSize);
-  }, [filteredShifts, page]);
+    return groupedFilteredShifts.slice(start, start + pageSize);
+  }, [groupedFilteredShifts, page]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -694,8 +769,10 @@ export default function ShiftManagementPage() {
           ) : (
             <>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {paginatedShifts.map((shift) => (
-                  <Card key={shift.id} className="h-full p-6">
+                {paginatedShiftGroups.map((group) => {
+                  const shift = group.representative;
+                  return (
+                  <Card key={group.key} className="h-full p-6">
                 <div className="flex h-full flex-col gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
@@ -749,14 +826,23 @@ export default function ShiftManagementPage() {
                         </div>
                       )}
 
-                      {shift.user && (
+                      {group.assignees.length > 0 && (
                         <div className="flex items-center gap-2 text-gray-700">
                           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                           </svg>
                           <span className="font-medium">พนักงาน:</span>
-                          <span>{shift.user.name} ({shift.user.employeeId})</span>
+                          {group.assignees.length === 1 ? (
+                            <span>{group.assignees[0].name} ({group.assignees[0].employeeId})</span>
+                          ) : (
+                            <span>{group.assignees.length} คน</span>
+                          )}
                         </div>
+                      )}
+                      {group.assignees.length > 1 && (
+                        <p className="ml-7 mt-1 text-xs text-gray-500">
+                          {group.assignees.map((assignee) => `${assignee.employeeId} ${assignee.name}`).join(', ')}
+                        </p>
                       )}
 
                       {shift.location && (
@@ -811,7 +897,7 @@ export default function ShiftManagementPage() {
                   </div>
                 </div>
                   </Card>
-                ))}
+                );})}
               </div>
 
               <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1170,13 +1256,26 @@ export default function ShiftManagementPage() {
                       <span className="font-medium">ระยะเวลา:</span>
                       <span>รอสาย {showDetailModal.gracePeriodMinutes} นาที / สายสูงสุด {showDetailModal.lateThresholdMinutes} นาที</span>
                     </div>
-                    {showDetailModal.user && (
+                    {detailAssignees.length > 0 && (
                       <div className="flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                         </svg>
                         <span className="font-medium">พนักงาน:</span>
-                        <span>{showDetailModal.user.name} ({showDetailModal.user.employeeId})</span>
+                        {detailAssignees.length === 1 ? (
+                          <span>{detailAssignees[0].name} ({detailAssignees[0].employeeId})</span>
+                        ) : (
+                          <span>{detailAssignees.length} คน</span>
+                        )}
+                      </div>
+                    )}
+                    {detailAssignees.length > 1 && (
+                      <div className="ml-7 flex flex-wrap gap-2">
+                        {detailAssignees.map((assignee) => (
+                          <Badge key={`${assignee.id}-${assignee.employeeId}`} variant="outline">
+                            {assignee.employeeId} {assignee.name}
+                          </Badge>
+                        ))}
                       </div>
                     )}
                     {showDetailModal.location && (

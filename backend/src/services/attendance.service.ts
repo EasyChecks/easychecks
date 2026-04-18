@@ -8,6 +8,7 @@ import { uploadAttendancePhotoToSupabase } from '../utils/supabase-storage.js';
 
 const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
 const AUTO_CHECKOUT_GRACE_MINUTES = 30;
+const MIN_CHECKOUT_MINUTES_AFTER_CHECKIN = 1;
 
 /**
  * 📋 Attendance Service — บริการจัดการการเข้า-ออกงาน
@@ -193,7 +194,7 @@ async function attachMissingShiftRelations<T extends AttendanceRowWithShift>(row
     },
     orderBy: [
       { isActive: 'desc' },
-      { updatedAt: 'desc' },
+      { shiftId: 'desc' },
     ],
   });
 
@@ -461,6 +462,16 @@ export const checkIn = async (data: CheckInDTO) => {
   if (shift.userId !== userId) throw new Error('กะนี้ไม่ใช่ของคุณ');  // ป้องกัน check-in สลับกะคนอื่น
   if (!shift.isActive) throw new Error('กะนี้ถูกปิดใช้งานแล้ว');      // Admin ปิดกะแล้ว
 
+  if (!shiftMatchesAttendanceDate(shift, new Date())) {
+    if (shift.shiftType === 'SPECIFIC_DAY') {
+      throw new Error('วันนี้ไม่ใช่วันที่กำหนดสำหรับกะนี้');
+    }
+    if (shift.shiftType === 'CUSTOM') {
+      throw new Error('กะนี้ใช้ได้เฉพาะวันที่กำหนดเท่านั้น');
+    }
+    throw new Error('วันนี้ไม่สามารถเข้างานกะนี้ได้');
+  }
+
   // ===== 2.1 ตรวจสอบว่าเลยเวลาออกงานหรือยัง =====
   // ทำไมต้องเช็ค? ถ้ากะ 08:00-17:00 แล้วมาเข้างานตอน 18:00
   // ไม่มีประโยชน์แล้ว → บล็อกไว้เลย ไม่ให้สร้าง record ขยะ
@@ -633,6 +644,12 @@ export const checkOut = async (data: CheckOutDTO) => {
     throw new Error('ไม่พบการ check-in ที่ยังไม่ได้ check-out');
   }
 
+  const now = new Date();
+  const minutesSinceCheckIn = (now.getTime() - attendance.checkIn.getTime()) / 60000;
+  if (minutesSinceCheckIn < MIN_CHECKOUT_MINUTES_AFTER_CHECKIN) {
+    throw new Error(`เพิ่งเข้างานเมื่อสักครู่ กรุณารออย่างน้อย ${MIN_CHECKOUT_MINUTES_AFTER_CHECKIN} นาทีจึงจะออกงานได้`);
+  }
+
   // ===== 2. ตรวจสอบ GPS (ถ้ามี location ผูกอยู่) =====
   let distance: number | null = null;
   if (attendance.location !== null) {
@@ -660,7 +677,7 @@ export const checkOut = async (data: CheckOutDTO) => {
   const updatedAttendance = await prisma.attendance.update({
     where: { attendanceId: attendance.attendanceId }, // id ของ record ที่พบข้างบน
     data: {
-      checkOut: new Date(),          // timestamp ปัจจุบัน
+      checkOut: now,          // timestamp ปัจจุบัน
       checkOutPhoto: checkOutPhotoUrl, // URL รูปจาก Supabase Storage
       checkOutLat: latitude,         // ← บังคับบันทึก GPS (ไม่ใช่ null)
       checkOutLng: longitude,

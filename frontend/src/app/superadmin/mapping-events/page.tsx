@@ -4,14 +4,13 @@ import { useState, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from '@/components/ui/card';
 import LocationManagement from '@/components/admin/LocationManagement';
-import EventManagementTab from '@/components/admin/EventManagementTab';
+import EventManagement from '../event-management/page';
 
 export default function MappingAndEventsPage() {
   const [activeTab, setActiveTab] = useState<'locations' | 'events'>('locations');
-  const [locationsVersion, setLocationsVersion] = useState(0);
 
   const handleLocationsChanged = useCallback(() => {
-    setLocationsVersion(v => v + 1);
+    // no-op: kept for LocationManagement prop
   }, []);
 
   return (
@@ -51,7 +50,7 @@ export default function MappingAndEventsPage() {
           </TabsContent>
 
           <TabsContent value="events" className="mt-0">
-            <EventManagementTab locationsKey={locationsVersion} />
+            <EventManagement embedded />
           </TabsContent>
         </Tabs>
       </Card>

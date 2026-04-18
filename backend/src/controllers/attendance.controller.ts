@@ -178,9 +178,10 @@ export const checkIn = async (req: Request, res: Response) => {
     //     photo?       → Base64 selfie พิสูจน์ตัวตน
     //     latitude/longitude? → พิกัด GPS จาก browser / app
     //     address?     → ที่อยู่ที่ reverse-geocode มาแล้วจาก frontend
-    const { shiftId, locationId, photo, latitude, longitude, address } = req.body as {
+    const { shiftId, locationId, eventId, photo, latitude, longitude, address } = req.body as {
       shiftId?: number;
       locationId?: number;
+      eventId?: number;
       photo?: string;
       latitude?: number;
       longitude?: number;
@@ -193,6 +194,7 @@ export const checkIn = async (req: Request, res: Response) => {
       userId,                                                             // from token
       shiftId: shiftId !== undefined ? Number(shiftId) : undefined,      // optional
       locationId: locationId !== undefined ? Number(locationId) : undefined, // optional
+      eventId: eventId !== undefined ? Number(eventId) : undefined,      // optional
       photo,                                                              // Base64
       latitude: latitude !== undefined ? Number(latitude) : undefined,   // GPS
       longitude: longitude !== undefined ? Number(longitude) : undefined, // GPS

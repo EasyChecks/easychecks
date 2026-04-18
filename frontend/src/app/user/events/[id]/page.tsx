@@ -75,9 +75,9 @@ export default function UserEventDetailPage() {
       case 'ongoing':
         return <Badge variant="active">กำลังดำเนินการ</Badge>;
       case 'upcoming':
-        return <Badge variant="pending">กำลังจะมาถึง</Badge>;
+        return <Badge variant="info">กำลังจะมาถึง</Badge>;
       case 'completed':
-        return <Badge variant="suspend">สิ้นสุดแล้ว</Badge>;
+        return <Badge variant="default">สิ้นสุดแล้ว</Badge>;
       default:
         return null;
     }
@@ -100,7 +100,21 @@ export default function UserEventDetailPage() {
         reject(new Error('เบราว์เซอร์ไม่รองรับ GPS'));
         return;
       }
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
+      navigator.geolocation.getCurrentPosition(resolve, (error) => {
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            reject(new Error('กรุณาอนุญาตการเข้าถึงตำแหน่ง (Location) ในตั้งค่าเบราว์เซอร์เพื่อใช้ในการเช็คอิน'));
+            break;
+          case error.POSITION_UNAVAILABLE:
+            reject(new Error('ไม่สามารถดึงข้อมูลตำแหน่งได้ กรุณาตรวจสอบ GPS ของคุณ'));
+            break;
+          case error.TIMEOUT:
+            reject(new Error('หมดเวลาในการค้นหาตำแหน่ง กรุณาลองใหม่อีกครั้ง'));
+            break;
+          default:
+            reject(new Error('เกิดข้อผิดพลาดในการดึงตำแหน่ง GPS'));
+        }
+      }, {
         enableHighAccuracy: true,
         timeout: 15000,
         maximumAge: 0,
@@ -285,7 +299,7 @@ export default function UserEventDetailPage() {
                 </svg>
                 แผนที่สถานที่จัดกิจกรรม
               </h2>
-              <div className="rounded-lg overflow-hidden border border-gray-200" style={{ height: 280 }}>
+              <div className="rounded-lg overflow-hidden border border-gray-200" style={{ height: 280, position: 'relative', zIndex: 0 }}>
                 <MapContainer
                   center={[lat, lng]}
                   zoom={16}

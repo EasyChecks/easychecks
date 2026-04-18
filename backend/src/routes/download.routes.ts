@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireRole } from '../middleware/role.middleware.js';
 import {
   handleDownloadReport,
+  handlePreviewReport,
 } from '../controllers/download.controller.js';
 
 /**
@@ -40,5 +41,6 @@ const router = Router();
  * GET /api/download/report?type=shift&format=excel&branchId=2
  */
 router.get('/report', requireRole(['ADMIN', 'SUPERADMIN']), handleDownloadReport);
+router.get('/preview', requireRole(['ADMIN', 'SUPERADMIN']), handlePreviewReport);
 
 export default router;

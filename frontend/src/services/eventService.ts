@@ -66,6 +66,17 @@ export interface EventItem {
   deletedBy?: EventCreator | null;
   participants?: EventParticipant[];
   event_participants?: { branchId: number | null }[];
+  attendance?: {
+    attendanceId: number;
+    checkIn: string;
+    checkOut?: string | null;
+    user: {
+      userId: number;
+      firstName: string;
+      lastName: string;
+      email?: string;
+    };
+  }[];
   _count?: {
     event_participants?: number;
     attendance?: number;

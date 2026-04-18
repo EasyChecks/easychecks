@@ -2,6 +2,18 @@ import { prisma } from '../lib/prisma.js';
 import type { Role } from '@prisma/client';
 
 /**
+ * คำนวณ start/end ของวันใน timezone Asia/Bangkok
+ * - date = "YYYY-MM-DD" ในเวลาไทย
+ * - ไม่ระบุ date → ใช้วันปัจจุบันในไทย
+ */
+function getBangkokDayRange(date?: string): { start: Date; end: Date } {
+  const dateStr = date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
+  const start = new Date(`${dateStr}T00:00:00+07:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+/**
  * 📊 DashboardService - บริหารข้อมูลสำหรับหน้า Admin Dashboard
  * 
  * ทำไมมีไฟล์นี้?
@@ -33,10 +45,7 @@ export interface User {
  * GROUP BY status;
  */
 export async function getAttendanceSummary(user: User, branchId?: number, date?: string) {
-  const today = date ? new Date(date) : new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const { start: today, end: tomorrow } = getBangkokDayRange(date);
 
   // เลือก branch ตามสิทธิ์ (SUPERADMIN สามารถเลือก branch อื่นได้)
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
@@ -109,10 +118,7 @@ export async function getAttendanceSummary(user: User, branchId?: number, date?:
  * ORDER BY a.checkIn DESC;
  */
 export async function getEmployeesToday(user: User, branchId?: number, date?: string) {
-  const today = date ? new Date(date) : new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const { start: today, end: tomorrow } = getBangkokDayRange(date);
 
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
@@ -186,15 +192,18 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
+      timeZone: 'Asia/Bangkok',
     }),
     checkOut: att.checkOut
       ? att.checkOut.toLocaleTimeString('th-TH', {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
+        timeZone: 'Asia/Bangkok',
       })
       : null,
     lateMinutes: att.lateMinutes || 0,
+    eventId: att.eventId ?? null,
   }));
 
   // เอา userId ที่มี attendance แล้วไม่ต้องซ้ำ
@@ -284,10 +293,7 @@ export async function getBranchesMap(user: User) {
  *   AND DATE(a.checkIn) = TODAY();
  */
 export async function getLocationEvents(user: User, branchId?: number, date?: string) {
-  const today = date ? new Date(date) : new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  const { start: today, end: tomorrow } = getBangkokDayRange(date);
 
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
@@ -327,6 +333,7 @@ export async function getLocationEvents(user: User, branchId?: number, date?: st
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
+        timeZone: 'Asia/Bangkok',
       }),
       expectedLocation: att.location?.locationName || 'Unknown',
       actualDistance: Math.round(att.checkInDistance || 0),
@@ -337,11 +344,125 @@ export async function getLocationEvents(user: User, branchId?: number, date?: st
   return outsideEvents;
 }
 
+/**
+ * GET /api/dashboard/event-stats/:eventId
+ * ดึงสถิติการเข้าร่วมกิจกรรม per-event
+ * - participantType = ALL  → แสดงแค่คนที่เข้าร่วมแล้ว (isOpenEvent = true)
+ * - participantType != ALL → มี participant list ให้เปรียบเทียบ (isOpenEvent = false)
+ */
+export async function getEventStats(user: User, eventId: number) {
+  const event = await prisma.event.findUnique({
+    where: { eventId },
+    include: {
+      event_participants: {
+        include: {
+          users: {
+            select: { userId: true, employeeId: true, firstName: true, lastName: true },
+          },
+          branches: {
+            include: {
+              users: {
+                select: { userId: true, employeeId: true, firstName: true, lastName: true },
+              },
+            },
+          },
+        },
+      },
+      attendance: {
+        include: {
+          user: {
+            select: {
+              userId: true,
+              employeeId: true,
+              firstName: true,
+              lastName: true,
+              branchId: true,
+              branch: { select: { name: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!event) throw new Error('ไม่พบกิจกรรม');
+
+  // ADMIN เห็นแค่ branch ตัวเอง (กรอง attendance)
+  const filteredAttendance = user.role === 'ADMIN'
+    ? event.attendance.filter((att) => att.user.branchId === user.branchId)
+    : event.attendance;
+
+  const joined = filteredAttendance.map((att) => ({
+    userId: att.user.userId,
+    employeeId: att.user.employeeId,
+    name: `${att.user.firstName} ${att.user.lastName}`,
+    branch: att.user.branch?.name || 'N/A',
+    checkIn: att.checkIn.toLocaleTimeString('th-TH', {
+      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok',
+    }),
+    status: att.status,
+  }));
+
+  const isOpenEvent = event.participantType === 'ALL';
+
+  if (isOpenEvent) {
+    return {
+      eventId: event.eventId,
+      eventName: event.eventName,
+      participantType: event.participantType,
+      isOpenEvent: true,
+      joined,
+      notJoined: [] as typeof joined,
+      joinedCount: joined.length,
+      notJoinedCount: 0,
+    };
+  }
+
+  // สร้าง participant map จาก EventParticipant (user หรือ branch)
+  const participantMap = new Map<number, { userId: number; employeeId: string; name: string; branch: string }>();
+
+  for (const p of event.event_participants) {
+    if (p.users) {
+      participantMap.set(p.users.userId, {
+        userId: p.users.userId,
+        employeeId: p.users.employeeId,
+        name: `${p.users.firstName} ${p.users.lastName}`,
+        branch: '',
+      });
+    }
+    if (p.branches) {
+      for (const u of p.branches.users) {
+        participantMap.set(u.userId, {
+          userId: u.userId,
+          employeeId: u.employeeId,
+          name: `${u.firstName} ${u.lastName}`,
+          branch: p.branches.name ?? '',
+        });
+      }
+    }
+  }
+
+  const joinedUserIds = new Set(joined.map((j) => j.userId));
+  const notJoined = Array.from(participantMap.values()).filter((p) => !joinedUserIds.has(p.userId));
+
+  return {
+    eventId: event.eventId,
+    eventName: event.eventName,
+    participantType: event.participantType,
+    isOpenEvent: false,
+    joined,
+    notJoined,
+    joinedCount: joined.length,
+    notJoinedCount: notJoined.length,
+  };
+}
+
 export const dashboardService = {
   getAttendanceSummary,
   getEmployeesToday,
   getBranchesMap,
   getLocationEvents,
+  getEventStats,
 };
 
 export default dashboardService;

@@ -5,6 +5,7 @@ import {
   handleEmployeesToday,
   handleBranchesMap,
   handleLocationEvents,
+  handleEventStats,
 } from '../controllers/dashboard.controller.js';
 
 /**
@@ -107,6 +108,15 @@ router.get(
   '/location-events',
   requireRole(['ADMIN', 'SUPERADMIN']),
   handleLocationEvents
+);
+
+/**
+ * GET /api/dashboard/event-stats/:eventId - ดึงสถิติการเข้าร่วมกิจกรรม
+ */
+router.get(
+  '/event-stats/:eventId',
+  requireRole(['ADMIN', 'SUPERADMIN']),
+  handleEventStats
 );
 
 export default router;

@@ -335,6 +335,7 @@ async function getAllEvents(params: SearchEventParams): Promise<{
             firstName: true,
             lastName: true,
             branchId: true,
+            role: true,
           },
         },
         _count: {
@@ -408,6 +409,23 @@ async function getEventById(eventId: number): Promise<Event | null> {
           attendance: true,
         },
       },
+      attendance: {
+        where: { isDeleted: false },
+        select: {
+          attendanceId: true,
+          checkIn: true,
+          checkOut: true,
+          user: {
+            select: {
+              userId: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: { checkIn: 'asc' },
+      },
     },
   });
 
@@ -426,12 +444,22 @@ async function updateEvent(
   // เก็บชื่อกิจกรรมเดิมไว้เพื่อใช้ใน oldValues ของ Audit Log และตรวจสอบเงื่อนไข
   const event = await prisma.event.findUnique({
     where: { eventId },
+    include: { creator: { select: { branchId: true } } },
   });
 
   if (!event) throw new Error('ไม่พบกิจกรรม'); // ไม่ล้ะ record นี้ใน DB → หยุดทันที
 
   // กิจกรรมที่ลบไปแล้ว ไม่สามารถแก้ไขได้อีก (delete_reason มีค่า = ถูกลบ)
   if (event.deleteReason) throw new Error('ไม่สามารถแก้ไขกิจกรรมที่ถูกลบแล้ว');
+
+  // Security: Admin แก้ไขได้เฉพาะกิจกรรมที่สร้างโดยคนในสาขาเดียวกัน
+  const updatingUser = await prisma.user.findUnique({
+    where: { userId: data.updatedByUserId },
+    select: { role: true, branchId: true },
+  });
+  if (updatingUser?.role === 'ADMIN' && event.creator?.branchId !== updatingUser.branchId) {
+    throw new Error('คุณไม่มีสิทธิ์จัดการกิจกรรมของสาขาอื่น');
+  }
 
   // ── ② ตรวจสอบวันเวลา (ถ้ามีการเปลี่ยน) ────────────────────────────────────
   if (data.startDateTime || data.endDateTime) {
@@ -505,9 +533,21 @@ async function deleteEvent(
 ): Promise<Event> {
   // ── ① ดึงกิจกรรมเพื่อเก็บชื่อไว้บันทึก Audit Log ─────────────────────────
   // [READ] SELECT * FROM events WHERE event_id = $1 LIMIT 1
-  const event = await prisma.event.findUnique({ where: { eventId } });
+  const event = await prisma.event.findUnique({
+    where: { eventId },
+    include: { creator: { select: { branchId: true } } },
+  });
 
   if (!event) throw new Error('ไม่พบกิจกรรม'); // หาไม่เจอ → หยุดทันที
+
+  // Security: Admin ลบได้เฉพาะกิจกรรมที่สร้างโดยคนในสาขาเดียวกัน
+  const deletingUser = await prisma.user.findUnique({
+    where: { userId: data.deletedByUserId },
+    select: { role: true, branchId: true },
+  });
+  if (deletingUser?.role === 'ADMIN' && event.creator?.branchId !== deletingUser.branchId) {
+    throw new Error('คุณไม่มีสิทธิ์จัดการกิจกรรมของสาขาอื่น');
+  }
 
   // ── ② ลบผู้เข้าร่วมก่อน (FK constraint) ────────────────────────────────────────
   // [DELETE] DELETE FROM event_participants WHERE event_id = $1
@@ -829,6 +869,12 @@ async function eventCheckIn(data: EventCheckInDTO) {
   if (existingAttendance) throw new Error('คุณได้ check-in กิจกรรมนี้ไปแล้ว'); // ห้าม check-in ซ้ำ
 
   // ── ④ ตรวจสอบ GPS — อยู่ในรัศมีหรือไม่ ────────────────────────────────────
+  // Security: บังคับ GPS ถ้ากิจกรรมกำหนดสถานที่ (mode A หรือ mode B)
+  if ((event.location || (event.venueLatitude != null && event.venueLongitude != null)) &&
+      (latitude == null || longitude == null)) {
+    throw new Error('กรุณาเปิด GPS และส่งพิกัดเพื่อใช้ในการเช็คอิน/เช็คเอาท์');
+  }
+
   let distance: number | null = null;
   let locationId: number | null = null;
 
@@ -917,6 +963,12 @@ async function eventCheckOut(data: EventCheckOutDTO) {
   if (!attendance) throw new Error('ไม่พบการ check-in กิจกรรมนี้ที่ยังไม่ได้ check-out'); // ไม่เคย check-in หรือ check-out ไปแล้ว
 
   // ── ② ตรวจสอบ GPS (ถ้ามี location) ────────────────────────────────────────────────
+  // Security: บังคับ GPS ถ้ากิจกรรมกำหนดสถานที่ (mode A หรือ mode B)
+  if ((attendance.location || (attendance.event && attendance.event.venueLatitude != null && attendance.event.venueLongitude != null)) &&
+      (latitude == null || longitude == null)) {
+    throw new Error('กรุณาเปิด GPS และส่งพิกัดเพื่อใช้ในการเช็คอิน/เช็คเอาท์');
+  }
+
   let distance: number | null = null;
   if (attendance.location && latitude != null && longitude != null) {
     // คำนวณระยะทางจากตำแหน่งปัจจุบันไปยังศูนย์กลางสถานที่

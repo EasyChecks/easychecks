@@ -757,7 +757,6 @@ async function getLeaveRequestsByUser(
     if (lower.includes('รอ') || lower.includes('pending')) statusMatches.push('PENDING');
 
     const or: Prisma.LeaveRequestWhereInput[] = [
-      { leaveType: { contains: search, mode: 'insensitive' } },
       { reason: { contains: search, mode: 'insensitive' } },
       { rejectionReason: { contains: search, mode: 'insensitive' } },
     ];

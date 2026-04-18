@@ -41,7 +41,6 @@ export default function DownloadData() {
       setIsPreviewing(true);
       const data = await downloadService.previewReport({
         type: selectedReportType,
-        format: 'excel',
         startDate: startDate || undefined,
         endDate: endDate || undefined,
       });

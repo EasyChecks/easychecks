@@ -136,7 +136,7 @@ export default function EventManagement({ embedded = false }: { embedded?: boole
             employeeId: u.employeeId || '',
             email: u.email || '',
             role: u.role as UserServiceUser['role'],
-            isActive: u.isActive ?? true,
+            isActive: u.status === 'active',
           })));
         }
       } catch (err) {

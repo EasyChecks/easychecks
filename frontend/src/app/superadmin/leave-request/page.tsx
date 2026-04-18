@@ -27,10 +27,87 @@ const LEAVE_TYPE_MAP: Record<string, { label: string; Icon: React.ElementType; c
 
 const HISTORY_TAKE = 10;
 
+const STATUS_OPTIONS = [
+  { value: 'ALL', label: 'ทุกสถานะ', dot: 'bg-gray-400' },
+  { value: 'PENDING', label: 'รอพิจารณา', dot: 'bg-amber-400' },
+  { value: 'APPROVED', label: 'อนุมัติ', dot: 'bg-emerald-500' },
+  { value: 'REJECTED', label: 'ไม่อนุมัติ', dot: 'bg-rose-500' },
+];
+
 function StatusBadge({ status }: { status: string }) {
   if (status === 'APPROVED') return <Badge variant="active">อนุมัติ</Badge>;
   if (status === 'REJECTED') return <Badge className="bg-red-100 text-red-700 hover:bg-red-100">ไม่อนุมัติ</Badge>;
   return <Badge variant="pending">รอพิจารณา</Badge>;
+}
+
+function StatusFilterSelect({ value, onChange }: { value: string; onChange: (nextValue: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const selected = STATUS_OPTIONS.find((option) => option.value === value) ?? STATUS_OPTIONS[0];
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (wrapperRef.current.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm bg-white flex items-center justify-between gap-2"
+      >
+        <span className="flex items-center gap-2 text-gray-900">
+          <span className={`w-2 h-2 rounded-full ${selected.dot}`} />
+          {selected.label}
+        </span>
+        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute z-20 mt-2 w-full rounded-xl border border-gray-200 bg-white shadow-lg p-1"
+        >
+          {STATUS_OPTIONS.map((option) => {
+            const isActive = option.value === value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="option"
+                aria-selected={isActive}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${
+                  isActive ? 'bg-orange-50 text-orange-700' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${option.dot}`} />
+                  {option.label}
+                </span>
+                {isActive && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-orange-200 bg-orange-100 text-orange-700">
+                    เลือกแล้ว
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function formatQuotaValue(value: number | null | undefined) {
@@ -733,16 +810,7 @@ function MyLeaveTab() {
             placeholder="ค้นหาประเภท, เหตุผล, สถานะ"
             className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
           />
-          <select
-            value={historyStatus}
-            onChange={(e) => setHistoryStatus(e.target.value)}
-            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm bg-white"
-          >
-            <option value="ALL">ทุกสถานะ</option>
-            <option value="PENDING">รอพิจารณา</option>
-            <option value="APPROVED">อนุมัติ</option>
-            <option value="REJECTED">ไม่อนุมัติ</option>
-          </select>
+          <StatusFilterSelect value={historyStatus} onChange={setHistoryStatus} />
         </div>
         {historyLoading ? (
           <div className="text-sm text-gray-500 text-center py-6">กำลังโหลด...</div>
@@ -1411,16 +1479,7 @@ function MyLateTab() {
             placeholder="ค้นหาวันที่, เหตุผล, สถานะ"
             className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
           />
-          <select
-            value={historyStatus}
-            onChange={(e) => setHistoryStatus(e.target.value)}
-            className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm bg-white"
-          >
-            <option value="ALL">ทุกสถานะ</option>
-            <option value="PENDING">รอพิจารณา</option>
-            <option value="APPROVED">อนุมัติ</option>
-            <option value="REJECTED">ไม่อนุมัติ</option>
-          </select>
+          <StatusFilterSelect value={historyStatus} onChange={setHistoryStatus} />
         </div>
         {historyLoading ? (
           <div className="text-sm text-gray-500 text-center py-4">กำลังโหลด...</div>

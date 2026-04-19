@@ -191,8 +191,12 @@ export default function SuperAdminLayout({ children }: SuperAdminLayoutProps) {
           {!sidebarCollapsed ? (
             <div className="space-y-3">
               <div className="flex items-center gap-3 p-4 bg-linear-to-br from-orange-50 to-orange-100/50 rounded-2xl border border-orange-200/50">
-                <div className="w-12 h-12 bg-linear-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold shadow-md text-xl shrink-0">
-                  {user?.name?.charAt(0) || 'A'}
+                <div className="w-12 h-12 bg-linear-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold shadow-md text-xl shrink-0 overflow-hidden">
+                  {user?.avatar ? (
+                    <img src={user.avatar} alt="avatar" className="w-12 h-12 object-cover rounded-full" />
+                  ) : (
+                    user?.name?.charAt(0) || 'A'
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-gray-900 truncate">{user?.name || 'Admin'}</p>

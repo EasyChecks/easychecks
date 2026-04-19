@@ -37,8 +37,12 @@ export default function UserLayout({ children }: UserLayoutProps) {
             <div className="flex items-center gap-3">
 
               {/* Profile avatar */}
-              <div className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-                {user?.name?.charAt(0) || 'U'}
+              <div className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md overflow-hidden">
+                {user?.avatar ? (
+                  <img src={user.avatar} alt="avatar" className="w-10 h-10 object-cover rounded-full" />
+                ) : (
+                  user?.name?.charAt(0) || 'U'
+                )}
               </div>
             </div>
           </div>

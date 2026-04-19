@@ -113,16 +113,8 @@ export default function AdminManageUser() {
   const filteredUsers = useMemo(() => {
     let filtered = users;
     
-    // Branch filter for admin role
-    if (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'admin') {
-      const adminBranch = currentUser.branch || currentUser.provinceCode;
-      if (adminBranch) {
-        filtered = filtered.filter(user => {
-          const userBranch = user.branch || user.provinceCode;
-          return userBranch === adminBranch;
-        });
-      }
-    }
+    // Backend already filters by branchId for ADMIN role via RBAC
+    // No client-side branch filter needed here
     
     // Search filter
     filtered = filtered.filter(user => {

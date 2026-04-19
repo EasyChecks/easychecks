@@ -69,8 +69,12 @@ export default function AdminSettingsPage() {
 				onClick={() => router.push('/admin/profile')}
 				className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center gap-4 active:bg-gray-50 transition-colors"
 			>
-				<div className="w-16 h-16 bg-linear-to-br from-[#f26623] to-[#ea580c] rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md shrink-0">
-					{user?.name?.charAt(0) || 'U'}
+				<div className="w-16 h-16 bg-linear-to-br from-[#f26623] to-[#ea580c] rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md shrink-0 overflow-hidden">
+					{user?.avatar ? (
+						<img src={user.avatar} alt="avatar" className="w-16 h-16 object-cover rounded-full" />
+					) : (
+						user?.name?.charAt(0) || 'U'
+					)}
 				</div>
 
 				<div className="flex-1 text-left min-w-0">

@@ -119,14 +119,19 @@ export default function EventManagement({ embedded = false }: { embedded?: boole
   useEffect(() => {
     const loadStatic = async () => {
       try {
-        const [locsResp, branchesResp] = await Promise.all([
+        const [locsResult, branchesResult] = await Promise.allSettled([
           locationService.getAll(),
           dashboardService.getBranchesMap(),
         ]);
-        // Filter out deleted locations
-        const nonDeletedLocations = locsResp.data.filter(loc => !loc.deletedAt && loc.locationType !== 'EVENT' && loc.isActive);
-        setLocations(nonDeletedLocations.map(apiLocationToLocationData));
-        setBranches(branchesResp.data);
+        if (locsResult.status === 'fulfilled') {
+          const nonDeletedLocations = locsResult.value.data.filter(loc => !loc.deletedAt && loc.locationType !== 'EVENT' && loc.isActive);
+          setLocations(nonDeletedLocations.map(apiLocationToLocationData));
+        }
+        if (branchesResult.status === 'fulfilled') {
+          setBranches(branchesResult.value.data);
+        } else {
+          console.error('[EventManagement] getBranchesMap error:', branchesResult.reason);
+        }
         // Load users in admin's branch only
         if (user?.branchId) {
           const usersResp = await userService.getManageUsers({} as never, { branchId: user.branchId, limit: 500 });

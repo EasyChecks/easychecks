@@ -94,10 +94,10 @@ export const locationService = {
   },
 
   /**
-   * PATCH /api/locations/:id - แก้ไขสถานที่ (Admin/SuperAdmin)
+   * PUT /api/locations/:id - แก้ไขสถานที่ (Admin/SuperAdmin)
    */
   async update(id: number, data: Partial<CreateLocationRequest>): Promise<LocationItem> {
-    const res = await api.patch(`/locations/${id}`, data);
+    const res = await api.put(`/locations/${id}`, data);
     return res.data.data;
   },
 

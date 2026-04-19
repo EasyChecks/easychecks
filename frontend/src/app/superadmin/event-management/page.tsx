@@ -115,16 +115,23 @@ export default function EventManagement({ embedded = false }: { embedded?: boole
   useEffect(() => {
     const loadStatic = async () => {
       try {
-        const [locsResp, branchesResp, usersData] = await Promise.all([
+        const [locsResult, branchesResult, usersResult] = await Promise.allSettled([
           locationService.getAll(),
           dashboardService.getBranchesMap(),
           userService.getAll(),
         ]);
-        // Filter out deleted + EVENT-type locations (EVENT locations are event pins themselves)
-        const nonDeletedLocations = locsResp.data.filter(loc => !loc.deletedAt && loc.locationType !== 'EVENT' && loc.isActive);
-        setLocations(nonDeletedLocations.map(apiLocationToLocationData));
-        setBranches(branchesResp.data);
-        setAllUsers(usersData);
+        if (locsResult.status === 'fulfilled') {
+          const nonDeletedLocations = locsResult.value.data.filter(loc => !loc.deletedAt && loc.locationType !== 'EVENT' && loc.isActive);
+          setLocations(nonDeletedLocations.map(apiLocationToLocationData));
+        }
+        if (branchesResult.status === 'fulfilled') {
+          setBranches(branchesResult.value.data);
+        } else {
+          console.error('[EventManagement] getBranchesMap error:', branchesResult.reason);
+        }
+        if (usersResult.status === 'fulfilled') {
+          setAllUsers(usersResult.value);
+        }
       } catch (err) {
         console.error('[EventManagement] load static error:', err);
       }

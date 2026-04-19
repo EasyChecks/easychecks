@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -179,6 +179,7 @@ export default function AdminDashboard() {
   const [perEventStats, setPerEventStats] = useState<EventStatsResponse | null>(null);
   const [perEventStatsLoading, setPerEventStatsLoading] = useState(false);
   const [mapFlyTarget, setMapFlyTarget] = useState<{ center: [number, number]; zoom: number } | null>(null);
+  const mapHomeRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
 
   // Branch options: dynamic from API (filter out seed data branches matching "สาขา BR...")
   const branchOptions: BranchOption[] = useMemo(() => [
@@ -189,10 +190,32 @@ export default function AdminDashboard() {
   ], [branchesMap]);
 
   // ── Fetch dashboard data when branch or date changes ──
+  const fetchDashboardData = useCallback(async (branchIdNum: number | undefined, dateParam: string | undefined) => {
+    try {
+      const [summary, employees, branches, eventsResp, locations] = await Promise.all([
+        dashboardService.getAttendanceSummary(branchIdNum, dateParam),
+        dashboardService.getEmployeesToday(branchIdNum, dateParam),
+        dashboardService.getBranchesMap(),
+        eventService.getAll({ take: 100, branchId: branchIdNum }),
+        locationService.getAll(),
+      ]);
+      setDashboardSummary(summary);
+      setEmployeesToday(employees.data);
+      setBranchesMap(branches.data);
+      setApiEvents(eventsResp.data);
+      setApiLocations(locations.data);
+      const [locEventsResult] = await Promise.allSettled([
+        dashboardService.getLocationEvents(branchIdNum, dateParam),
+      ]);
+      if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
+    } catch (err) {
+      console.error('[Dashboard] Failed to fetch data:', err);
+    }
+  }, []);
+
   useEffect(() => {
     const branchIdNum =
       selectedBranch !== "all" ? parseInt(selectedBranch, 10) : undefined;
-    // format date as YYYY-MM-DD for API
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
     const dateParam = isToday ? undefined : dateStr;
@@ -201,36 +224,13 @@ export default function AdminDashboard() {
 
     const fetchData = async () => {
       setIsLoading(true);
-      try {
-        // ดึงข้อมูลหลัก (ถ้าพังจะไม่แสดงอะไรเลย)
-        const [summary, employees, branches, eventsResp, locations] = await Promise.all([
-          dashboardService.getAttendanceSummary(branchIdNum, dateParam),
-          dashboardService.getEmployeesToday(branchIdNum, dateParam),
-          dashboardService.getBranchesMap(),
-          eventService.getAll({ take: 100, branchId: branchIdNum }),
-          locationService.getAll(),
-        ]);
-        setDashboardSummary(summary);
-        setEmployeesToday(employees.data);
-        setBranchesMap(branches.data);
-        setApiEvents(eventsResp.data);
-        setApiLocations(locations.data);
-
-        // ดึงข้อมูลเสริม (ถ้าพังไม่กระทบข้อมูลหลัก)
-        const [locEventsResult] = await Promise.allSettled([
-          dashboardService.getLocationEvents(branchIdNum, dateParam),
-        ]);
-        if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
-      } catch (err) {
-        console.error('[Dashboard] Failed to fetch data:', err);
-      } finally {
-        setIsLoading(false);
-      }
+      await fetchDashboardData(branchIdNum, dateParam);
+      setIsLoading(false);
     };
 
     fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranch, selectedDate]);
+  }, [selectedBranch, selectedDate, fetchDashboardData]);
 
   // ── Fetch per-event stats when selectedEventId changes ──
   useEffect(() => {
@@ -246,6 +246,71 @@ export default function AdminDashboard() {
       .finally(() => { if (!cancelled) setPerEventStatsLoading(false); });
     return () => { cancelled = true; };
   }, [selectedEventId]);
+
+  // ── Real-time WebSocket for attendance updates ──
+  useEffect(() => {
+    const wsBase =
+      process.env.NEXT_PUBLIC_WS_URL ||
+      (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api')
+        .replace(/^http/, 'ws')
+        .replace('/api', '');
+
+    // Skip WS on remote deployments that don't support WebSocket
+    if (wsBase.includes('onrender.com') || wsBase.includes('vercel.app')) return;
+
+    const url = `${wsBase}/ws/attendance`;
+    console.log('[WS Superadmin] wsBase:', wsBase);
+    console.log('[WS Superadmin] Connecting to:', url);
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      console.log('[WS Superadmin] new WebSocket(', url, ')');
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        console.log('[WS Superadmin] Connected successfully');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'attendance_update') {
+            const branchIdNum = selectedBranch !== 'all' ? parseInt(selectedBranch, 10) : undefined;
+            const dateStr = format(selectedDate, 'yyyy-MM-dd');
+            const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
+            const dateParam = isToday ? undefined : dateStr;
+            fetchDashboardData(branchIdNum, dateParam);
+            if (selectedEventId !== null) {
+              dashboardService.getEventStats(selectedEventId)
+                .then((data) => setPerEventStats(data))
+                .catch(() => {});
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.log('[WS Superadmin] Connection closed. Code:', event.code, 'Reason:', event.reason);
+        reconnectTimer = setTimeout(connect, 5000);
+      };
+
+      ws.onerror = (event) => {
+        console.error('[WS Superadmin] Connection error:', event);
+        ws?.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchDashboardData]);
 
   // ── Map API employees → AttendanceStats ──
   const attendanceStats = useMemo((): AttendanceStats => {
@@ -314,26 +379,16 @@ export default function AdminDashboard() {
   // วันนี้ → แสดงเฉพาะ ongoing/upcoming เรียงใกล้สุด
   // วันอื่น → แสดงกิจกรรมที่ overlap กับวันนั้น
   const displayedEvents = useMemo(() => {
-    const now = new Date();
-    const todayStr = format(now, 'yyyy-MM-dd');
-    const selectedStr = format(selectedDate, 'yyyy-MM-dd');
-    const isToday = todayStr === selectedStr;
+    const dayStart = new Date(selectedDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(selectedDate);
+    dayEnd.setHours(23, 59, 59, 999);
 
-    let filtered: ApiEventItem[];
-
-    if (isToday) {
-      filtered = apiEvents.filter(e => new Date(e.endDateTime) >= now);
-    } else {
-      const dayStart = new Date(selectedDate);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(selectedDate);
-      dayEnd.setHours(23, 59, 59, 999);
-      filtered = apiEvents.filter(e => {
-        const start = new Date(e.startDateTime);
-        const end = new Date(e.endDateTime);
-        return start <= dayEnd && end >= dayStart;
-      });
-    }
+    const filtered = apiEvents.filter(e => {
+      const start = new Date(e.startDateTime);
+      const end = new Date(e.endDateTime);
+      return start <= dayEnd && end >= dayStart;
+    });
 
     return filtered.sort(
       (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
@@ -678,10 +733,18 @@ export default function AdminDashboard() {
           <div className="border-t-2 border-borderMain bg-white flex flex-col flex-1 min-h-0">
             <div className="px-4 py-2 border-b border-borderMain flex items-center justify-between shrink-0">
               <h3 className="text-sm font-semibold text-primaryMain">
-                {statsType === 'attendance' ? 'บันทึกการเข้างาน' : 'รายการกิจกรรม'}
+                {statsType === 'attendance'
+                  ? 'บันทึกการเข้างาน'
+                  : (selectedEventId && (perEventStatsLoading || perEventStats))
+                    ? 'รายชื่อผู้เข้าร่วม'
+                    : 'รายการกิจกรรม'}
               </h3>
               <span className="text-xs text-textMain/60">
-                {statsType === 'attendance' ? employeesToday.length : displayedEvents.length} รายการ
+                {statsType === 'attendance'
+                  ? `${employeesToday.length} รายการ`
+                  : (selectedEventId && perEventStats)
+                    ? `${perEventStats.isOpenEvent ? perEventStats.joinedCount : perEventStats.joinedCount + perEventStats.notJoinedCount} คน`
+                    : `${displayedEvents.length} รายการ`}
               </span>
             </div>
             <div className="overflow-y-auto flex-1">
@@ -747,6 +810,71 @@ export default function AdminDashboard() {
                   </>
                 );
               })() : (() => {
+                // ── Participant view when event is selected ──
+                if (selectedEventId && (perEventStatsLoading || perEventStats)) {
+                  if (perEventStatsLoading) {
+                    return (
+                      <div className="flex items-center justify-center py-12 text-gray-400">
+                        <div className="text-center">
+                          <div className="w-8 h-8 mx-auto mb-2 border-b-2 border-primaryMain rounded-full animate-spin" />
+                          <p className="text-xs">กำลังโหลดข้อมูล...</p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  const participants = perEventStats!.isOpenEvent
+                    ? perEventStats!.joined.map(p => ({ ...p, hasJoined: true }))
+                    : [
+                        ...perEventStats!.joined.map(p => ({ ...p, hasJoined: true })),
+                        ...perEventStats!.notJoined.map(p => ({ ...p, hasJoined: false })),
+                      ];
+                  const PAGE_SIZE = 10;
+                  const totalPages = Math.max(1, Math.ceil(participants.length / PAGE_SIZE));
+                  const safePage = Math.min(tablePage, totalPages);
+                  const pageItems = participants.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+                  return (
+                    <>
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">เวลาเช็คอิน</th>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-borderMain/50">
+                          {participants.length === 0 ? (
+                            <tr><td colSpan={4} className="text-center py-6 text-gray-400">ไม่มีข้อมูลผู้เข้าร่วม</td></tr>
+                          ) : (
+                            pageItems.map((p, idx) => (
+                              <tr key={`${p.name}-${idx}`} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-3 py-2 text-textMain font-medium">{p.name}</td>
+                                <td className="px-3 py-2 text-textMain/70">{p.branch || '-'}</td>
+                                <td className="px-3 py-2 text-textMain/70">{p.checkIn || '-'}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    p.hasJoined ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    {p.hasJoined ? 'เข้าร่วมแล้ว' : 'ยังไม่เข้าร่วม'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-center gap-2 py-2 border-t border-borderMain text-xs">
+                          <button onClick={() => setTablePage(p => Math.max(1, p - 1))} disabled={safePage === 1} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">‹</button>
+                          <span className="text-textMain/70">{safePage} / {totalPages}</span>
+                          <button onClick={() => setTablePage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">›</button>
+                        </div>
+                      )}
+                    </>
+                  );
+                }
+                // ── Events list ──
                 const PAGE_SIZE = 10;
                 const totalPages = Math.max(1, Math.ceil(displayedEvents.length / PAGE_SIZE));
                 const safePage = Math.min(tablePage, totalPages);
@@ -787,7 +915,17 @@ export default function AdminDashboard() {
                                   const lat = evt.location?.latitude ?? evt.venueLatitude;
                                   const lng = evt.location?.longitude ?? evt.venueLongitude;
                                   if (!isSelected && lat != null && lng != null) {
+                                    // บันทึกตำแหน่งเดิมก่อน fly ไป event
+                                    if (!mapHomeRef.current) {
+                                      mapHomeRef.current = { center: mapCenter, zoom: selectedBranch !== 'all' ? 15 : 11 };
+                                    }
                                     setMapFlyTarget({ center: [lat, lng], zoom: 16 });
+                                  } else if (isSelected) {
+                                    // fly กลับบ้าน
+                                    if (mapHomeRef.current) {
+                                      setMapFlyTarget(mapHomeRef.current);
+                                      mapHomeRef.current = null;
+                                    }
                                   }
                                 }}
                                 className={`cursor-pointer transition-colors ${isSelected ? 'bg-primaryMain/10 border-l-2 border-primaryMain' : 'hover:bg-gray-50'}`}
@@ -881,7 +1019,13 @@ export default function AdminDashboard() {
                   {perEventStats?.eventName || '...'}
                   {perEventStats?.isOpenEvent && <span className="ml-1 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">เปิดทั่วไป</span>}
                 </span>
-                <button onClick={() => setSelectedEventId(null)} className="text-textMain/40 hover:text-textMain/80 text-xs">✕</button>
+                <button onClick={() => {
+                  setSelectedEventId(null);
+                  if (mapHomeRef.current) {
+                    setMapFlyTarget(mapHomeRef.current);
+                    mapHomeRef.current = null;
+                  }
+                }} className="text-textMain/40 hover:text-textMain/80 text-xs">✕</button>
               </div>
             )}
             {statsType === 'event' && !selectedEventId && (
@@ -979,13 +1123,19 @@ export default function AdminDashboard() {
                 </div>
                 {perEventStats ? (
                   <>
+                    {!perEventStats.isOpenEvent && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-textMain/60">เป้าหมาย</span>
+                        <span className="font-bold text-primaryMain">{perEventStats.joinedCount + perEventStats.notJoinedCount} คน</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-xs">
-                      <span className="text-textMain/60">เข้าร่วม</span>
+                      <span className="text-textMain/60">มาแล้ว</span>
                       <span className="font-bold text-emerald-600">{perEventStatsLoading ? '...' : perEventStats.joinedCount} คน</span>
                     </div>
                     {!perEventStats.isOpenEvent && (
                       <div className="flex justify-between text-xs">
-                        <span className="text-textMain/60">ยังไม่เข้าร่วม</span>
+                        <span className="text-textMain/60">ยังไม่มา</span>
                         <span className="font-bold text-red-500">{perEventStatsLoading ? '...' : perEventStats.notJoinedCount} คน</span>
                       </div>
                     )}

@@ -4,7 +4,7 @@ import * as shiftService from '../services/shift.service.js';
 import { broadcastShiftUpdate } from '../websocket/attendance.websocket.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
-/** normalize query/params ให้ parse ได้เสถียรเมื่อ framework ส่งค่ามาเป็น array */
+/** req.query の値は string | string[] になりうるので string に正規化する */
 function qs(v: unknown): string | undefined {
   if (typeof v === 'string') return v;
   if (Array.isArray(v) && typeof v[0] === 'string') return v[0] as string;
@@ -19,18 +19,74 @@ function deriveHttpStatus(message: string): number {
   return 500;
 }
 
-/** create shift endpoint: controller เก็บเฉพาะ auth/validation boundary */
+/**
+ * 📋 Shift Controller — API จัดการตารางงาน/กะ
+ *
+ * ทำไม Controller ถึงบางมาก?
+ * - รับ request, ตรวจ params/body เบื้องต้น
+ * - ดึง identity (userId, role, branchId) จาก req.user ที่ authenticate middleware ตั้งไว้
+ *   → ไม่ต้องรับจาก body อีกต่อไป เพราะ client ปลอมได้
+ * - business logic ทั้งหมดอยู่ใน shift.service.ts
+ *
+ * ============================================================
+ * API ENDPOINT REFERENCE (การสร้างตารางงาน)
+ * ============================================================
+ *
+ * POST /api/shifts
+ *   → Admin/SuperAdmin สร้างกะให้พนักงาน
+ *   → Body: { name, shiftType, startTime, endTime, userId,
+ *             gracePeriodMinutes?, lateThresholdMinutes?,
+ *             specificDays?, customDate?, locationId? }
+ *   → gracePeriodMinutes  = เข้าก่อนได้กี่นาทีถึงนับว่าตรงเวลา (default 15)
+ *   → lateThresholdMinutes = สายเกินนี้นาทีถือว่าขาดงาน (default 30)
+ *
+ * GET /api/shifts
+ *   → SuperAdmin: เห็นทุกกะ | Admin: เห็นสาขาตัวเอง | User: เห็นกะตัวเอง
+ *   → Query: userId?, shiftType?, isActive?
+ *
+ * GET /api/shifts/today/:userId
+ *   → กะที่ใช้งานได้วันนี้ของพนักงาน (filter ตาม DayOfWeek / customDate)
+ *
+ * GET /api/shifts/:id
+ *   → ดูรายละเอียดกะเดียว
+ *
+ * PUT /api/shifts/:id  (Admin/SuperAdmin only)
+ *   → แก้ไขกะ: เวลา, grace period, late threshold, สถานที่, เปิด/ปิด
+ *   → Body: { name?, startTime?, endTime?, gracePeriodMinutes?,
+ *             lateThresholdMinutes?, specificDays?, customDate?,
+ *             locationId?, isActive? }
+ *
+ * DELETE /api/shifts/:id  (Admin/SuperAdmin only — Soft Delete)
+ *   → Body: { deleteReason: string }
+ */
+
+/**
+ * ➕ สร้างกะใหม่ (Admin/SuperAdmin only)
+ * POST /api/shifts
+ */
 export const createShift = async (req: Request, res: Response) => {
   try {
-    // ใช้ identity จาก token เท่านั้นเพื่อตัดช่องปลอม role/branch จาก client
-    const createdByUserId = req.user?.userId;
-    const creatorRole = req.user?.role;
-    const creatorBranchId = req.user?.branchId;
+    // [1] ดึง identity ของผู้สร้างจาก token ที่ authenticate middleware ถอดรหัสไว้
+    //     ทำไมไม่รับจาก body? ป้องกัน client ส่ง role='SUPERADMIN' ปลอมเพื่อสร้างกะสาขาอื่น
+    const createdByUserId = req.user?.userId;   // id ของ Admin/SuperAdmin ที่กดสร้างกะ
+    const creatorRole = req.user?.role;          // SUPERADMIN / ADMIN / MANAGER
+    const creatorBranchId = req.user?.branchId; // service จะตรวจว่า userId อยู่สาขาเดียวกันไหม
 
+    // [2] token ไม่มีข้อมูล → request ไม่ผ่าน middleware → reject ทันที
     if (createdByUserId === undefined || creatorRole === undefined) {
       return sendError(res, 'ไม่พบข้อมูลผู้ใช้ กรุณา login ใหม่', 401);
     }
 
+    // [3] Destructure body — field ที่ต้องมีจะ validate ข้างล่าง
+    //     userId            → พนักงานที่จะรับกะนี้
+    //     name              → ชื่อกะ เช่น "เช้า สาขา A"
+    //     shiftType         → REGULAR (ทุกวัน) | SPECIFIC_DAY (ระบุวัน) | CUSTOM (วันที่เจาะจง)
+    //     startTime/endTime → รูปแบบ "HH:MM" เช่น "08:00"
+    //     gracePeriodMinutes    → เข้าก่อนได้กี่นาทีถือว่าตรงเวลา (default 15 ใน service)
+    //     lateThresholdMinutes  → สายเกินนี้นาทีถือว่าขาด (default 30 ใน service)
+    //     specificDays      → ["MONDAY","WEDNESDAY"] ใช้กับ SPECIFIC_DAY
+    //     customDate        → "2025-12-31" ใช้กับ CUSTOM
+    //     locationId?       → ผูก GPS radius กับกะนี้
     const {
       userId,
       userIds,
@@ -59,6 +115,7 @@ export const createShift = async (req: Request, res: Response) => {
       locationId?: number;
     };
 
+    // [4] Validate required fields — ส่ง 400 ทันทีพร้อมข้อความบอก field ที่ขาด
     if (!name) return sendError(res, 'กรุณาระบุชื่อกะ (name)', 400);
     if (!shiftType) return sendError(res, 'กรุณาระบุ shiftType (REGULAR, SPECIFIC_DAY, CUSTOM)', 400);
     if (!startTime) return sendError(res, 'กรุณาระบุเวลาเริ่มงาน (startTime HH:MM)', 400);
@@ -106,6 +163,8 @@ export const createShift = async (req: Request, res: Response) => {
       return sendSuccess(res, result, `สร้างกะเรียบร้อยแล้ว ${result.createdCount} รายการ`, 201);
     }
 
+    // [5] สร้างกะผ่าน service — service จะตรวจสิทธิ์ (Admin ข้ามสาขาไม่ได้)
+    //     แปลง Number() ตรงนี้เพราะ body JSON อาจส่งตัวเลขมาเป็น string
     const shift = await shiftService.createShift({
       name,
       shiftType: shiftType as Parameters<typeof shiftService.createShift>[0]['shiftType'],
@@ -118,14 +177,15 @@ export const createShift = async (req: Request, res: Response) => {
       locationId: locationId === null ? null : (locationId !== undefined ? Number(locationId) : undefined),
       userId: targetUserIds[0] as number,
       replaceExisting: replaceExisting === true,
-      createdByUserId,
-      creatorRole,
-      creatorBranchId,
+      createdByUserId,   // ผู้สร้าง (จาก token)
+      creatorRole,       // บทบาท (จาก token) — service ใช้ตรวจสิทธิ์ครอสสาขา
+      creatorBranchId,   // สาขาผู้สร้าง (จาก token)
     });
 
-    // broadcast หลังเขียนสำเร็จเท่านั้นเพื่อไม่ให้ client รับสถานะหลอก
+    // [6] Broadcast ให้ client ที่เปิด Dashboard อยู่รู้ว่ามีกะใหม่
     broadcastShiftUpdate('CREATE', shift);
 
+    // [7] Response 201 Created พร้อม shift record ที่เพิ่ง INSERT
     sendSuccess(res, shift, 'สร้างกะเรียบร้อยแล้ว', 201);
   } catch (error: unknown) {
     if (error instanceof shiftService.BulkShiftCreateError) {
@@ -142,7 +202,9 @@ export const createShift = async (req: Request, res: Response) => {
   }
 };
 
-/** route เสริมสำหรับ bulk โดยตรง เพื่อรองรับ client ที่ส่งเฉพาะ userIds */
+/**
+ * ➕➕ ตัวช่วยสร้างกะแบบกลุ่ม (เรียกภายใน)
+ */
 export const createBulkShift = async (req: Request, res: Response) => {
   try {
     const createdByUserId = req.user?.userId;
@@ -224,7 +286,13 @@ export const createBulkShift = async (req: Request, res: Response) => {
   }
 };
 
-/** ใช้ role/branch จาก token เพื่อบังคับ data scope ที่ service */
+/**
+ * 📋 ดึงกะทั้งหมด (ตาม role และ branch)
+ * GET /api/shifts
+ *
+ * ทำไม role และ branchId ดึงจาก req.user?
+ * เพื่อให้ getShifts() กรองข้อมูลตามสิทธิ์จริงของ user ที่ login อยู่
+ */
 export const getShifts = async (req: Request, res: Response) => {
   try {
     const requesterId = req.user?.userId;

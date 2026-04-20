@@ -176,7 +176,7 @@
  *       ค่า default: gracePeriodMinutes=15, lateThresholdMinutes=30
  *
  *       **shiftType:**
- *       - `REGULAR` — ใช้ทุกวัน ไม่กำหนดวัน
+ *       - `REGULAR` — ใช้วันจันทร์-ศุกร์
  *       - `SPECIFIC_DAY` — ต้องระบุ specificDays เช่น ["MONDAY","FRIDAY"]
  *       - `CUSTOM` — ต้องระบุ customDate วันเดียว เช่น "2026-03-15"
  *
@@ -203,7 +203,7 @@
  *             $ref: '#/components/schemas/CreateShiftRequest'
  *           examples:
  *             กะเช้าประจำ:
- *               summary: กะเช้า REGULAR ทุกวัน
+ *               summary: กะเช้า REGULAR วันจันทร์-ศุกร์
  *               value:
  *                 name: "กะเช้า"
  *                 shiftType: "REGULAR"
@@ -374,7 +374,7 @@
  *       ไม่ต้องแสดงกะวันอื่น เพื่อลด confusion
  *
  *       **Logic:**
- *       - REGULAR → ใช้ได้ทุกวัน
+ *       - REGULAR → ใช้ได้วันจันทร์-ศุกร์
  *       - SPECIFIC_DAY → ต้องตรงกับวันในสัปดาห์วันนี้
  *       - CUSTOM → ต้อง customDate ตรงกับวันนี้
  *     tags:
@@ -4687,7 +4687,7 @@
 // ============================================================
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * tags:
  *   - name: Audit
  *     description: |
@@ -4704,7 +4704,7 @@
  */
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * /api/audit:
  *   get:
  *     summary: ดึง Audit Logs
@@ -4786,7 +4786,7 @@
  */
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * /api/audit/actions:
  *   get:
  *     summary: ดึงรายชื่อ Action ทั้งหมด
@@ -4822,7 +4822,7 @@
  */
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * components:
  *   schemas:
  *     AuditLog:

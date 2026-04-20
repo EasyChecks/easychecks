@@ -1,5 +1,5 @@
-import AuditLogPage from '@/components/audit/AuditLogPage';
+import { redirect } from 'next/navigation';
 
 export default function AdminAuditLogPage() {
-  return <AuditLogPage />;
+  redirect('/admin/dashboard');
 }

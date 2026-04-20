@@ -20,9 +20,10 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ClipboardList, Search, FileX, FilePenLine, Trash2 } from 'lucide-react';
+import { ClipboardList, Search, FileX, FilePenLine, Trash2, Camera, X } from 'lucide-react';
 import { attendanceService } from '@/services/attendance';
 import { Attendance, UpdateAttendanceRequest } from '@/types/attendance';
+import Image from 'next/image';
 
 // ========== ค่าคงที่ ==========
 
@@ -113,6 +114,7 @@ export default function AttendanceLogPage() {
 
   // --- State: Modal ดูรายละเอียด ---
   const [detailRecord, setDetailRecord] = useState<Attendance | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   // ========== โหลดข้อมูล ==========
   const loadData = useCallback(async () => {
@@ -450,11 +452,100 @@ export default function AttendanceLogPage() {
               <DetailRow label="ระยะห่าง (เข้า)" value={detailRecord.checkInDistance != null ? `${detailRecord.checkInDistance.toFixed(0)} ม.` : '-'} />
               <DetailRow label="ที่อยู่ออกงาน" value={detailRecord.checkOutAddress ?? '-'} />
               <DetailRow label="ระยะห่าง (ออก)" value={detailRecord.checkOutDistance != null ? `${detailRecord.checkOutDistance.toFixed(0)} ม.` : '-'} />
+
+              {/* === รูปถ่ายเข้างาน-ออกงาน === */}
+              {(detailRecord.checkInPhoto || detailRecord.checkOutPhoto) && (
+                <div className="pt-3 mt-3 border-t border-gray-100">
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Camera className="w-4 h-4 text-gray-500" />
+                    <span className="text-sm font-medium text-gray-500">รูปถ่ายบันทึกงาน</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* รูปเข้างาน */}
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-gray-500">เข้างาน</p>
+                      {detailRecord.checkInPhoto ? (
+                        <button
+                          type="button"
+                          onClick={() => setLightboxUrl(detailRecord.checkInPhoto!)}
+                          className="relative w-full overflow-hidden transition-all border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:shadow-md group aspect-square"
+                        >
+                          <Image
+                            src={detailRecord.checkInPhoto}
+                            alt="รูปเข้างาน"
+                            fill
+                            className="object-cover transition-transform group-hover:scale-105"
+                            sizes="200px"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center transition-opacity opacity-0 bg-black/30 group-hover:opacity-100">
+                            <Search className="w-5 h-5 text-white" />
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-center text-gray-300 border-2 border-dashed border-gray-200 rounded-xl aspect-square">
+                          <Camera className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+                    {/* รูปออกงาน */}
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-gray-500">ออกงาน</p>
+                      {detailRecord.checkOutPhoto ? (
+                        <button
+                          type="button"
+                          onClick={() => setLightboxUrl(detailRecord.checkOutPhoto!)}
+                          className="relative w-full overflow-hidden transition-all border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:shadow-md group aspect-square"
+                        >
+                          <Image
+                            src={detailRecord.checkOutPhoto}
+                            alt="รูปออกงาน"
+                            fill
+                            className="object-cover transition-transform group-hover:scale-105"
+                            sizes="200px"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center transition-opacity opacity-0 bg-black/30 group-hover:opacity-100">
+                            <Search className="w-5 h-5 text-white" />
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-center text-gray-300 border-2 border-dashed border-gray-200 rounded-xl aspect-square">
+                          <Camera className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end mt-6">
               <Button variant="outline" onClick={() => setDetailRecord(null)}>ปิด</Button>
             </div>
+
+            {/* === Lightbox: ขยายรูปเต็มจอ === */}
+            {lightboxUrl && (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
+                onClick={() => setLightboxUrl(null)}
+              >
+                <button
+                  type="button"
+                  onClick={() => setLightboxUrl(null)}
+                  className="absolute p-2 text-white transition-colors rounded-full top-4 right-4 hover:bg-white/20"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+                <div className="relative w-full max-w-2xl max-h-[85vh] rounded-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <Image
+                    src={lightboxUrl}
+                    alt="รูปถ่ายบันทึกงาน"
+                    width={800}
+                    height={800}
+                    className="object-contain w-full h-full"
+                  />
+                </div>
+              </div>
+            )}
           </Card>
         </div>
       )}

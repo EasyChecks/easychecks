@@ -1,5 +1,5 @@
 import swaggerJsdoc from 'swagger-jsdoc';
-import type { Application } from 'express';
+import type { Application, Request, Response, NextFunction } from 'express';
 import swaggerUi from 'swagger-ui-express';
 
 const options: swaggerJsdoc.Options = {
@@ -24,6 +24,7 @@ const options: swaggerJsdoc.Options = {
         description: 'Production server',
       },
     ],
+    // หมายเหตุ: servers จะถูก override dynamically ตาม request host ใน setupSwagger()
     components: {
       securitySchemes: {
         BearerAuth: {
@@ -992,18 +993,56 @@ const options: swaggerJsdoc.Options = {
 
 const swaggerSpec = swaggerJsdoc(options);
 
-export const setupSwagger = (app: Application) => {
-  // Swagger UI
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-    explorer: true,
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'EasyCheck API Docs',
-  }));
+/**
+ * Inject ค่า servers ให้ชี้ไปหา origin ที่ request มาจริง
+ * ทำให้ Try it out ใน Swagger UI ทำงานได้ทั้ง local และ production
+ * โดยไม่ต้อง hardcode URL
+ */
+function getDynamicSpec(req: Request): object {
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3001';
+  const baseUrl = `${protocol}://${host}`;
 
-  // JSON endpoint
-  app.get('/api-docs.json', (req, res) => {
+  return {
+    ...swaggerSpec,
+    servers: [
+      {
+        url: baseUrl,
+        description: host.includes('localhost') ? 'Development server (current)' : 'Production server (current)',
+      },
+      // fallback servers
+      ...(host.includes('localhost')
+        ? [{ url: 'https://easycheck-backend.onrender.com', description: 'Production server' }]
+        : [{ url: 'http://localhost:3001', description: 'Development server' }]
+      ),
+    ],
+  };
+}
+
+export const setupSwagger = (app: Application) => {
+  // Middleware: inject dynamic spec ก่อน serve Swagger UI
+  app.use('/api-docs', swaggerUi.serve);
+
+  app.get('/api-docs', (req: Request, res: Response, next: NextFunction) => {
+    const dynamicSpec = getDynamicSpec(req);
+    const handler = swaggerUi.setup(dynamicSpec, {
+      explorer: true,
+      customCss: '.swagger-ui .topbar { display: none }',
+      customSiteTitle: 'EasyCheck API Docs',
+      swaggerOptions: {
+        persistAuthorization: true,  // จำ token ไว้หลัง refresh หน้า
+        displayRequestDuration: true,
+        filter: true,                // ให้ search/filter endpoint ได้
+        tryItOutEnabled: true,       // เปิด Try it out เป็น default
+      },
+    });
+    handler(req, res, next);
+  });
+
+  // Dynamic JSON spec endpoint — frontend หรือ tool อื่นเรียกไปขอ spec ได้
+  app.get('/api-docs.json', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/json');
-    res.send(swaggerSpec);
+    res.json(getDynamicSpec(req));
   });
 
   console.log('📚 Swagger documentation available at /api-docs');

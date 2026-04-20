@@ -70,4 +70,3 @@ export interface SendAnnouncementResult {
   announcement: Announcement;
   recipientCount: number;
 }
-}

@@ -13,6 +13,7 @@ import { leaveRequestService, LeaveRequest, LeaveQuotaItem } from '@/services/le
 import { lateRequestService, LateRequest } from '@/services/lateRequestService';
 import { useAuth } from '@/contexts/AuthContext';
 import { getLeaveRequestErrorMessage } from '@/utils/leaveRequestErrors';
+import { getLateRequestErrorMessage } from '@/utils/lateRequestErrors';
 
 const LEAVE_TYPE_MAP: Record<string, { label: string; Icon: React.ElementType; color: string; apiValue: string }> = {
   SICK:          { label: 'ลาป่วย',           Icon: Thermometer, color: 'text-red-500 bg-red-50',      apiValue: 'SICK' },
@@ -135,7 +136,7 @@ function LeaveTab() {
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [, setError] = useState('');
   const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'warning' | 'info' } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
@@ -165,7 +166,7 @@ function LeaveTab() {
   const [editAttachmentFile, setEditAttachmentFile] = useState<File | null>(null);
   const [editAttachmentUploading, setEditAttachmentUploading] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
-  const [editError, setEditError] = useState('');
+  const [, setEditError] = useState('');
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyStatus, setHistoryStatus] = useState('ALL');
 
@@ -783,7 +784,6 @@ function LeaveTab() {
                   </label>
                 </div>
 
-                {error && <p className="text-sm text-red-600 px-1">{error}</p>}
               </form>
             </div>
 
@@ -1074,7 +1074,6 @@ function LeaveTab() {
                 </label>
               </div>
 
-              {editError && <p className="text-sm text-red-600 px-1">{editError}</p>}
             </form>
             </div>
             {/* Sticky footer */}
@@ -1154,10 +1153,14 @@ function LateTab() {
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [stats, setStats] = useState<{ totalRequests?: number; totalLateMinutes?: number; approved?: number; pending?: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'warning' | 'info' } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyStatus, setHistoryStatus] = useState('ALL');
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'error') => {
+    setToast({ message, type });
+  };
 
   const buildHistoryParams = useCallback((skipValue: number) => ({
     skip: skipValue,
@@ -1251,14 +1254,13 @@ function LateTab() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!scheduledTime || !actualTime || !reason || !attachmentFile) { 
-      setError('กรุณากรอกข้อมูลให้ครบถ้วน'); 
+      showToast('กรุณากรอกข้อมูลให้ครบถ้วน'); 
       return; 
     }
     if (lateMinutesPreview === null) { 
-      setError('เวลาที่มาจริงต้องหลังเวลาที่กำหนด'); 
+      showToast('เวลาที่มาจริงต้องหลังเวลาที่กำหนด'); 
       return; 
     }
-    setError('');
     setSubmitting(true);
     try {
       let attachmentUrl = '';
@@ -1284,8 +1286,8 @@ function LateTab() {
       await refreshHistory();
       setTimeout(() => setShowSuccess(false), 2500);
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setError(axiosMsg || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
+      const finalMsg = getLateRequestErrorMessage(err, 'ส่งคำขอมาสายไม่สำเร็จ');
+      showToast(finalMsg);
     } finally {
       setSubmitting(false);
     }
@@ -1310,12 +1312,11 @@ function LateTab() {
   };
 
   const handleEditSubmit = async () => {
-    setError('');
     const scheduledTime = `${editScheduledHour.padStart(2, '0')}:${editScheduledMin.padStart(2, '0')}`;
     const actualTime = `${editActualHour.padStart(2, '0')}:${editActualMin.padStart(2, '0')}`;
     
     if (!scheduledTime || !actualTime || !editReason) {
-      setError('กรุณากรอกข้อมูลให้ครบถ้วน');
+      showToast('กรุณากรอกข้อมูลให้ครบถ้วน');
       return;
     }
     setSubmitting(true);
@@ -1336,10 +1337,9 @@ function LateTab() {
       await lateRequestService.updateLateRequest(editingId!, updateData);
       setEditingId(null);
       await refreshHistory();
-      setError('');
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setError(axiosMsg || 'เกิดข้อผิดพลาด');
+      const finalMsg = getLateRequestErrorMessage(err, 'บันทึกการแก้ไขคำขอมาสายไม่สำเร็จ');
+      showToast(finalMsg);
       console.error('Edit error:', err);
     } finally {
       setSubmitting(false);
@@ -1352,10 +1352,9 @@ function LateTab() {
       await lateRequestService.deleteLateRequest(id);
       setShowDeleteConfirm(null);
       await refreshHistory();
-      setError('');
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setError(axiosMsg || 'เกิดข้อผิดพลาด');
+      const finalMsg = getLateRequestErrorMessage(err, 'ยกเลิกคำขอมาสายไม่สำเร็จ');
+      showToast(finalMsg);
     } finally {
       setSubmitting(false);
     }
@@ -1363,26 +1362,12 @@ function LateTab() {
 
   return (
     <div className="space-y-4">
-      {/* Stats */}
-      {stats && (
-        <Card className="p-4">
-          <h3 className="font-semibold text-gray-800 mb-3">สถิติปีนี้</h3>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="p-2 bg-orange-50 rounded-lg">
-              <div className="text-xl font-bold text-orange-600">{stats.totalRequests ?? 0}</div>
-              <div className="text-xs text-gray-500">ครั้งทั้งหมด</div>
-            </div>
-            <div className="p-2 bg-green-50 rounded-lg">
-              <div className="text-xl font-bold text-green-600">{stats.approved ?? 0}</div>
-              <div className="text-xs text-gray-500">อนุมัติแล้ว</div>
-            </div>
-            <div className="p-2 bg-gray-50 rounded-lg">
-              <div className="text-xl font-bold text-gray-600">{stats.totalLateMinutes ?? 0}</div>
-              <div className="text-xs text-gray-500">นาทีรวม</div>
-            </div>
-          </div>
-        </Card>
-      )}
+      <Toast
+        open={Boolean(toast)}
+        type={toast?.type}
+        message={toast?.message ?? ''}
+        onClose={() => setToast(null)}
+      />
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -1497,8 +1482,6 @@ function LateTab() {
               }} />
           </label>
         </Card>
-
-        {error && <p className="text-sm text-red-600 px-1">{error}</p>}
 
         <Button type="submit" disabled={submitting || attachmentUploading}
           className="w-full bg-orange-500 hover:bg-orange-600 py-6 text-lg disabled:opacity-50">
@@ -1767,7 +1750,6 @@ function LateTab() {
                 </label>
               </div>
 
-              {error && <div className="p-2 bg-red-50 border-l-3 border-red-500 rounded text-sm text-red-700">{error}</div>}
             </div>
 
             {/* Footer */}

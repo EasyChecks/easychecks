@@ -1,9 +1,14 @@
 import { prisma } from '../lib/prisma.js';
-import type { LateRequest, ApprovalStatus, Gender, ApprovalActionType, Role } from '@prisma/client';
+import type { LateRequest, ApprovalStatus, Gender, ApprovalActionType, Role, AttendanceStatus } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import { differenceInMinutes, parse } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
-import { ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
+import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
+import {
+  calculateLateMinutesFromTimes,
+  evaluateAttendanceStatus,
+  resolveAttendanceWithApprovedLateWindow,
+} from '../utils/late-policy.js';
+import { getThaiDayRange, getThaiTimeHHMM } from '../utils/timezone.js';
 
 /**
  * Late Request Service - จัดการการขอมาสาย
@@ -238,16 +243,7 @@ function attachLateApprover<T extends LateRequest>(
  *            ตั้ง baseDate เป็นวันเดียวกันเพราะต้องการเปรียบเทียบเฉพาะเวลา (ไม่สนใจวันที่)
  */
 function calculateLateMinutes(scheduledTime: string, actualTime: string): number {
-  try {
-    const baseDate = '2000-01-01'; // ใช้วันเดียวกันสำหรับเปรียบเทียบเวลา
-    const scheduled = parse(`${baseDate} ${scheduledTime}`, 'yyyy-MM-dd HH:mm', new Date());
-    const actual = parse(`${baseDate} ${actualTime}`, 'yyyy-MM-dd HH:mm', new Date());
-
-    const minutes = differenceInMinutes(actual, scheduled);
-    return minutes > 0 ? minutes : 0;
-  } catch (_error) {
-    throw new Error('รูปแบบเวลาไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM');
-  }
+  return calculateLateMinutesFromTimes(scheduledTime, actualTime);
 }
 
 const THAI_MONTHS: Record<string, number> = {
@@ -394,7 +390,7 @@ async function createLateRequest(
   // เพื่อป้องกัน invalid format ก่อนที่จะคำนวณ
   const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
   if (!timeRegex.test(data.scheduledTime) || !timeRegex.test(data.actualTime)) {
-    throw new Error('รูปแบบเวลาไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM (เช่น 08:30)');
+    throw new BadRequestError('รูปแบบเวลาไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM (เช่น 08:30)');
   }
 
   // 📊 คำนวณนาทีที่มาสายจากความต่างของเวลา
@@ -402,7 +398,7 @@ async function createLateRequest(
 
   // ⚠️ ต้องมาสายจริง (เวลามาถึงต้องมากกว่าเวลาที่กำหนด)
   if (lateMinutes <= 0) {
-    throw new Error('เวลามาถึงต้องมากกว่าเวลาที่กำหนด');
+    throw new BadRequestError('เวลามาถึงต้องมากกว่าเวลาที่กำหนด');
   }
 
   // 🔍 ตรวจสอบว่า user มีอยู่จริงเพื่อป้องกัน invalid userId
@@ -412,24 +408,30 @@ async function createLateRequest(
   });
 
   if (!user) {
-    throw new Error('ไม่พบผู้ใช้');
+    throw new NotFoundError('ไม่พบผู้ใช้');
   }
 
   // 🚫 ตรวจสอบคำขอซ้ำในวันเดียวกัน
   // เพื่อป้องกันการขอมาสายหลายครั้งในวันเดียวกัน
   // ยกเว้น status = REJECTED เพราะสามารถขอใหม่ได้ถ้าถูกปฏิเสธ
   // ⚠️ ต้อง filter deletedAt = null เพRAะเป็น soft delete เท่านั้น
+  const requestDate = new Date(data.requestDate);
+  const { start: requestDayStart, end: requestDayEnd } = getThaiDayRange(requestDate);
+
   const existingRequest = await prisma.lateRequest.findFirst({
     where: {
       userId: data.userId,
-      requestDate: new Date(data.requestDate),
+      requestDate: {
+        gte: requestDayStart,
+        lt: requestDayEnd,
+      },
       status: { not: 'REJECTED' },
       deletedAt: null, // Filter out soft-deleted records
     },
   });
 
   if (existingRequest) {
-    throw new Error('มีคำขอมาสายในวันนี้อยู่แล้ว');
+    throw new ConflictError('มีคำขอมาสายในวันนี้อยู่แล้ว');
   }
 
   // 📝 บันทึกคำขอมาสายลงฐานข้อมูล สถานะเริ่มต้นเป็น PENDING
@@ -437,7 +439,7 @@ async function createLateRequest(
     data: {
       userId: data.userId,
       attendanceId: data.attendanceId,
-      requestDate: new Date(data.requestDate),
+      requestDate,
       scheduledTime: data.scheduledTime,
       actualTime: data.actualTime,
       lateMinutes,
@@ -591,43 +593,66 @@ async function updateLateRequest(
   lateRequestId: number,
   data: UpdateLateRequestDTO
 ): Promise<LateRequestFrontend> {
-  const lateRequest = await prisma.lateRequest.findUnique({
-    where: { lateRequestId },
+  const lateRequest = await prisma.lateRequest.findFirst({
+    where: {
+      lateRequestId,
+      deletedAt: null,
+    },
   });
 
   if (!lateRequest) {
-    throw new Error('ไม่พบคำขอมาสาย');
+    throw new NotFoundError('ไม่พบคำขอมาสาย');
   }
 
   if (lateRequest.status !== 'PENDING') {
-    throw new Error('สามารถแก้ไขได้เฉพาะคำขอที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
+    throw new BadRequestError('สามารถแก้ไขได้เฉพาะคำขอที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
 
   // Validate time format if provided
   if (data.scheduledTime || data.actualTime) {
     const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
     if (data.scheduledTime && !timeRegex.test(data.scheduledTime)) {
-      throw new Error('รูปแบบเวลาที่กำหนดไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM');
+      throw new BadRequestError('รูปแบบเวลาที่กำหนดไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM');
     }
     if (data.actualTime && !timeRegex.test(data.actualTime)) {
-      throw new Error('รูปแบบเวลาที่มาจริงไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM');
+      throw new BadRequestError('รูปแบบเวลาที่มาจริงไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM');
     }
   }
 
   const scheduledTime = data.scheduledTime || lateRequest.scheduledTime;
   const actualTime = data.actualTime || lateRequest.actualTime;
+  const requestDate = data.requestDate ? new Date(data.requestDate) : lateRequest.requestDate;
+
+  // กันการย้ายวันแล้วชนกับคำขอเดิมที่ยังไม่ถูกปฏิเสธ
+  const { start: requestDayStart, end: requestDayEnd } = getThaiDayRange(requestDate);
+  const duplicateRequest = await prisma.lateRequest.findFirst({
+    where: {
+      userId: lateRequest.userId,
+      lateRequestId: { not: lateRequestId },
+      requestDate: {
+        gte: requestDayStart,
+        lt: requestDayEnd,
+      },
+      status: { not: 'REJECTED' },
+      deletedAt: null,
+    },
+  });
+
+  if (duplicateRequest) {
+    throw new ConflictError('มีคำขอมาสายในวันนี้อยู่แล้ว');
+  }
 
   // Recalculate late minutes if time changed
   const lateMinutes = calculateLateMinutes(scheduledTime, actualTime);
 
   if (lateMinutes <= 0) {
-    throw new Error('เวลามาถึงต้องมากกว่าเวลาที่กำหนด');
+    throw new BadRequestError('เวลามาถึงต้องมากกว่าเวลาที่กำหนด');
   }
 
   const updatedLateRequest = await prisma.lateRequest.update({
     where: { lateRequestId },
     data: {
-      requestDate: data.requestDate ? new Date(data.requestDate) : undefined,
+      requestDate,
       scheduledTime,
       actualTime,
       lateMinutes,
@@ -654,16 +679,19 @@ async function updateLateRequest(
  * ลบคำขอมาสาย (อนุญาตแค่เมื่อ PENDING)
  */
 async function deleteLateRequest(lateRequestId: number): Promise<LateRequest> {
-  const lateRequest = await prisma.lateRequest.findUnique({
-    where: { lateRequestId },
+  const lateRequest = await prisma.lateRequest.findFirst({
+    where: {
+      lateRequestId,
+      deletedAt: null,
+    },
   });
 
   if (!lateRequest) {
-    throw new Error('ไม่พบคำขอมาสาย');
+    throw new NotFoundError('ไม่พบคำขอมาสาย');
   }
 
   if (lateRequest.status !== 'PENDING') {
-    throw new Error('สามารถลบได้เฉพาะคำขอที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
+    throw new BadRequestError('สามารถลบได้เฉพาะคำขอที่อยู่ในสถานะรอการอนุมัติเท่านั้น');
   }
 
   // Soft delete: set deletedAt instead of hard delete
@@ -696,15 +724,17 @@ async function getLateStatistics(userId: number): Promise<{
   totalLateMinutes: number;
   approvedLateMinutes: number;
 }> {
+  const baseWhere: Prisma.LateRequestWhereInput = { userId, deletedAt: null };
+
   const [total, approved, pending, rejected] = await Promise.all([
-    prisma.lateRequest.count({ where: { userId } }),
-    prisma.lateRequest.count({ where: { userId, status: 'APPROVED' } }),
-    prisma.lateRequest.count({ where: { userId, status: 'PENDING' } }),
-    prisma.lateRequest.count({ where: { userId, status: 'REJECTED' } }),
+    prisma.lateRequest.count({ where: baseWhere }),
+    prisma.lateRequest.count({ where: { ...baseWhere, status: 'APPROVED' } }),
+    prisma.lateRequest.count({ where: { ...baseWhere, status: 'PENDING' } }),
+    prisma.lateRequest.count({ where: { ...baseWhere, status: 'REJECTED' } }),
   ]);
 
   const allRequests = await prisma.lateRequest.findMany({
-    where: { userId },
+    where: baseWhere,
     select: { lateMinutes: true, status: true },
   });
 
@@ -723,6 +753,108 @@ async function getLateStatistics(userId: number): Promise<{
   };
 }
 
+async function findAttendanceForLateSync(
+  tx: Prisma.TransactionClient,
+  lateRequest: Pick<LateRequest, 'attendanceId' | 'userId' | 'requestDate'>,
+) {
+  if (lateRequest.attendanceId) {
+    return tx.attendance.findFirst({
+      where: {
+        attendanceId: lateRequest.attendanceId,
+        userId: lateRequest.userId,
+        isDeleted: false,
+      },
+      include: {
+        shift: {
+          select: {
+            startTime: true,
+            gracePeriodMinutes: true,
+            lateThresholdMinutes: true,
+          },
+        },
+      },
+    });
+  }
+
+  const { start, end } = getThaiDayRange(lateRequest.requestDate);
+  return tx.attendance.findFirst({
+    where: {
+      userId: lateRequest.userId,
+      isDeleted: false,
+      checkIn: {
+        gte: start,
+        lt: end,
+      },
+    },
+    orderBy: {
+      checkIn: 'desc',
+    },
+    include: {
+      shift: {
+        select: {
+          startTime: true,
+          gracePeriodMinutes: true,
+          lateThresholdMinutes: true,
+        },
+      },
+    },
+  });
+}
+
+async function syncAttendanceOnApprovedLate(
+  tx: Prisma.TransactionClient,
+  lateRequest: Pick<LateRequest, 'attendanceId' | 'userId' | 'requestDate' | 'scheduledTime' | 'actualTime'>,
+): Promise<void> {
+  const attendance = await findAttendanceForLateSync(tx, lateRequest);
+  if (!attendance) return;
+
+  if (attendance.status === 'LEAVE_APPROVED') {
+    return;
+  }
+
+  const checkInTime = getThaiTimeHHMM(attendance.checkIn);
+  const shiftPolicy = attendance.shift
+    ? {
+      startTime: attendance.shift.startTime,
+      gracePeriodMinutes: attendance.shift.gracePeriodMinutes,
+      lateThresholdMinutes: attendance.shift.lateThresholdMinutes,
+    }
+    : {
+      startTime: lateRequest.scheduledTime,
+      gracePeriodMinutes: 0,
+      lateThresholdMinutes: 0,
+    };
+
+  const baseResolution = evaluateAttendanceStatus(checkInTime, shiftPolicy);
+  const resolved = resolveAttendanceWithApprovedLateWindow({
+    baseResolution,
+    checkInTime,
+    shiftStartTime: shiftPolicy.startTime,
+    approvedActualTime: lateRequest.actualTime,
+  });
+
+  const nextStatus = resolved.status as AttendanceStatus;
+  const nextLateMinutes = resolved.lateMinutes;
+  const nextNote = resolved.message;
+
+  if (
+    attendance.status === nextStatus
+    && (attendance.lateMinutes ?? 0) === nextLateMinutes
+    && (attendance.note ?? '') === nextNote
+  ) {
+    return;
+  }
+
+  await tx.attendance.update({
+    where: { attendanceId: attendance.attendanceId },
+    data: {
+      status: nextStatus,
+      lateMinutes: nextLateMinutes,
+      note: nextNote,
+    },
+  });
+}
+
 // ========================================================================================
 // ADMIN ACTIONS - การดำเนินการของผู้จัดการ/แอดมิน
 // ========================================================================================
@@ -737,8 +869,6 @@ async function getAllLateRequests(
   userRole?: string, // Current user's role for approval hierarchy filtering
   currentUserId?: number // Current user's ID to include self-requests
 ): Promise<{ data: LateRequestFrontend[]; total: number }> {
-  console.log('[getAllLateRequests] Called with:', { status, skip, take, userRole, currentUserId });
-  
   const where: Prisma.LateRequestWhereInput = { 
     deletedAt: null,
     // Default to PENDING if not specified (for approval workflow)
@@ -796,15 +926,10 @@ async function getAllLateRequests(
     prisma.lateRequest.count({ where }),
   ]);
 
-  console.log('[getAllLateRequests] Found', data.length, 'records. Total:', total);
-  console.log('[getAllLateRequests] Where clause:', JSON.stringify(where, null, 2));
-
   const latestMap = await getLatestLateApprovalMap(data.map((request) => request.lateRequestId));
   const enriched = attachLateApprover(data, latestMap);
   const mapped = enriched.map(mapLateRequestForFrontend);
-  
-  console.log('[getAllLateRequests] Final response data:', JSON.stringify(mapped.slice(0, 1), null, 2));
-  
+
   return { data: mapped, total };
 }
 
@@ -815,8 +940,11 @@ async function approveLateRequest(
   lateRequestId: number,
   data: ApproveLateRequestDTO
 ): Promise<LateRequestFrontend> {
-  const lateRequest = await prisma.lateRequest.findUnique({
-    where: { lateRequestId },
+  const lateRequest = await prisma.lateRequest.findFirst({
+    where: {
+      lateRequestId,
+      deletedAt: null,
+    },
     include: {
       user: {
         select: { role: true },
@@ -850,14 +978,22 @@ async function approveLateRequest(
   }
 
   const approvedRequest = await prisma.$transaction(async (tx) => {
-    const updated = await tx.lateRequest.update({
-      where: { lateRequestId },
+    const updatedResult = await tx.lateRequest.updateMany({
+      where: {
+        lateRequestId,
+        deletedAt: null,
+        status: 'PENDING',
+      },
       data: {
         status: 'APPROVED',
         adminComment: data.adminComment,
         rejectionReason: null,
       },
     });
+
+    if (updatedResult.count === 0) {
+      throw new ConflictError('ไม่สามารถอนุมัติคำขอที่มีสถานะอื่นได้');
+    }
 
     await tx.approvalAction.create({
       data: {
@@ -867,6 +1003,19 @@ async function approveLateRequest(
         adminComment: data.adminComment,
       },
     });
+
+    const updated = await tx.lateRequest.findFirst({
+      where: {
+        lateRequestId,
+        deletedAt: null,
+      },
+    });
+
+    if (!updated) {
+      throw new NotFoundError('ไม่พบคำขอมาสาย');
+    }
+
+    await syncAttendanceOnApprovedLate(tx, updated);
 
     return updated;
   });
@@ -893,8 +1042,11 @@ async function rejectLateRequest(
   lateRequestId: number,
   data: RejectLateRequestDTO
 ): Promise<LateRequestFrontend> {
-  const lateRequest = await prisma.lateRequest.findUnique({
-    where: { lateRequestId },
+  const lateRequest = await prisma.lateRequest.findFirst({
+    where: {
+      lateRequestId,
+      deletedAt: null,
+    },
     include: {
       user: {
         select: { role: true },
@@ -928,13 +1080,21 @@ async function rejectLateRequest(
   }
 
   const rejectedRequest = await prisma.$transaction(async (tx) => {
-    const updated = await tx.lateRequest.update({
-      where: { lateRequestId },
+    const updatedResult = await tx.lateRequest.updateMany({
+      where: {
+        lateRequestId,
+        deletedAt: null,
+        status: 'PENDING',
+      },
       data: {
         status: 'REJECTED',
         rejectionReason: data.rejectionReason,
       },
     });
+
+    if (updatedResult.count === 0) {
+      throw new ConflictError('ไม่สามารถปฏิเสธคำขอที่มีสถานะอื่นได้');
+    }
 
     await tx.approvalAction.create({
       data: {
@@ -944,6 +1104,17 @@ async function rejectLateRequest(
         rejectionReason: data.rejectionReason,
       },
     });
+
+    const updated = await tx.lateRequest.findFirst({
+      where: {
+        lateRequestId,
+        deletedAt: null,
+      },
+    });
+
+    if (!updated) {
+      throw new NotFoundError('ไม่พบคำขอมาสาย');
+    }
 
     return updated;
   });

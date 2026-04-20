@@ -5,6 +5,11 @@ import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
 import { getThaiDayRange, getThaiTimeHHMM } from '../utils/timezone.js';
 import { uploadAttendancePhotoToSupabase } from '../utils/supabase-storage.js';
+import {
+  calculateTimeDifferenceFromShift,
+  evaluateAttendanceStatus,
+  resolveAttendanceWithApprovedLateWindow,
+} from '../utils/late-policy.js';
 
 const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
 const AUTO_CHECKOUT_GRACE_MINUTES = 30;
@@ -56,21 +61,6 @@ export interface CheckOutDTO {
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number);
   return (hours ?? 0) * 60 + (minutes ?? 0);
-}
-
-/**
- * คำนวณผลต่างเวลา checkIn − shiftStart (หน่วย: นาที)
- *
- * ทำไมต้องจัดการ edge case ±720?
- * กะข้ามเที่ยงคืน เช่น กะ 23:00–07:00 ถ้า check-in 00:30
- * ผลต่างปกติ = 0:30 − 23:00 = −1350 → ผิด
- * ต้องบวก 1440 (24h) เพื่อให้ได้ +90 (สาย 90 นาที) ✓
- */
-function calculateTimeDifference(checkInTime: string, shiftStart: string): number {
-  let diff = timeToMinutes(checkInTime) - timeToMinutes(shiftStart);
-  if (diff > 720) diff -= 1440;   // check-in ข้ามเที่ยงคืนไปแล้ว
-  if (diff < -720) diff += 1440;  // กะข้ามเที่ยงคืน, check-in หลังเที่ยงคืน
-  return diff;
 }
 
 /**
@@ -154,7 +144,7 @@ function inferShiftForAttendance(checkIn: Date, userShifts: Shift[]): Shift | nu
   let bestScore = Number.POSITIVE_INFINITY;
 
   for (const shift of candidates) {
-    const score = Math.abs(calculateTimeDifference(checkInHHMM, shift.startTime));
+    const score = Math.abs(calculateTimeDifferenceFromShift(checkInHHMM, shift.startTime));
     if (score < bestScore) {
       bestScore = score;
       bestShift = shift;
@@ -323,45 +313,6 @@ async function enrichWithWorkSummary<T extends AttendanceWithShiftForSummary>(at
   };
 }
 
-/**
- * ตัดสินสถานะการเข้างาน ON_TIME / LATE / ABSENT
- *
- * ทำไมไม่ hardcode threshold?
- * Admin สามารถตั้ง gracePeriodMinutes และ lateThresholdMinutes ต่อกะได้
- * → frontend ส่งมาใน CreateShiftDTO, บันทึกไว้ใน Shift record
- *
- * Logic ที่แก้แล้ว (v2):
- * diff ≤ grace  → ON_TIME  (มาก่อน หรือสายไม่เกิน grace — ยังถือว่าตรงเวลา)
- * grace < diff ≤ threshold → LATE    (สายแต่ยังไม่ถึงเกณฑ์ขาด)
- * diff > threshold         → ABSENT  (สายเกินไป — ขาดงาน)
- *
- * ทำไมเปลี่ยน?
- * เวอร์ชันเก่ามี bug: เงื่อนไข `diff === 0` อยู่หลัง `diff <= 0` → ไม่มีทางเข้าถึง
- * และ grace ควรรวม "มาก่อน" + "สายนิดหน่อย" ด้วย เช่น grace=15 แปลว่า
- * มาสายได้ 15 นาทีแล้วยังถือว่า ON_TIME
- */
-function calculateAttendanceStatus(
-  checkInTime: string,
-  shift: Shift,
-): { status: AttendanceStatus; lateMinutes: number; message: string } {
-  const diff = calculateTimeDifference(checkInTime, shift.startTime);
-  const grace = shift.gracePeriodMinutes;       // สายไม่เกินกี่นาทียังตรงเวลา
-  const threshold = shift.lateThresholdMinutes; // สายเกินนี้ถือว่าขาด
-
-  // diff ≤ 0 = มาก่อนเวลา, diff > 0 = มาหลังเวลา
-  if (diff <= grace) {
-    // มาก่อนหรือสายไม่เกิน grace → ตรงเวลา
-    const earlyOrLate = diff <= 0 ? `มาก่อน ${Math.abs(diff)} นาที` : 'ตรงเวลาพอดี';
-    return { status: 'ON_TIME', lateMinutes: 0, message: `เข้างานตรงเวลา (${earlyOrLate})` };
-  }
-  if (diff <= threshold) {
-    // สายแต่ยังไม่ถึง threshold → LATE
-    return { status: 'LATE', lateMinutes: diff, message: `มาสาย ${diff} นาที` };
-  }
-  // สายเกิน threshold → ABSENT
-  return { status: 'ABSENT', lateMinutes: diff, message: `สายเกิน ${threshold} นาที — ถือว่าขาดงาน` };
-}
-
 // ============================================
 // 📋 Main Functions — ฟังก์ชันหลัก
 // ============================================
@@ -481,12 +432,12 @@ export const checkIn = async (data: CheckInDTO) => {
   //
   // SQL เทียบเท่า: ไม่มี — เป็น business logic ฝั่ง application
   const currentTimeHHMM = getThaiTimeHHMM();
-  const diffFromStart = calculateTimeDifference(currentTimeHHMM, shift.startTime);
+  const diffFromStart = calculateTimeDifferenceFromShift(currentTimeHHMM, shift.startTime);
   if (diffFromStart < -MAX_EARLY_CHECKIN_MINUTES) {
     throw new Error(`คุณต้องเข้างานก่อนเวลาได้ไม่เกิน ${MAX_EARLY_CHECKIN_MINUTES} นาที`);
   }
 
-  const diffFromEnd = calculateTimeDifference(currentTimeHHMM, shift.endTime);
+  const diffFromEnd = calculateTimeDifferenceFromShift(currentTimeHHMM, shift.endTime);
   if (diffFromEnd > 0) {
     throw new Error(`ไม่สามารถเข้างานได้ — เลยเวลาออกงาน (${shift.endTime}) แล้ว`);
   }
@@ -526,25 +477,29 @@ export const checkIn = async (data: CheckInDTO) => {
       userId,
       status: 'APPROVED',
       requestDate: { gte: today, lt: tomorrow },
+      deletedAt: null,
     },
     orderBy: { lateRequestId: 'desc' },
   });
 
-  let status: AttendanceStatus = 'ON_TIME';
-  let lateMinutes = 0;
-  let message = 'เข้างาน';
+  const baseResolution = evaluateAttendanceStatus(checkInTime, {
+    startTime: shift.startTime,
+    gracePeriodMinutes: shift.gracePeriodMinutes,
+    lateThresholdMinutes: shift.lateThresholdMinutes,
+  });
 
-  if (approvedLateRequest) {
-    status = 'LATE_APPROVED' as AttendanceStatus;
-    lateMinutes = approvedLateRequest.lateMinutes;
-    message = `มาสายอนุมัติแล้ว ${approvedLateRequest.lateMinutes} นาที`;
-  } else {
-    // มีกะ → คำนวณด้วย gracePeriodMinutes และ lateThresholdMinutes ของกะนั้น
-    const result = calculateAttendanceStatus(checkInTime, shift);
-    status = result.status;           // ON_TIME / LATE / ABSENT
-    lateMinutes = result.lateMinutes; // จำนวนนาทีที่สาย
-    message = result.message;         // ข้อความสำหรับบันทึกใน note
-  }
+  const finalResolution = approvedLateRequest
+    ? resolveAttendanceWithApprovedLateWindow({
+      baseResolution,
+      checkInTime,
+      shiftStartTime: shift.startTime,
+      approvedActualTime: approvedLateRequest.actualTime,
+    })
+    : baseResolution;
+
+  const status: AttendanceStatus = finalResolution.status;
+  const lateMinutes = finalResolution.lateMinutes;
+  const message = finalResolution.message;
 
   // ===== 5. บันทึกลง Database =====
   // SQL: INSERT INTO "Attendance" (...) VALUES (...) RETURNING *

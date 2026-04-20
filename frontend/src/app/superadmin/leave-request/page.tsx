@@ -12,6 +12,7 @@ import { leaveRequestService, LeaveRequest, LeaveQuotaItem } from '@/services/le
 import { lateRequestService, LateRequest } from '@/services/lateRequestService';
 import { useAuth } from '@/contexts/AuthContext';
 import { getLeaveRequestErrorMessage } from '@/utils/leaveRequestErrors';
+import { getLateRequestErrorMessage } from '@/utils/lateRequestErrors';
 
 const LEAVE_TYPE_MAP: Record<string, { label: string; Icon: React.ElementType; color: string; apiValue: string }> = {
   SICK:          { label: 'ลาป่วย',           Icon: Thermometer, color: 'text-red-500 bg-red-50',      apiValue: 'SICK' },
@@ -33,6 +34,21 @@ const STATUS_OPTIONS = [
   { value: 'APPROVED', label: 'อนุมัติ', dot: 'bg-emerald-500' },
   { value: 'REJECTED', label: 'ไม่อนุมัติ', dot: 'bg-rose-500' },
 ];
+
+function getUserDisplayName(
+  user?: {
+    firstName?: string | null;
+    lastName?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    name?: string | null;
+  } | null
+) {
+  const firstName = user?.firstName ?? user?.first_name ?? '';
+  const lastName = user?.lastName ?? user?.last_name ?? '';
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  return fullName || user?.name || '';
+}
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'APPROVED') return <Badge variant="active">อนุมัติ</Badge>;
@@ -125,7 +141,7 @@ function MyLeaveTab() {
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [, setError] = useState('');
   const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'warning' | 'info' } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
@@ -154,7 +170,7 @@ function MyLeaveTab() {
   const [editAttachmentFile, setEditAttachmentFile] = useState<File | null>(null);
   const [editAttachmentUploading, setEditAttachmentUploading] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
-  const [editError, setEditError] = useState('');
+  const [, setEditError] = useState('');
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyStatus, setHistoryStatus] = useState('ALL');
 
@@ -770,7 +786,6 @@ function MyLeaveTab() {
                         </label>
                       </div>
       
-                      {error && <p className="text-sm text-red-600 px-1">{error}</p>}
                     </form>
                   </div>
       
@@ -1112,7 +1127,6 @@ function MyLeaveTab() {
                   </label>
                 </div>
 
-                {editError && <p className="text-sm text-red-600 px-1">{editError}</p>}
               </form>
             </div>
 
@@ -1143,10 +1157,14 @@ function MyLateTab() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'warning' | 'info' } | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyStatus, setHistoryStatus] = useState('ALL');
+
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'error') => {
+    setToast({ message, type });
+  };
 
   const buildHistoryParams = useCallback((skipValue: number) => ({
     skip: skipValue,
@@ -1235,14 +1253,13 @@ function MyLateTab() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!scheduledTime || !actualTime || !reason || !attachmentFile) { 
-      setError('กรุณากรอกข้อมูลให้ครบถ้วน'); 
+      showToast('กรุณากรอกข้อมูลให้ครบถ้วน'); 
       return; 
     }
     if (lateMinutesPreview === null) { 
-      setError('เวลาที่มาจริงต้องหลังเวลาที่กำหนด'); 
+      showToast('เวลาที่มาจริงต้องหลังเวลาที่กำหนด'); 
       return; 
     }
-    setError('');
     setSubmitting(true);
     try {
       let attachmentUrl = '';
@@ -1268,8 +1285,8 @@ function MyLateTab() {
       await refreshHistory();
       setTimeout(() => setShowSuccess(false), 2500);
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setError(axiosMsg || 'เกิดข้อผิดพลาด');
+      const finalMsg = getLateRequestErrorMessage(err, 'ส่งคำขอมาสายไม่สำเร็จ');
+      showToast(finalMsg);
     } finally {
       setSubmitting(false);
     }
@@ -1294,12 +1311,11 @@ function MyLateTab() {
   };
 
   const handleEditSubmit = async () => {
-    setError('');
     const scheduledTime = `${editScheduledHour.padStart(2, '0')}:${editScheduledMin.padStart(2, '0')}`;
     const actualTime = `${editActualHour.padStart(2, '0')}:${editActualMin.padStart(2, '0')}`;
     
     if (!scheduledTime || !actualTime || !editReason) {
-      setError('กรุณากรอกข้อมูลให้ครบถ้วน');
+      showToast('กรุณากรอกข้อมูลให้ครบถ้วน');
       return;
     }
     setSubmitting(true);
@@ -1320,10 +1336,9 @@ function MyLateTab() {
       await lateRequestService.updateLateRequest(editingId!, updateData);
       setEditingId(null);
       await refreshHistory();
-      setError('');
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setError(axiosMsg || 'เกิดข้อผิดพลาด');
+      const finalMsg = getLateRequestErrorMessage(err, 'บันทึกการแก้ไขคำขอมาสายไม่สำเร็จ');
+      showToast(finalMsg);
       console.error('Edit error:', err);
     } finally {
       setSubmitting(false);
@@ -1336,10 +1351,9 @@ function MyLateTab() {
       await lateRequestService.deleteLateRequest(id);
       setShowDeleteConfirm(null);
       await refreshHistory();
-      setError('');
     } catch (err: unknown) {
-      const axiosMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      setError(axiosMsg || 'เกิดข้อผิดพลาด');
+      const finalMsg = getLateRequestErrorMessage(err, 'ยกเลิกคำขอมาสายไม่สำเร็จ');
+      showToast(finalMsg);
     } finally {
       setSubmitting(false);
     }
@@ -1347,6 +1361,12 @@ function MyLateTab() {
 
   return (
     <div className="space-y-4">
+      <Toast
+        open={Boolean(toast)}
+        type={toast?.type}
+        message={toast?.message ?? ''}
+        onClose={() => setToast(null)}
+      />
       <form onSubmit={handleSubmit} className="space-y-4">
         <Card className="p-4">
           <label className="block font-semibold text-gray-800 mb-3">วันที่มาสาย</label>
@@ -1458,7 +1478,6 @@ function MyLateTab() {
           </label>
         </Card>
 
-        {error && <p className="text-sm text-red-600 px-1">{error}</p>}
         <Button type="submit" disabled={submitting || attachmentUploading} className="w-full bg-orange-500 hover:bg-orange-600 py-6 text-lg disabled:opacity-50">
           {submitting || attachmentUploading ? 'กำลังส่ง...' : 'ส่งคำขอมาสาย'}
         </Button>
@@ -1725,7 +1744,6 @@ function MyLateTab() {
                 </label>
               </div>
 
-              {error && <div className="p-2 bg-red-50 border-l-3 border-red-500 rounded text-sm text-red-700">{error}</div>}
             </div>
 
             {/* Footer */}
@@ -1889,7 +1907,7 @@ function ApproveLeaveTab() {
   const filteredRequests = requests.filter((req) => {
     if (!query.trim()) return true;
     const needle = query.trim().toLowerCase();
-    const name = (req.user?.name || '').toLowerCase();
+    const name = getUserDisplayName(req.user).toLowerCase();
     const employeeId = (req.user?.employeeId || '').toLowerCase();
     const leaveLabel = (LEAVE_TYPE_MAP[req.leaveType]?.label || req.leaveType || '').toLowerCase();
     return name.includes(needle) || employeeId.includes(needle) || leaveLabel.includes(needle);
@@ -1997,7 +2015,7 @@ function ApproveLeaveTab() {
               <div className="flex items-start justify-between mb-2">
                 <div>
                   <div className="font-semibold text-gray-900">
-                    {req.user?.name || `User #${req.userId}`}
+                    {getUserDisplayName(req.user) || `User #${req.userId}`}
                   </div>
                   <div className="text-sm text-gray-500">{req.user?.employeeId}</div>
                 </div>
@@ -2252,10 +2270,25 @@ function ApproveLateTab() {
     if (selectedIds.length === 0) return;
     setActionId(-1);
     try {
-      await Promise.all(selectedIds.map((id) => lateRequestService.approveLateRequest(id)));
-      showToast('อนุมัติรายการที่เลือกแล้ว', 'success');
-      setSelectedIds([]);
-      setSelectionMode(false);
+      const results = await Promise.allSettled(
+        selectedIds.map((id) => lateRequestService.approveLateRequest(id)),
+      );
+      const successCount = results.filter((result) => result.status === 'fulfilled').length;
+      const failedCount = results.length - successCount;
+
+      if (failedCount === 0) {
+        showToast('อนุมัติรายการที่เลือกแล้ว', 'success');
+      } else if (successCount > 0) {
+        showToast(`อนุมัติสำเร็จ ${successCount} รายการ, ไม่สำเร็จ ${failedCount} รายการ`, 'warning');
+      } else {
+        showToast('ไม่สามารถอนุมัติรายการที่เลือกได้');
+      }
+
+      if (successCount > 0) {
+        setSelectedIds([]);
+        setSelectionMode(false);
+      }
+
       load();
     } catch {
       showToast('เกิดข้อผิดพลาด');
@@ -2268,10 +2301,25 @@ function ApproveLateTab() {
     if (selectedIds.length === 0 || !rejectReason.trim()) return;
     setActionId(-1);
     try {
-      await Promise.all(selectedIds.map((id) => lateRequestService.rejectLateRequest(id, rejectReason)));
-      showToast('ปฏิเสธรายการที่เลือกแล้ว', 'success');
-      setSelectedIds([]);
-      setSelectionMode(false);
+      const results = await Promise.allSettled(
+        selectedIds.map((id) => lateRequestService.rejectLateRequest(id, rejectReason)),
+      );
+      const successCount = results.filter((result) => result.status === 'fulfilled').length;
+      const failedCount = results.length - successCount;
+
+      if (failedCount === 0) {
+        showToast('ปฏิเสธรายการที่เลือกแล้ว', 'success');
+      } else if (successCount > 0) {
+        showToast(`ปฏิเสธสำเร็จ ${successCount} รายการ, ไม่สำเร็จ ${failedCount} รายการ`, 'warning');
+      } else {
+        showToast('ไม่สามารถปฏิเสธรายการที่เลือกได้');
+      }
+
+      if (successCount > 0) {
+        setSelectedIds([]);
+        setSelectionMode(false);
+      }
+
       setBulkRejectOpen(false);
       setRejectReason('');
       load();
@@ -2306,7 +2354,7 @@ function ApproveLateTab() {
   const filteredRequests = requests.filter((req) => {
     if (!query.trim()) return true;
     const needle = query.trim().toLowerCase();
-    const name = (req.user?.name || '').toLowerCase();
+    const name = getUserDisplayName(req.user).toLowerCase();
     const employeeId = (req.user?.employeeId || '').toLowerCase();
     const reason = (req.reason || '').toLowerCase();
     return name.includes(needle) || employeeId.includes(needle) || reason.includes(needle);
@@ -2402,7 +2450,7 @@ function ApproveLateTab() {
           >
             <div className="flex items-start justify-between mb-2">
               <div>
-                <div className="font-semibold text-gray-900">{req.user?.name || `User #${req.userId}`}</div>
+                <div className="font-semibold text-gray-900">{getUserDisplayName(req.user) || `User #${req.userId}`}</div>
                 <div className="text-sm text-gray-500">{req.user?.employeeId}</div>
               </div>
               <Badge variant="default">รอพิจารณา</Badge>

@@ -970,8 +970,11 @@ async function getLeaveRequestsByUser(
  * ดึงใบลาด้วย ID
  */
 async function getLeaveRequestById(leaveId: number) {
-  const leaveRequest = await prisma.leaveRequest.findUnique({
-    where: { leaveId },
+  const leaveRequest = await prisma.leaveRequest.findFirst({
+    where: {
+      leaveId,
+      deletedAt: null,
+    },
     include: {
       user: {
         select: {
@@ -1002,8 +1005,11 @@ async function updateLeaveRequest(
   leaveId: number,
   data: UpdateLeaveRequestDTO
 ): Promise<LeaveRequestWithApprover> {
-  const leaveRequest = await prisma.leaveRequest.findUnique({
-    where: { leaveId },
+  const leaveRequest = await prisma.leaveRequest.findFirst({
+    where: {
+      leaveId,
+      deletedAt: null,
+    },
   });
 
   if (!leaveRequest) {
@@ -1161,8 +1167,11 @@ async function updateLeaveRequest(
  * ลบใบลา (Soft Delete - อนุญาตแค่เมื่อ PENDING)
  */
 async function deleteLeaveRequest(leaveId: number): Promise<LeaveRequest> {
-  const leaveRequest = await prisma.leaveRequest.findUnique({
-    where: { leaveId },
+  const leaveRequest = await prisma.leaveRequest.findFirst({
+    where: {
+      leaveId,
+      deletedAt: null,
+    },
   });
 
   if (!leaveRequest) {
@@ -1317,8 +1326,11 @@ async function approveLeaveRequest(
   leaveId: number,
   data: ApproveLeaveRequestDTO
 ): Promise<LeaveRequestWithApprover> {
-  const leaveRequest = await prisma.leaveRequest.findUnique({
-    where: { leaveId },
+  const leaveRequest = await prisma.leaveRequest.findFirst({
+    where: {
+      leaveId,
+      deletedAt: null,
+    },
     include: {
       user: {
         select: { role: true },
@@ -1352,12 +1364,36 @@ async function approveLeaveRequest(
   }
 
   const approvedLeave = await prisma.$transaction(async (tx) => {
-    const updated = await tx.leaveRequest.update({
-      where: { leaveId },
+    const updatedResult = await tx.leaveRequest.updateMany({
+      where: {
+        leaveId,
+        deletedAt: null,
+        status: 'PENDING',
+      },
       data: {
         status: 'APPROVED',
         adminComment: data.adminComment,
         rejectionReason: null,
+      },
+    });
+
+    if (updatedResult.count === 0) {
+      throw new ConflictError('ไม่สามารถอนุมัติใบลาที่มีสถานะอื่นได้');
+    }
+
+    await tx.approvalAction.create({
+      data: {
+        leaveId,
+        actorUserId: data.approvedByUserId,
+        action: 'APPROVED',
+        adminComment: data.adminComment,
+      },
+    });
+
+    const updated = await tx.leaveRequest.findFirst({
+      where: {
+        leaveId,
+        deletedAt: null,
       },
       include: {
         user: {
@@ -1372,14 +1408,9 @@ async function approveLeaveRequest(
       },
     });
 
-    await tx.approvalAction.create({
-      data: {
-        leaveId,
-        actorUserId: data.approvedByUserId,
-        action: 'APPROVED',
-        adminComment: data.adminComment,
-      },
-    });
+    if (!updated) {
+      throw new NotFoundError('ไม่พบใบลา');
+    }
 
     return updated;
   });
@@ -1406,8 +1437,11 @@ async function rejectLeaveRequest(
   leaveId: number,
   data: RejectLeaveRequestDTO
 ): Promise<LeaveRequestWithApprover> {
-  const leaveRequest = await prisma.leaveRequest.findUnique({
-    where: { leaveId },
+  const leaveRequest = await prisma.leaveRequest.findFirst({
+    where: {
+      leaveId,
+      deletedAt: null,
+    },
     include: {
       user: {
         select: { role: true },
@@ -1441,11 +1475,35 @@ async function rejectLeaveRequest(
   }
 
   const rejectedLeave = await prisma.$transaction(async (tx) => {
-    const updated = await tx.leaveRequest.update({
-      where: { leaveId },
+    const updatedResult = await tx.leaveRequest.updateMany({
+      where: {
+        leaveId,
+        deletedAt: null,
+        status: 'PENDING',
+      },
       data: {
         status: 'REJECTED',
         rejectionReason: data.rejectionReason,
+      },
+    });
+
+    if (updatedResult.count === 0) {
+      throw new ConflictError('ไม่สามารถปฏิเสธใบลาที่มีสถานะอื่นได้');
+    }
+
+    await tx.approvalAction.create({
+      data: {
+        leaveId,
+        actorUserId: data.approvedByUserId,
+        action: 'REJECTED',
+        rejectionReason: data.rejectionReason,
+      },
+    });
+
+    const updated = await tx.leaveRequest.findFirst({
+      where: {
+        leaveId,
+        deletedAt: null,
       },
       include: {
         user: {
@@ -1460,14 +1518,9 @@ async function rejectLeaveRequest(
       },
     });
 
-    await tx.approvalAction.create({
-      data: {
-        leaveId,
-        actorUserId: data.approvedByUserId,
-        action: 'REJECTED',
-        rejectionReason: data.rejectionReason,
-      },
-    });
+    if (!updated) {
+      throw new NotFoundError('ไม่พบใบลา');
+    }
 
     return updated;
   });

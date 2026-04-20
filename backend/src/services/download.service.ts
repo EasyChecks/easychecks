@@ -1,8 +1,25 @@
 import { prisma } from '../lib/prisma.js';
-import type { Role } from '@prisma/client';
+import { Prisma, type Role } from '@prisma/client';
 import { generateExcel } from '../utils/excel.generator.js';
 import { generatePDF } from '../utils/pdf.generator.js';
 import { toThaiIso } from '../utils/timezone.js';
+
+const statusMap: Record<string, string> = {
+  'ON_TIME': 'ตรงเวลา',
+  'LATE': 'สาย',
+  'ABSENT': 'ขาดงาน',
+  'LEAVE': 'ลา',
+  'LEAVE_APPROVED': 'ลา (อนุมัติแล้ว)',
+  'NOT_CHECKED_IN': 'ยังไม่เข้างาน',
+};
+
+const formatLateTime = (minutes: number | null | undefined): string => {
+  if (!minutes) return '-';
+  if (minutes < 60) return `${minutes} นาที`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours} ชม. ${mins} นาที` : `${hours} ชม.`;
+};
 
 /**
  * 📥 DownloadService - บริหารจัดการดาวน์โหลดเอกสาร
@@ -21,11 +38,12 @@ export interface User {
 }
 
 export interface DownloadQuery {
-  type: 'attendance' | 'shift';
-  format: 'excel';
+  type: 'attendance';
+  format: 'excel' | 'pdf';
   startDate?: Date;
   endDate?: Date;
   branchId?: number;
+  filterType?: 'all' | 'shift' | 'event';
 }
 
 /**
@@ -60,30 +78,14 @@ export async function downloadReport(
   let fileName = '';
   let buffer: Buffer;
 
-  switch (type) {
-  case 'attendance':
-    ({ buffer, fileName } = await downloadAttendanceReport(
-      user,
-      format,
-      startDate,
-      endDate,
-      branchId
-    ));
-    break;
-
-  case 'shift':
-    ({ buffer, fileName } = await downloadShiftReport(
-      user,
-      format,
-      startDate,
-      endDate,
-      branchId
-    ));
-    break;
-
-  default:
-    throw new Error('Invalid report type');
-  }
+  ({ buffer, fileName } = await downloadAttendanceReport(
+    user,
+    format,
+    startDate,
+    endDate,
+    branchId,
+    query.filterType
+  ));
 
   return {
     buffer,
@@ -116,24 +118,28 @@ async function downloadAttendanceReport(
   format: string,
   startDate?: Date,
   endDate?: Date,
-  branchId?: number
+  branchId?: number,
+  filterType?: 'all' | 'shift' | 'event'
 ): Promise<{ buffer: Buffer; fileName: string }> {
   console.log('📊 Fetching attendance data...');
   
   try {
+    // สร้าง where condition อย่างชัดเจน
+    const whereCondition: Prisma.AttendanceWhereInput = {
+      user: branchId
+        ? { branchId }
+        : user.role === 'ADMIN'
+          ? { branchId: user.branchId }
+          : {},
+      checkIn: {
+        gte: startDate || new Date(new Date().getFullYear(), 0, 1),
+        lte: endDate || new Date(),
+      },
+    };
+
     // ดึงข้อมูล attendance จะรวมข้อมูล user (employeeId, firstName, lastName)
     const attendances = await prisma.attendance.findMany({
-      where: {
-        user: branchId
-          ? { branchId }
-          : user.role === 'ADMIN'
-            ? { branchId: user.branchId }
-            : {},
-        checkIn: {
-          gte: startDate || new Date(new Date().getFullYear(), 0, 1),
-          lte: endDate || new Date(),
-        },
-      },
+      where: whereCondition,
       include: {
         user: {
           select: {
@@ -143,22 +149,21 @@ async function downloadAttendanceReport(
           },
         },
       },
-      orderBy: { checkIn: 'desc' },
-      take: 100, // จำกัดเพื่อป้องกันข้อมูลจำนวนมากทำให้ระบบช้า
+      orderBy: { checkIn: 'asc' },
     });
 
     console.log(`✓ Found ${attendances.length} attendance records`);
 
     // จัดรูปแบบข้อมูลให้เป็นตารางที่เม่าเอกสาร (Excel/PDF)
     const data: Record<string, unknown>[] = attendances.map((att) => ({
-      'Employee ID': att.user?.employeeId ?? '-',
-      'Name': att.user ? `${att.user.firstName} ${att.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
-      'Check In': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
-      'Check Out': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'Not yet',
-      'Status': att.status,
-      'Late Minutes': att.lateMinutes || '-',
-      'Type': att.eventId ? 'Event (กิจกรรม)' : 'Shift (กะงาน)',
-      'Note': att.note || '-',
+      'รหัสพนักงาน': att.user?.employeeId ?? '-',
+      'ชื่อ-นามสกุล': att.user ? `${att.user.firstName} ${att.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
+      'เวลาเข้างาน': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
+      'เวลาออกงาน': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'Not yet',
+      'สาย (นาที/ชั่วโมง)': formatLateTime(att.lateMinutes),
+      'สถานะ': statusMap[att.status] || att.status,
+      'ประเภท': att.eventId ? 'Event (กิจกรรม)' : 'Shift (กะงาน)',
+      'หมายเหตุ': att.note || '-',
     }));
 
     const fileName = `attendance_${new Date().getTime()}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
@@ -172,14 +177,14 @@ async function downloadAttendanceReport(
         sheetName: 'Attendance Report',
         title: 'Attendance Report',
         columns:  [
-          { header: 'Employee ID', key: 'Employee ID', width: 12 },
-          { header: 'Name', key: 'Name', width: 20 },
-          { header: 'Check In', key: 'Check In', width: 18 },
-          { header: 'Check Out', key: 'Check Out', width: 18 },
-          { header: 'Status', key: 'Status', width: 12 },
-          { header: 'Late Minutes', key: 'Late Minutes', width: 12 },
-          { header: 'Type', key: 'Type', width: 15 },
-          { header: 'Note', key: 'Note', width: 30 },
+          { header: 'รหัสพนักงาน', key: 'รหัสพนักงาน', width: 14 },
+          { header: 'ชื่อ-นามสกุล', key: 'ชื่อ-นามสกุล', width: 22 },
+          { header: 'เวลาเข้างาน', key: 'เวลาเข้างาน', width: 18 },
+          { header: 'เวลาออกงาน', key: 'เวลาออกงาน', width: 18 },
+          { header: 'สาย (นาที/ชั่วโมง)', key: 'สาย (นาที/ชั่วโมง)', width: 18 },
+          { header: 'สถานะ', key: 'สถานะ', width: 16 },
+          { header: 'ประเภท', key: 'ประเภท', width: 18 },
+          { header: 'หมายเหตุ', key: 'หมายเหตุ', width: 30 },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ] as any,
         data,
@@ -189,13 +194,14 @@ async function downloadAttendanceReport(
         title: 'Attendance Report',
         fileName,
         columns: [
-          'Employee ID',
-          'Name',
-          'Check In',
-          'Check Out',
-          'Status',
-          'Type',
-          'Note',
+          'รหัสพนักงาน',
+          'ชื่อ-นามสกุล',
+          'เวลาเข้างาน',
+          'เวลาออกงาน',
+          'สาย (นาที/ชั่วโมง)',
+          'สถานะ',
+          'ประเภท',
+          'หมายเหตุ',
         ],
         data,
       });
@@ -209,108 +215,6 @@ async function downloadAttendanceReport(
   }
 }
 
-/**
- * ดาวน์โหลดรายงาน Shift
- */
-async function downloadShiftReport(
-  user: User,
-  format: string,
-  startDate?: Date,
-  endDate?: Date,
-  branchId?: number
-): Promise<{ buffer: Buffer; fileName: string }> {
-  console.log('📋 Fetching shift data...');
-  
-  try {
-    // Query data - simplified
-    const shifts = await prisma.shift.findMany({
-      where: {
-        user: branchId
-          ? { branchId }
-          : user.role === 'ADMIN'
-            ? { branchId: user.branchId }
-            : {},
-        isDeleted: false,
-        OR: [
-          { customDate: null },
-          {
-            customDate: {
-              gte: startDate || new Date(new Date().getFullYear(), 0, 1),
-              lte: endDate || new Date(),
-            },
-          },
-        ],
-      },
-      include: {
-        user: {
-          select: {
-            employeeId: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-      }, // Limit for faster query
-    });
-
-    console.log(`✓ Found ${shifts.length} shift records`);
-
-    // แปลงข้อมูลให้พร้อม export
-    const data: Record<string, unknown>[] = shifts.map((shift) => ({
-      'Employee ID': shift.user?.employeeId ?? '-',
-      'Name': shift.user ? `${shift.user.firstName} ${shift.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
-      'Shift Name': shift.name,
-      'Shift Type': shift.shiftType,
-      'Start Time': shift.startTime,
-      'End Time': shift.endTime,
-      'Active': shift.isActive ? 'Yes' : 'No',
-    }));
-
-    const fileName = `shift_${new Date().getTime()}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
-
-    console.log(`📝 Generating ${format} file with ${data.length} rows...`);
-    let buffer: Buffer;
-
-    if (format === 'excel') {
-      buffer = await generateExcel({
-        fileName,
-        sheetName: 'Shift Report',
-        title: 'Shift Report',
-        columns: [
-          { header: 'Employee ID', key: 'Employee ID', width: 12 },
-          { header: 'Name', key: 'Name', width: 20 },
-          { header: 'Shift Name', key: 'Shift Name', width: 15 },
-          { header: 'Shift Type', key: 'Shift Type', width: 15 },
-          { header: 'Start Time', key: 'Start Time', width: 12 },
-          { header: 'End Time', key: 'End Time', width: 12 },
-          { header: 'Active', key: 'Active', width: 10 },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ] as any,
-        data,
-      });
-    } else {
-      buffer = await generatePDF({
-        title: 'Shift Report',
-        fileName,
-        columns: [
-          'Employee ID',
-          'Name',
-          'Shift Name',
-          'Shift Type',
-          'Start Time',
-          'End Time',
-        ],
-        data,
-      });
-    }
-
-    console.log(`✅ File generated: ${fileName}`);
-    return { buffer, fileName };
-  } catch (error) {
-    console.error('❌ Error in downloadShiftReport:', error);
-    throw error;
-  }
-}
-
 // ── Preview Types ──────────────────────────────────────────────────────────
 
 export interface PreviewResult {
@@ -320,10 +224,11 @@ export interface PreviewResult {
 }
 
 export interface PreviewQuery {
-  type: 'attendance' | 'shift';
+  type: 'attendance';
   startDate?: Date;
   endDate?: Date;
   branchId?: number;
+  filterType?: 'all' | 'shift' | 'event';
 }
 
 /**
@@ -341,75 +246,40 @@ export async function previewReport(
   }
 
   if (type === 'attendance') {
-    const attendances = await prisma.attendance.findMany({
-      where: {
-        user: branchId ? { branchId } : {},
-        checkIn: {
-          gte: startDate || new Date(new Date().getFullYear(), 0, 1),
-          lte: endDate || new Date(),
-        },
+    // สร้าง where condition อย่างชัดเจน
+    const previewWhere: Prisma.AttendanceWhereInput = {
+      user: branchId ? { branchId } : {},
+      checkIn: {
+        gte: startDate || new Date(new Date().getFullYear(), 0, 1),
+        lte: endDate || new Date(),
       },
+    };
+
+    const attendances = await prisma.attendance.findMany({
+      where: previewWhere,
       include: {
         user: { select: { employeeId: true, firstName: true, lastName: true } },
       },
-      orderBy: { checkIn: 'desc' },
+      orderBy: { checkIn: 'asc' },
       take: 20,
     });
 
     const rows = attendances.map((att) => ({
-      'Employee ID': att.user?.employeeId ?? '-',
-      'Name': att.user ? `${att.user.firstName} ${att.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
-      'Check In': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
-      'Check Out': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'ยังไม่ออก',
-      'Status': att.status,
-      'Late Minutes': att.lateMinutes ?? '-',
-      'Type': att.eventId ? 'Event (กิจกรรม)' : 'Shift (กะงาน)',
-      'Note': att.note || '-',
+      'รหัสพนักงาน': att.user?.employeeId ?? '-',
+      'ชื่อ-นามสกุล': att.user ? `${att.user.firstName} ${att.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
+      'เวลาเข้างาน': toThaiIso(att.checkIn)?.slice(0, 19).replace('T', ' ') ?? '-',
+      'เวลาออกงาน': att.checkOut ? (toThaiIso(att.checkOut)?.slice(0, 19).replace('T', ' ') ?? '-') : 'ยังไม่ออก',
+      'สาย (นาที/ชั่วโมง)': formatLateTime(att.lateMinutes),
+      'สถานะ': statusMap[att.status] || att.status,
+      'ประเภท': att.eventId ? 'Event (กิจกรรม)' : 'Shift (กะงาน)',
+      'หมายเหตุ': att.note || '-',
     }));
 
     return {
-      columns: ['Employee ID', 'Name', 'Check In', 'Check Out', 'Status', 'Late Minutes', 'Type', 'Note'],
+      columns: ['รหัสพนักงาน', 'ชื่อ-นามสกุล', 'เวลาเข้างาน', 'เวลาออกงาน', 'สาย (นาที/ชั่วโมง)', 'สถานะ', 'ประเภท', 'หมายเหตุ'],
       rows,
       total: rows.length,
     };
   }
-
-  // shift
-  const shifts = await prisma.shift.findMany({
-    where: {
-      user: branchId ? { branchId } : {},
-      isDeleted: false,
-      OR: [
-        { customDate: null },
-        {
-          customDate: {
-            gte: startDate || new Date(new Date().getFullYear(), 0, 1),
-            lte: endDate || new Date(),
-          },
-        },
-      ],
-    },
-    include: {
-      user: { select: { employeeId: true, firstName: true, lastName: true } },
-    },
-    orderBy: { shiftId: 'desc' },
-    take: 20,
-  });
-
-  const rows = shifts.map((shift) => ({
-    'Employee ID': shift.user?.employeeId ?? '-',
-    'Name': shift.user ? `${shift.user.firstName} ${shift.user.lastName}` : 'ไม่พบข้อมูลพนักงาน',
-    'Shift Name': shift.name,
-    'Shift Type': shift.shiftType,
-    'Start Time': shift.startTime,
-    'End Time': shift.endTime,
-    'Active': shift.isActive ? 'Yes' : 'No',
-  }));
-
-  return {
-    columns: ['Employee ID', 'Name', 'Shift Name', 'Shift Type', 'Start Time', 'End Time', 'Active'],
-    rows,
-    total: rows.length,
-  };
 }
 

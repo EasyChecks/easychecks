@@ -20,8 +20,11 @@ import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { th } from "date-fns/locale";
 import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, BranchMapItem, LocationEvent, EventStatsResponse } from "@/services/dashboardService";
+import { attendanceService } from "@/services/attendance";
+import { Attendance } from "@/types/attendance";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
+import type { DivIcon } from 'leaflet';
 
 
 // Dynamic import for Map components (client-side only)
@@ -63,17 +66,9 @@ const MapController = dynamic(
 );
 
 
-// Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
-if (typeof window !== "undefined") {
-  import("leaflet").then((L) => {
-    delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
-      iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-      shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-    });
-  });
-}
+// SVG icon HTML shared with EventMap (mapping-events page)
+const LOCATION_ICON_HTML = `<svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 3px 6px rgba(29,78,216,0.5))"><path d="M16 2C8.27 2 2 8.27 2 16c0 9.94 14 28 14 28S30 25.94 30 16C30 8.27 23.73 2 16 2z" fill="#2563eb"/><circle cx="16" cy="16" r="5" fill="white"/></svg>`;
+const EVENT_ICON_HTML = `<svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 3px 6px rgba(194,65,12,0.5))"><path d="M16 2C8.27 2 2 8.27 2 16c0 9.94 14 28 14 28S30 25.94 30 16C30 8.27 23.73 2 16 2z" fill="#ea580c"/><circle cx="16" cy="16" r="5" fill="white"/></svg>`;
 
 // Types
 interface BranchOption {
@@ -168,6 +163,7 @@ export default function AdminDashboard() {
   const [apiEvents, setApiEvents] = useState<ApiEventItem[]>([]);
   const [apiLocations, setApiLocations] = useState<LocationItem[]>([]);
   const [locationEvents, setLocationEvents] = useState<LocationEvent[]>([]);
+  const [attendanceLogs, setAttendanceLogs] = useState<Attendance[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -180,6 +176,25 @@ export default function AdminDashboard() {
   const [perEventStatsLoading, setPerEventStatsLoading] = useState(false);
   const [mapFlyTarget, setMapFlyTarget] = useState<{ center: [number, number]; zoom: number } | null>(null);
   const mapHomeRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
+  const [mapIcons, setMapIcons] = useState<{ location: DivIcon; event: DivIcon } | null>(null);
+
+  useEffect(() => {
+    import('leaflet').then((L) => {
+      const iconOpts = { className: '', iconSize: [32, 42] as [number, number], iconAnchor: [16, 42] as [number, number], popupAnchor: [0, -44] as [number, number] };
+      setMapIcons({
+        location: L.divIcon({ ...iconOpts, html: LOCATION_ICON_HTML }),
+        event: L.divIcon({ ...iconOpts, html: EVENT_ICON_HTML }),
+      });
+    });
+  }, []);
+
+  // Refs to avoid stale closure in WebSocket handler
+  const selectedBranchRef = useRef(selectedBranch);
+  const selectedDateRef = useRef(selectedDate);
+  const selectedEventIdRef = useRef(selectedEventId);
+  useEffect(() => { selectedBranchRef.current = selectedBranch; }, [selectedBranch]);
+  useEffect(() => { selectedDateRef.current = selectedDate; }, [selectedDate]);
+  useEffect(() => { selectedEventIdRef.current = selectedEventId; }, [selectedEventId]);
 
   // Branch options: dynamic from API (filter out seed data branches matching "สาขา BR...")
   const branchOptions: BranchOption[] = useMemo(() => [
@@ -192,18 +207,21 @@ export default function AdminDashboard() {
   // ── Fetch dashboard data when branch or date changes ──
   const fetchDashboardData = useCallback(async (branchIdNum: number | undefined, dateParam: string | undefined) => {
     try {
-      const [summary, employees, branches, eventsResp, locations] = await Promise.all([
+      const dateStr = dateParam ?? format(new Date(), 'yyyy-MM-dd');
+      const [summary, employees, branches, eventsResp, locations, logsResp] = await Promise.all([
         dashboardService.getAttendanceSummary(branchIdNum, dateParam),
         dashboardService.getEmployeesToday(branchIdNum, dateParam),
         dashboardService.getBranchesMap(),
         eventService.getAll({ take: 100, branchId: branchIdNum }),
         locationService.getAll(),
+        attendanceService.getAll({ startDate: dateStr, endDate: dateStr }),
       ]);
       setDashboardSummary(summary);
       setEmployeesToday(employees.data);
       setBranchesMap(branches.data);
       setApiEvents(eventsResp.data);
       setApiLocations(locations.data);
+      setAttendanceLogs(logsResp);
       const [locEventsResult] = await Promise.allSettled([
         dashboardService.getLocationEvents(branchIdNum, dateParam),
       ]);
@@ -255,34 +273,33 @@ export default function AdminDashboard() {
         .replace(/^http/, 'ws')
         .replace('/api', '');
 
-    // Skip WS on remote deployments that don't support WebSocket
     if (wsBase.includes('onrender.com') || wsBase.includes('vercel.app')) return;
 
     const url = `${wsBase}/ws/attendance`;
-    console.log('[WS Superadmin] wsBase:', wsBase);
-    console.log('[WS Superadmin] Connecting to:', url);
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      console.log('[WS Superadmin] new WebSocket(', url, ')');
       ws = new WebSocket(url);
 
       ws.onopen = () => {
-        console.log('[WS Superadmin] Connected successfully');
+        console.log('[WS] Connected to', url);
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'attendance_update') {
-            const branchIdNum = selectedBranch !== 'all' ? parseInt(selectedBranch, 10) : undefined;
-            const dateStr = format(selectedDate, 'yyyy-MM-dd');
+            const branch = selectedBranchRef.current;
+            const date = selectedDateRef.current;
+            const branchIdNum = branch !== 'all' ? parseInt(branch, 10) : undefined;
+            const dateStr = format(date, 'yyyy-MM-dd');
             const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
             const dateParam = isToday ? undefined : dateStr;
             fetchDashboardData(branchIdNum, dateParam);
-            if (selectedEventId !== null) {
-              dashboardService.getEventStats(selectedEventId)
+            const evtId = selectedEventIdRef.current;
+            if (evtId !== null) {
+              dashboardService.getEventStats(evtId)
                 .then((data) => setPerEventStats(data))
                 .catch(() => {});
             }
@@ -292,13 +309,11 @@ export default function AdminDashboard() {
         }
       };
 
-      ws.onclose = (event) => {
-        console.log('[WS Superadmin] Connection closed. Code:', event.code, 'Reason:', event.reason);
+      ws.onclose = () => {
         reconnectTimer = setTimeout(connect, 5000);
       };
 
-      ws.onerror = (event) => {
-        console.error('[WS Superadmin] Connection error:', event);
+      ws.onerror = () => {
         ws?.close();
       };
     };
@@ -312,33 +327,35 @@ export default function AdminDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchDashboardData]);
 
-  // ── Map API employees → AttendanceStats ──
+  // ── Map attendanceLogs → AttendanceStats (same source as attendance-log page) ──
   const attendanceStats = useMemo((): AttendanceStats => {
-    const toUser = (e: EmployeeToday, idx: number): User => ({
-      id: String(e.employeeId || idx),
-      name: e.name,
-      department: e.branch || '',
+    const fmtTime = (iso?: string) =>
+      iso ? new Date(iso).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' }) : '';
+    const toUser = (r: Attendance, idx: number): User => ({
+      id: String(r.id ?? idx),
+      name: r.user?.name ?? '-',
+      department: r.user?.employeeId ?? '',
       position: '',
-      avatar: '',
-      time: e.checkIn || '',
-      status: e.status,
+      avatar: r.user?.avatarUrl ?? '',
+      time: fmtTime(r.checkIn),
+      status: r.status,
     });
-    const absentUsers = employeesToday.filter(e => e.status === 'ABSENT').map(toUser);
-    const lateUsers   = employeesToday.filter(e => e.status === 'LATE').map(toUser);
-    const onTimeUsers = employeesToday.filter(e => e.status === 'ON_TIME' || e.status === 'LEAVE_APPROVED').map(toUser);
-    const leaveUsers  = employeesToday.filter(e => e.status === 'LEAVE').map(toUser);
+    const onTimeUsers = attendanceLogs.filter(r => r.status === 'ON_TIME').map(toUser);
+    const lateUsers   = attendanceLogs.filter(r => r.status === 'LATE' || r.status === 'LATE_APPROVED').map(toUser);
+    const leaveUsers  = attendanceLogs.filter(r => r.status === 'LEAVE_APPROVED').map(toUser);
+    const absentUsers = attendanceLogs.filter(r => r.status === 'ABSENT').map(toUser);
     return {
-      totalEmployees: dashboardSummary?.total ?? employeesToday.length,
-      absentCount:    dashboardSummary?.absent ?? absentUsers.length,
-      leaveCount:     dashboardSummary?.leave ?? leaveUsers.length,
-      lateCount:      dashboardSummary?.late ?? lateUsers.length,
-      onTimeCount:    dashboardSummary?.onTime ?? onTimeUsers.length,
+      totalEmployees: attendanceLogs.length,
+      absentCount:    absentUsers.length,
+      leaveCount:     leaveUsers.length,
+      lateCount:      lateUsers.length,
+      onTimeCount:    onTimeUsers.length,
       absentUsers,
       leaveUsers,
       lateUsers,
       onTimeUsers,
     };
-  }, [dashboardSummary, employeesToday]);
+  }, [attendanceLogs]);
 
   // ── Map API events → EventStats ──
   const eventStats = useMemo((): EventStats => {
@@ -477,11 +494,10 @@ export default function AdminDashboard() {
           { name: "ยังไม่เข้าร่วม", value: perEventStats.notJoinedCount, color: CHART_COLORS.absent },
         ];
       }
-      return [
-        { name: "เข้าร่วม", value: eventStats.activeEvents, color: CHART_COLORS.onTime },
-      ];
+      // ไม่ได้เลือกกิจกรรม → ไม่แสดงข้อมูลการเข้าของพนักงาน
+      return [];
     }
-  }, [statsType, attendanceStats, eventStats, perEventStats]);
+  }, [statsType, attendanceStats, perEventStats]);
 
   // Handlers
   const handleDetailClick = (type: DetailType, users: User[]) => {
@@ -539,12 +555,12 @@ export default function AdminDashboard() {
 
   const statusLabel = (status: string) => {
     switch (status) {
-      case 'ON_TIME':        return { text: 'ตรงเวลา', cls: 'bg-emerald-100 text-emerald-700' };
-      case 'LATE':           return { text: 'มาสาย',   cls: 'bg-orange-100 text-orange-700'   };
-      case 'ABSENT':         return { text: 'ขาดงาน',  cls: 'bg-red-100 text-red-700'         };
-      case 'LEAVE':          return { text: 'ลางาน',   cls: 'bg-blue-100 text-blue-700'       };
-      case 'LEAVE_APPROVED': return { text: 'ลา(มางาน)', cls: 'bg-emerald-100 text-emerald-700' };
-      default:               return { text: 'ไม่ทราบ', cls: 'bg-gray-100 text-gray-600'       };
+      case 'ON_TIME':        return { text: 'ตรงเวลา',       cls: 'bg-green-100 text-green-800'  };
+      case 'LATE':           return { text: 'สาย',            cls: 'bg-yellow-100 text-yellow-800'};
+      case 'LATE_APPROVED':  return { text: 'สาย (อนุมัติ)', cls: 'bg-amber-100 text-amber-800'  };
+      case 'ABSENT':         return { text: 'ขาด',            cls: 'bg-red-100 text-red-800'      };
+      case 'LEAVE_APPROVED': return { text: 'ลา (อนุมัติ)',  cls: 'bg-blue-100 text-blue-800'    };
+      default:               return { text: status,           cls: 'bg-gray-100 text-gray-800'    };
     }
   };
 
@@ -556,39 +572,40 @@ export default function AdminDashboard() {
       {/* Detail Modal */}
       {showDetailModal && (
         <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
-          <Card className="max-w-2xl w-full max-h-[80vh] overflow-hidden">
-            <CardHeader className="border-b border-borderMain flex-row items-center justify-between py-4">
-              <CardTitle className="text-primaryMain">{getDetailTitle()}</CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
+          <Card className="w-full max-w-sm max-h-[70vh] overflow-hidden">
+            <div className="border-b border-borderMain flex flex-row items-center justify-between py-3 px-4">
+              <span className="text-sm font-semibold text-primaryMain">{getDetailTitle()}</span>
+              <button
                 onClick={() => setShowDetailModal(false)}
-                className="text-textMain/60 hover:text-textMain"
+                className="text-textMain/60 hover:text-textMain ml-2 shrink-0"
               >
-                <X className="h-5 w-5" />
-              </Button>
-            </CardHeader>
-            <CardContent className="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <CardContent className="p-3 overflow-y-auto max-h-[calc(70vh-56px)]">
               {detailUsers.length === 0 ? (
-                <div className="text-center py-8 text-textMain/60">
-                  <MapIcon className="w-16 h-16 mx-auto mb-4 text-textMain/30" />
-                  <p className="text-lg font-medium">ไม่มีข้อมูล</p>
+                <div className="text-center py-6 text-textMain/60">
+                  <p className="text-sm">ไม่มีข้อมูล</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {detailUsers.map((user, index) => (
                     <div
-                      key={user.id}
-                      className="bg-secondaryMain rounded-lg p-4 border-2 border-borderMain hover:border-primaryMain transition-colors"
+                      key={`${user.id}-${index}`}
+                      className="bg-secondaryMain rounded-lg p-3 border border-borderMain hover:border-primaryMain transition-colors"
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-primaryMain rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0">
-                          {index + 1}
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center">
+                          {user.avatar ? (
+                            <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-white font-bold text-sm">{user.name.charAt(0).toUpperCase()}</span>
+                          )}
                         </div>
-                        <div className="flex-1">
-                          <h3 className="font-bold text-primaryMain text-lg">{user.name}</h3>
-                          <p className="text-sm text-textMain">{user.department} - {user.position}</p>
-                          {user.time && <p className="text-xs text-textMain/70 mt-1">{user.time}</p>}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-primaryMain text-sm truncate">{user.name}</p>
+                          <p className="text-xs text-textMain/70 truncate">{user.department}{user.position ? ` - ${user.position}` : ''}</p>
+                          {user.time && <p className="text-xs text-textMain/50 mt-0.5">{user.time}</p>}
                         </div>
                       </div>
                     </div>
@@ -676,28 +693,36 @@ export default function AdminDashboard() {
               >
                 <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
                 <MapController center={mapFlyTarget?.center ?? null} zoom={mapFlyTarget?.zoom ?? 16} />
-                {filteredLocations.map((location) => (
-                  <React.Fragment key={location.id}>
-                    <Marker position={[location.latitude, location.longitude]}>
-                      <Popup>
-                        <div className="p-2 min-w-40">
-                          <p className="font-bold text-sm">{location.name}</p>
-                          {location.description && <p className="text-xs text-gray-500 mt-1">{location.description}</p>}
-                          <span className={`text-xs font-medium mt-2 inline-block ${location.statusColor}`}>{location.checkInStatus}</span>
-                        </div>
-                      </Popup>
-                    </Marker>
-                    <Circle
-                      center={[location.latitude, location.longitude]}
-                      radius={location.radius}
-                      pathOptions={{
-                        color: location.type === 'event' ? '#f97316' : '#10b981',
-                        fillColor: location.type === 'event' ? '#f97316' : '#10b981',
-                        fillOpacity: 0.15,
-                      }}
-                    />
-                  </React.Fragment>
-                ))}
+                {filteredLocations.map((location) => {
+                  const isEvent = location.type === 'event';
+                  const icon = isEvent ? mapIcons?.event : mapIcons?.location;
+                  return (
+                    <React.Fragment key={location.id}>
+                      <Marker position={[location.latitude, location.longitude]} icon={icon ?? undefined}>
+                        <Popup>
+                          <div style={{ padding: '4px 2px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: '50%', background: isEvent ? '#f97316' : '#2563eb', flexShrink: 0 }} />
+                              <span style={{ fontWeight: 700, fontSize: 14, color: '#1f2937', lineHeight: 1.3 }}>{location.name}</span>
+                            </div>
+                            {location.description && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{location.description}</div>}
+                            <div style={{ fontSize: 11, color: isEvent ? '#f97316' : '#2563eb', marginTop: 4, padding: '3px 6px', background: isEvent ? '#fef9ef' : '#eff6ff', borderRadius: 4 }}>
+                              {location.checkInStatus}
+                            </div>
+                          </div>
+                        </Popup>
+                      </Marker>
+                      <Circle
+                        center={[location.latitude, location.longitude]}
+                        radius={location.radius}
+                        pathOptions={isEvent
+                          ? { color: '#f97316', weight: 2, dashArray: '6 4', fillColor: '#f97316', fillOpacity: 0.08 }
+                          : { color: '#2563eb', weight: 2, dashArray: '6 4', fillColor: '#3b82f6', fillOpacity: 0.08 }
+                        }
+                      />
+                    </React.Fragment>
+                  );
+                })}
               </MapContainer>
             ) : (
               <div className="h-full flex items-center justify-center bg-gray-100">
@@ -741,7 +766,7 @@ export default function AdminDashboard() {
               </h3>
               <span className="text-xs text-textMain/60">
                 {statsType === 'attendance'
-                  ? `${employeesToday.length} รายการ`
+                  ? `${attendanceLogs.length} รายการ`
                   : (selectedEventId && perEventStats)
                     ? `${perEventStats.isOpenEvent ? perEventStats.joinedCount : perEventStats.joinedCount + perEventStats.notJoinedCount} คน`
                     : `${displayedEvents.length} รายการ`}
@@ -750,50 +775,47 @@ export default function AdminDashboard() {
             <div className="overflow-y-auto flex-1">
               {statsType === 'attendance' ? (() => {
                 const PAGE_SIZE = 10;
-                const totalPages = Math.max(1, Math.ceil(employeesToday.length / PAGE_SIZE));
+                const totalPages = Math.max(1, Math.ceil(attendanceLogs.length / PAGE_SIZE));
                 const safePage = Math.min(tablePage, totalPages);
-                const pageItems = employeesToday.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+                const pageItems = attendanceLogs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+                const fmtTime = (iso?: string) => {
+                  if (!iso) return '-';
+                  return new Date(iso).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+                };
                 return (
                   <>
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
                         <tr>
-                          <th className="px-3 py-2 text-left font-medium text-textMain/70 w-28">รหัสพนักงาน</th>
-                          <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
-                          <th className="px-3 py-2 text-left font-medium text-textMain/70">นามสกุล</th>
-                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
-                          <th className="px-3 py-2 text-left font-medium text-textMain/70">ประเภท</th>
-                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะการเข้างาน</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">พนักงาน</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">กะงาน</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">เข้างาน</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">ออกงาน</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
+                          <th className="px-3 py-2 text-left font-medium text-textMain/70">สาย</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-borderMain/50">
-                        {employeesToday.length === 0 ? (
+                        {attendanceLogs.length === 0 ? (
                           <tr><td colSpan={6} className="text-center py-6 text-gray-400">ไม่พบข้อมูล</td></tr>
                         ) : (
-                          pageItems.map((emp) => {
-                            const nameParts = emp.name.split(' ');
-                            const firstName = nameParts[0] ?? emp.name;
-                            const lastName  = nameParts.slice(1).join(' ');
-                            const sl = statusLabel(emp.status);
-                            const isEvent = emp.eventId != null;
+                          pageItems.map((r, idx) => {
+                            const sl = statusLabel(r.status);
                             return (
-                              <tr key={emp.employeeId} className="hover:bg-gray-50 transition-colors">
-                                <td className="px-3 py-2 font-mono text-textMain/80">{emp.employeeId}</td>
-                                <td className="px-3 py-2 text-textMain">{firstName}</td>
-                                <td className="px-3 py-2 text-textMain">{lastName || '-'}</td>
-                                <td className="px-3 py-2 text-textMain/70">{emp.branch || '-'}</td>
+                              <tr key={`${r.id}-${idx}`} className="hover:bg-gray-50 transition-colors">
                                 <td className="px-3 py-2">
-                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-                                    isEvent ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-                                  }`}>
-                                    {isEvent ? 'กิจกรรม' : 'ปกติ'}
-                                  </span>
+                                  <div className="font-medium text-textMain">{r.user?.name ?? '-'}</div>
+                                  <div className="text-textMain/50 font-mono text-[10px]">{r.user?.employeeId ?? ''}</div>
                                 </td>
+                                <td className="px-3 py-2 text-textMain/70">
+                                  {r.shift ? `${r.shift.name} (${r.shift.startTime}-${r.shift.endTime})` : '-'}
+                                </td>
+                                <td className="px-3 py-2 text-textMain/70">{fmtTime(r.checkIn)}</td>
+                                <td className="px-3 py-2 text-textMain/70">{fmtTime(r.checkOut)}</td>
                                 <td className="px-3 py-2">
-                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>
-                                    {sl.text}
-                                  </span>
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sl.cls}`}>{sl.text}</span>
                                 </td>
+                                <td className="px-3 py-2 text-textMain/70">{(() => { const m = r.lateMinutes ?? 0; if (m <= 0) return '-'; const h = Math.floor(m / 60); const mn = m % 60; return h > 0 && mn > 0 ? `${h} ชม. ${mn} น.` : h > 0 ? `${h} ชม.` : `${mn} น.`; })()}</td>
                               </tr>
                             );
                           })
@@ -966,20 +988,18 @@ export default function AdminDashboard() {
           <div className="flex shrink-0 border-b-2 border-borderMain">
             <button
               onClick={() => { setStatsType('attendance'); setTablePage(1); }}
-              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-                statsType === 'attendance'
-                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
-                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+              style={statsType === 'attendance' ? { color: '#F97316', borderBottom: '2px solid #F97316' } : {}}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors bg-white ${
+                statsType === 'attendance' ? '' : 'text-textMain/60 hover:text-textMain bg-gray-50'
               }`}
             >
               การเข้างาน
             </button>
             <button
               onClick={() => { setStatsType('event'); setTablePage(1); }}
+              style={statsType === 'event' ? { color: '#F97316', borderBottom: '2px solid #F97316' } : {}}
               className={`flex-1 py-3 text-sm font-semibold transition-colors border-l border-borderMain ${
-                statsType === 'event'
-                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
-                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+                statsType === 'event' ? 'bg-white' : 'text-textMain/60 hover:text-textMain bg-gray-50'
               }`}
             >
               กิจกรรม
@@ -1071,16 +1091,9 @@ export default function AdminDashboard() {
                 if (item.name === 'ขาดงาน') detailFn = () => handleDetailClick('absent', attendanceStats.absentUsers);
                 if (item.name === 'ลางาน')  detailFn = () => handleDetailClick('leave',  attendanceStats.leaveUsers);
                 if (item.name === 'มาสาย')  detailFn = () => handleDetailClick('late',   attendanceStats.lateUsers);
-              } else {
-                if (perEventStats) {
-                  if (item.name === 'เข้าร่วม') detailFn = () => handleDetailClick('joined', perEventStats.joined.map((p, i) => ({ id: String(i), name: p.name, department: p.branch, position: '', avatar: '', time: p.checkIn || '', status: p.status || '' })));
-                  if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', perEventStats.notJoined.map((p, i) => ({ id: String(i), name: p.name, department: p.branch, position: '', avatar: '', time: '', status: '' })));
-                } else {
-                  if (item.name === 'เข้าร่วม')    detailFn = () => handleDetailClick('joined', eventStats.joinedUsers);
-                  if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', eventStats.notParticipatedUsers);
-                  if (item.name === 'ลางาน')      detailFn = () => handleDetailClick('leave', eventStats.leaveEventUsers);
-                  if (item.name === 'มาสาย')      detailFn = () => handleDetailClick('late',  eventStats.lateEventUsers);
-                }
+              } else if (perEventStats) {
+                if (item.name === 'เข้าร่วม') detailFn = () => handleDetailClick('joined', perEventStats.joined.map((p, i) => ({ id: String(i), name: p.name, department: p.branch, position: '', avatar: '', time: p.checkIn || '', status: p.status || '' })));
+                if (item.name === 'ยังไม่เข้าร่วม') detailFn = () => handleDetailClick('notParticipated', perEventStats.notJoined.map((p, i) => ({ id: String(i), name: p.name, department: p.branch, position: '', avatar: '', time: '', status: '' })));
               }
               const pct = ((item.value / totalChart) * 100).toFixed(0);
               return (
@@ -1140,12 +1153,7 @@ export default function AdminDashboard() {
                       </div>
                     )}
                   </>
-                ) : (
-                  <div className="flex justify-between text-xs">
-                    <span className="text-textMain/60">ผู้เข้าร่วมวันนี้</span>
-                    <span className="font-bold text-emerald-600">{eventStats.activeEvents} คน</span>
-                  </div>
-                )}
+                ) : null}
               </>
             )}
           </div>

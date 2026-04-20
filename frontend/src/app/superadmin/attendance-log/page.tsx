@@ -64,6 +64,28 @@ function formatThaiTime(iso: string | undefined): string {
   });
 }
 
+/** format ISO string → "DD/MM/YYYY" (วันที่ไทย) */
+function formatThaiDate(iso: string | undefined): string {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleDateString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+/** format minutes → "X ชม. Y น." or "Y น." */
+function fmtLate(minutes: number): string {
+  if (!minutes || minutes <= 0) return '-';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h} ชม. ${m} น.`;
+  if (h > 0) return `${h} ชม.`;
+  return `${m} น.`;
+}
+
 // ========== Component ==========
 
 export default function AttendanceLogPage() {
@@ -287,10 +309,11 @@ export default function AttendanceLogPage() {
                 <tr className="text-left border-b border-gray-200">
                   <th className="px-3 py-3 font-semibold text-gray-600">พนักงาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">กะงาน</th>
+                  <th className="px-3 py-3 font-semibold text-gray-600">วันที่</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">เข้างาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">ออกงาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">สถานะ</th>
-                  <th className="px-3 py-3 font-semibold text-gray-600">สาย (นาที)</th>
+                  <th className="px-3 py-3 font-semibold text-gray-600">สาย</th>
                   <th className="px-3 py-3 font-semibold text-gray-600 text-right">จัดการ</th>
                 </tr>
               </thead>
@@ -312,6 +335,8 @@ export default function AttendanceLogPage() {
                           <span className="text-gray-400">-</span>
                         )}
                       </td>
+                      {/* วันที่ */}
+                      <td className="px-3 py-3 text-gray-600">{formatThaiDate(r.checkIn)}</td>
                       {/* เข้างาน */}
                       <td className="px-3 py-3 text-gray-600">{formatThaiTime(r.checkIn)}</td>
                       {/* ออกงาน */}
@@ -321,7 +346,7 @@ export default function AttendanceLogPage() {
                         <Badge className={`${st.color} border-0 text-xs`}>{st.label}</Badge>
                       </td>
                       {/* สาย */}
-                      <td className="px-3 py-3 text-gray-600">{r.lateMinutes ?? 0}</td>
+                      <td className="px-3 py-3 text-gray-600">{fmtLate(r.lateMinutes ?? 0)}</td>
                       {/* ปุ่มจัดการ */}
                       <td className="px-3 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -415,7 +440,7 @@ export default function AttendanceLogPage() {
               <DetailRow label="เข้างาน" value={formatThaiDateTime(detailRecord.checkIn)} />
               <DetailRow label="ออกงาน" value={formatThaiDateTime(detailRecord.checkOut)} />
               <DetailRow label="สถานะ" value={getStatusOption(detailRecord.status).label} />
-              <DetailRow label="สาย (นาที)" value={String(detailRecord.lateMinutes ?? 0)} />
+              <DetailRow label="สาย" value={fmtLate(detailRecord.lateMinutes ?? 0)} />
               <DetailRow label="เวลาทำงานรวม (นาที)" value={detailRecord.workedMinutes != null ? String(detailRecord.workedMinutes) : '-'} />
               <DetailRow label="หักพัก (นาที)" value={detailRecord.breakDeductedMinutes != null ? String(detailRecord.breakDeductedMinutes) : '-'} />
               <DetailRow label="หักลารายชั่วโมง (นาที)" value={detailRecord.leaveDeductedMinutes != null ? String(detailRecord.leaveDeductedMinutes) : '-'} />

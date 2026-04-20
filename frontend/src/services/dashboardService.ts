@@ -27,6 +27,7 @@ export interface EmployeeToday {
   checkOut: string | null;
   lateMinutes: number;
   eventId: number | null;
+  avatarUrl?: string | null;
 }
 
 export interface BranchMapItem {

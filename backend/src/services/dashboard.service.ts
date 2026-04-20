@@ -122,7 +122,28 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
 
   const queryBranchId = user.role === 'SUPERADMIN' ? branchId : user.branchId;
 
-  // ดึง attendance records วันนี้
+  // ① ดึงพนักงานทั้งหมดของสาขาเป็น Base List
+  const allUsers = await prisma.user.findMany({
+    where: {
+      branchId: queryBranchId,
+      status: 'ACTIVE',
+    },
+    select: {
+      userId: true,
+      employeeId: true,
+      firstName: true,
+      lastName: true,
+      avatarUrl: true,
+      branch: {
+        select: {
+          branchId: true,
+          name: true,
+        },
+      },
+    },
+  });
+
+  // ② ดึง attendance records วันนี้
   const attendances = await prisma.attendance.findMany({
     where: {
       user: {
@@ -140,6 +161,7 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
           employeeId: true,
           firstName: true,
           lastName: true,
+          avatarUrl: true,
           branch: {
             select: {
               branchId: true,
@@ -154,7 +176,7 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
     },
   });
 
-  // ดึงพนักงานที่ลาอนุมัติแล้ววันนี้ (จาก LeaveRequest table)
+  // ③ ดึงพนักงานที่ลาอนุมัติแล้ววันนี้ (จาก LeaveRequest table)
   const approvedLeaves = await prisma.leaveRequest.findMany({
     where: {
       status: 'APPROVED',
@@ -182,46 +204,68 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
     },
   });
 
-  // รวมข้อมูล attendance + leave
-  const attendanceRows = attendances.map((att) => ({
-    employeeId: att.user.employeeId,
-    name: `${att.user.firstName} ${att.user.lastName}`,
-    branch: att.user.branch?.name || 'N/A',
-    status: att.status,
-    checkIn: att.checkIn.toLocaleTimeString('th-TH', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      timeZone: 'Asia/Bangkok',
-    }),
-    checkOut: att.checkOut
-      ? att.checkOut.toLocaleTimeString('th-TH', {
+  // ④ Map ข้อมูลเข้าด้วยกัน
+  const leaveMap = new Map(approvedLeaves.map((lr) => [lr.user.userId, lr]));
+  const attendedUserIds = new Set(attendances.map((a) => a.user.userId));
+
+  // แสดงหนึ่งแถวต่อหนึ่ง attendance record (เพื่อให้ event + regular แสดงแยกกัน)
+  const rows: {
+    employeeId: string;
+    name: string;
+    branch: string;
+    status: string;
+    checkIn: string | null;
+    checkOut: string | null;
+    lateMinutes: number;
+    eventId: number | null;
+    avatarUrl: string | null;
+  }[] = [];
+
+  for (const att of attendances) {
+    rows.push({
+      employeeId: att.user.employeeId,
+      name: `${att.user.firstName} ${att.user.lastName}`,
+      branch: att.user.branch?.name || 'N/A',
+      status: att.status,
+      checkIn: att.checkIn.toLocaleTimeString('th-TH', {
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
         timeZone: 'Asia/Bangkok',
-      })
-      : null,
-    lateMinutes: att.lateMinutes || 0,
-    eventId: att.eventId ?? null,
-  }));
+      }),
+      checkOut: att.checkOut
+        ? att.checkOut.toLocaleTimeString('th-TH', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+          timeZone: 'Asia/Bangkok',
+        })
+        : null,
+      lateMinutes: att.lateMinutes || 0,
+      eventId: att.eventId ?? null,
+      avatarUrl: (att.user as any).avatarUrl ?? null,
+    });
+  }
 
-  // เอา userId ที่มี attendance แล้วไม่ต้องซ้ำ
-  const attendedUserIds = new Set(attendances.map(a => a.user.userId));
+  // เพิ่มแถวสำหรับพนักงานที่ยังไม่ได้ check-in
+  for (const u of allUsers) {
+    if (!attendedUserIds.has(u.userId)) {
+      const leave = leaveMap.get(u.userId);
+      rows.push({
+        employeeId: u.employeeId,
+        name: `${u.firstName} ${u.lastName}`,
+        branch: u.branch?.name || 'N/A',
+        status: leave ? 'LEAVE' : 'NOT_CHECKED_IN',
+        checkIn: null,
+        checkOut: null,
+        lateMinutes: 0,
+        eventId: null,
+        avatarUrl: (u as any).avatarUrl ?? null,
+      });
+    }
+  }
 
-  const leaveRows = approvedLeaves
-    .filter(lr => !attendedUserIds.has(lr.user.userId))
-    .map((lr) => ({
-      employeeId: lr.user.employeeId,
-      name: `${lr.user.firstName} ${lr.user.lastName}`,
-      branch: lr.user.branch?.name || 'N/A',
-      status: 'LEAVE' as const,
-      checkIn: null,
-      checkOut: null,
-      lateMinutes: 0,
-    }));
-
-  return [...attendanceRows, ...leaveRows];
+  return rows;
 }
 
 /**

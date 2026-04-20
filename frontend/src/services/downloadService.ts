@@ -8,8 +8,9 @@
 
 import api from './api';
 
-export type ReportType = 'attendance' | 'shift';
-export type ReportFormat = 'excel';
+export type ReportType = 'attendance';
+export type ReportFormat = 'excel' | 'pdf';
+export type FilterType = 'all' | 'shift' | 'event';
 
 export interface DownloadReportParams {
   type: ReportType;
@@ -17,6 +18,7 @@ export interface DownloadReportParams {
   startDate?: string;
   endDate?: string;
   branchId?: number;
+  filterType?: FilterType;
 }
 
 export interface DownloadHistoryItem {
@@ -77,7 +79,7 @@ export const downloadService = {
     // อ่านชื่อไฟล์จาก Content-Disposition header
     const disposition = res.headers['content-disposition'] || '';
     const match = disposition.match(/filename="?([^";\n]+)"?/);
-    const ext = 'xlsx';
+    const ext = params.format === 'pdf' ? 'pdf' : 'xlsx';
     const filename = match?.[1] || `${params.type}_report.${ext}`;
 
     // สร้าง blob URL และ trigger download

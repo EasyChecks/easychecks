@@ -67,6 +67,7 @@ function mapAttendance(raw: any): Attendance {
       ...raw.user,
       id: raw.user.userId ?? raw.user.id,
       name: raw.user.name ?? `${raw.user.firstName ?? ''} ${raw.user.lastName ?? ''}`.trim(),
+      avatarUrl: raw.user.avatarUrl ?? undefined,
     } : undefined,
   };
 }

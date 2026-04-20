@@ -21,7 +21,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import dashboardService, { AttendanceSummary as DashboardSummary, EmployeeToday, LocationEvent, BranchMapItem, EventStatsResponse } from "@/services/dashboardService";
 import eventService, { EventItem as ApiEventItem } from "@/services/eventService";
 import locationService, { LocationItem } from "@/services/locationService";
-import type L from "leaflet";
+import type { DivIcon } from 'leaflet';
+
+// SVG icon HTML shared with EventMap (mapping-events page)
+const LOCATION_ICON_HTML = `<svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 3px 6px rgba(29,78,216,0.5))"><path d="M16 2C8.27 2 2 8.27 2 16c0 9.94 14 28 14 28S30 25.94 30 16C30 8.27 23.73 2 16 2z" fill="#2563eb"/><circle cx="16" cy="16" r="5" fill="white"/></svg>`;
+const EVENT_ICON_HTML = `<svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 3px 6px rgba(194,65,12,0.5))"><path d="M16 2C8.27 2 2 8.27 2 16c0 9.94 14 28 14 28S30 25.94 30 16C30 8.27 23.73 2 16 2z" fill="#ea580c"/><circle cx="16" cy="16" r="5" fill="white"/></svg>`;
 
 // Dynamic import for Map components (client-side only)
 const MapContainer = dynamic(
@@ -61,18 +65,6 @@ const MapController = dynamic(
   { ssr: false }
 );
 
-
-// Fix Leaflet default marker icon 404 (icons load relative to page path otherwise)
-if (typeof window !== "undefined") {
-  import("leaflet").then((L) => {
-    delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
-      iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
-      shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
-    });
-  });
-}
 
 // Types
 interface User {
@@ -173,6 +165,21 @@ export default function AdminDashboard() {
   const [perEventStatsLoading, setPerEventStatsLoading] = useState(false);
   const [mapFlyTarget, setMapFlyTarget] = useState<{ center: [number, number]; zoom: number } | null>(null);
   const mapHomeRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
+  const [mapIcons, setMapIcons] = useState<{ location: DivIcon; event: DivIcon } | null>(null);
+
+  useEffect(() => {
+    import('leaflet').then((L) => {
+      const iconOpts = { className: '', iconSize: [32, 42] as [number, number], iconAnchor: [16, 42] as [number, number], popupAnchor: [0, -44] as [number, number] };
+      setMapIcons({
+        location: L.divIcon({ ...iconOpts, html: LOCATION_ICON_HTML }),
+        event: L.divIcon({ ...iconOpts, html: EVENT_ICON_HTML }),
+      });
+    });
+  }, []);
+  const selectedDateRef = useRef(selectedDate);
+  const selectedEventIdRef = useRef(selectedEventId);
+  useEffect(() => { selectedDateRef.current = selectedDate; }, [selectedDate]);
+  useEffect(() => { selectedEventIdRef.current = selectedEventId; }, [selectedEventId]);
 
   // ── Fetch dashboard data ──
   const fetchDashboardData = useCallback(async (dateParam?: string) => {
@@ -239,33 +246,31 @@ export default function AdminDashboard() {
         .replace(/^http/, 'ws')
         .replace('/api', '');
 
-    // Skip WS on remote deployments that don't support WebSocket
     if (wsBase.includes('onrender.com') || wsBase.includes('vercel.app')) return;
 
     const url = `${wsBase}/ws/attendance`;
-    console.log('[WS Admin] wsBase:', wsBase);
-    console.log('[WS Admin] Connecting to:', url);
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      console.log('[WS Admin] new WebSocket(', url, ')');
       ws = new WebSocket(url);
 
       ws.onopen = () => {
-        console.log('[WS Admin] Connected successfully');
+        console.log('[WS] Connected to', url);
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'attendance_update') {
-            const dateStr = format(selectedDate, 'yyyy-MM-dd');
+            const date = selectedDateRef.current;
+            const dateStr = format(date, 'yyyy-MM-dd');
             const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
             const dateParam = isToday ? undefined : dateStr;
             fetchDashboardData(dateParam);
-            if (selectedEventId !== null) {
-              dashboardService.getEventStats(selectedEventId)
+            const evtId = selectedEventIdRef.current;
+            if (evtId !== null) {
+              dashboardService.getEventStats(evtId)
                 .then((data) => setPerEventStats(data))
                 .catch(() => {});
             }
@@ -275,13 +280,11 @@ export default function AdminDashboard() {
         }
       };
 
-      ws.onclose = (event) => {
-        console.log('[WS Admin] Connection closed. Code:', event.code, 'Reason:', event.reason);
+      ws.onclose = () => {
         reconnectTimer = setTimeout(connect, 5000);
       };
 
-      ws.onerror = (event) => {
-        console.error('[WS Admin] Connection error:', event);
+      ws.onerror = () => {
         ws?.close();
       };
     };
@@ -302,7 +305,7 @@ export default function AdminDashboard() {
       name: e.name,
       department: e.branch || '',
       position: '',
-      avatar: '',
+      avatar: e.avatarUrl ?? '',
       time: e.checkIn || '',
       status: e.status,
     });
@@ -535,39 +538,40 @@ export default function AdminDashboard() {
       {/* Detail Modal */}
       {showDetailModal && (
         <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
-          <Card className="max-w-2xl w-full max-h-[80vh] overflow-hidden">
-            <CardHeader className="border-b border-borderMain flex-row items-center justify-between py-4">
-              <CardTitle className="text-primaryMain">{getDetailTitle()}</CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
+          <Card className="w-full max-w-sm max-h-[70vh] overflow-hidden">
+            <div className="border-b border-borderMain flex flex-row items-center justify-between py-3 px-4">
+              <span className="text-sm font-semibold text-primaryMain">{getDetailTitle()}</span>
+              <button
                 onClick={() => setShowDetailModal(false)}
-                className="text-textMain/60 hover:text-textMain"
+                className="text-textMain/60 hover:text-textMain ml-2 shrink-0"
               >
-                <X className="h-5 w-5" />
-              </Button>
-            </CardHeader>
-            <CardContent className="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <CardContent className="p-3 overflow-y-auto max-h-[calc(70vh-56px)]">
               {detailUsers.length === 0 ? (
-                <div className="text-center py-8 text-textMain/60">
-                  <MapIcon className="w-16 h-16 mx-auto mb-4 text-textMain/30" />
-                  <p className="text-lg font-medium">ไม่มีข้อมูล</p>
+                <div className="text-center py-6 text-textMain/60">
+                  <p className="text-sm">ไม่มีข้อมูล</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {detailUsers.map((user, index) => (
                     <div
-                      key={user.id}
-                      className="bg-secondaryMain rounded-lg p-4 border-2 border-borderMain hover:border-primaryMain transition-colors"
+                      key={`${user.id}-${index}`}
+                      className="bg-secondaryMain rounded-lg p-3 border border-borderMain hover:border-primaryMain transition-colors"
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-primaryMain rounded-full flex items-center justify-center text-white font-bold text-lg shrink-0">
-                          {index + 1}
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center">
+                          {user.avatar ? (
+                            <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-white font-bold text-sm">{user.name.charAt(0).toUpperCase()}</span>
+                          )}
                         </div>
-                        <div className="flex-1">
-                          <h3 className="font-bold text-primaryMain text-lg">{user.name}</h3>
-                          <p className="text-sm text-textMain">{user.department} - {user.position}</p>
-                          {user.time && <p className="text-xs text-textMain/70 mt-1">{user.time}</p>}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-primaryMain text-sm truncate">{user.name}</p>
+                          <p className="text-xs text-textMain/70 truncate">{user.department}{user.position ? ` - ${user.position}` : ''}</p>
+                          {user.time && <p className="text-xs text-textMain/50 mt-0.5">{user.time}</p>}
                         </div>
                       </div>
                     </div>
@@ -642,28 +646,36 @@ export default function AdminDashboard() {
               >
                 <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
                 <MapController center={mapFlyTarget?.center ?? null} zoom={mapFlyTarget?.zoom ?? 16} />
-                {filteredLocations.map((location) => (
-                  <React.Fragment key={location.id}>
-                    <Marker position={[location.latitude, location.longitude]}>
-                      <Popup>
-                        <div className="p-2 min-w-40">
-                          <p className="font-bold text-sm">{location.name}</p>
-                          {location.description && <p className="text-xs text-gray-500 mt-1">{location.description}</p>}
-                          <span className={`text-xs font-medium mt-2 inline-block ${location.statusColor}`}>{location.checkInStatus}</span>
-                        </div>
-                      </Popup>
-                    </Marker>
-                    <Circle
-                      center={[location.latitude, location.longitude]}
-                      radius={location.radius}
-                      pathOptions={{
-                        color: location.type === 'event' ? '#f97316' : '#10b981',
-                        fillColor: location.type === 'event' ? '#f97316' : '#10b981',
-                        fillOpacity: 0.15,
-                      }}
-                    />
-                  </React.Fragment>
-                ))}
+                {filteredLocations.map((location) => {
+                  const isEvent = location.type === 'event';
+                  const icon = isEvent ? mapIcons?.event : mapIcons?.location;
+                  return (
+                    <React.Fragment key={location.id}>
+                      <Marker position={[location.latitude, location.longitude]} icon={icon ?? undefined}>
+                        <Popup>
+                          <div style={{ padding: '4px 2px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: '50%', background: isEvent ? '#f97316' : '#2563eb', flexShrink: 0 }} />
+                              <span style={{ fontWeight: 700, fontSize: 14, color: '#1f2937', lineHeight: 1.3 }}>{location.name}</span>
+                            </div>
+                            {location.description && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{location.description}</div>}
+                            <div style={{ fontSize: 11, color: isEvent ? '#f97316' : '#2563eb', marginTop: 4, padding: '3px 6px', background: isEvent ? '#fef9ef' : '#eff6ff', borderRadius: 4 }}>
+                              {location.checkInStatus}
+                            </div>
+                          </div>
+                        </Popup>
+                      </Marker>
+                      <Circle
+                        center={[location.latitude, location.longitude]}
+                        radius={location.radius}
+                        pathOptions={isEvent
+                          ? { color: '#f97316', weight: 2, dashArray: '6 4', fillColor: '#f97316', fillOpacity: 0.08 }
+                          : { color: '#2563eb', weight: 2, dashArray: '6 4', fillColor: '#3b82f6', fillOpacity: 0.08 }
+                        }
+                      />
+                    </React.Fragment>
+                  );
+                })}
               </MapContainer>
             ) : (
               <div className="h-full flex items-center justify-center bg-gray-100">
@@ -932,20 +944,18 @@ export default function AdminDashboard() {
           <div className="flex shrink-0 border-b-2 border-borderMain">
             <button
               onClick={() => { setStatsType('attendance'); setTablePage(1); }}
-              className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-                statsType === 'attendance'
-                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
-                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+              style={statsType === 'attendance' ? { color: '#F97316', borderBottom: '2px solid #F97316' } : {}}
+              className={`flex-1 py-3 text-sm font-semibold transition-colors bg-white ${
+                statsType === 'attendance' ? '' : 'text-textMain/60 hover:text-textMain bg-gray-50'
               }`}
             >
               การเข้างาน
             </button>
             <button
               onClick={() => { setStatsType('event'); setTablePage(1); }}
+              style={statsType === 'event' ? { color: '#F97316', borderBottom: '2px solid #F97316' } : {}}
               className={`flex-1 py-3 text-sm font-semibold transition-colors border-l border-borderMain ${
-                statsType === 'event'
-                  ? 'text-primaryMain border-b-2 border-primaryMain bg-white'
-                  : 'text-textMain/60 hover:text-textMain bg-gray-50'
+                statsType === 'event' ? 'bg-white' : 'text-textMain/60 hover:text-textMain bg-gray-50'
               }`}
             >
               กิจกรรม

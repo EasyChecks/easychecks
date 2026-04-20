@@ -61,6 +61,18 @@ function formatThaiTime(iso: string | undefined): string {
   });
 }
 
+/** format ISO string → "DD/MM/YYYY" (วันที่ไทย) */
+function formatThaiDate(iso: string | undefined): string {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleDateString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
 // ========== Component ==========
 
 export default function AttendanceLogPage() {
@@ -284,6 +296,7 @@ export default function AttendanceLogPage() {
                 <tr className="text-left border-b border-gray-200">
                   <th className="px-3 py-3 font-semibold text-gray-600">พนักงาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">กะงาน</th>
+                  <th className="px-3 py-3 font-semibold text-gray-600">วันที่</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">เข้างาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">ออกงาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">สถานะ</th>
@@ -309,6 +322,8 @@ export default function AttendanceLogPage() {
                           <span className="text-gray-400">-</span>
                         )}
                       </td>
+                      {/* วันที่ */}
+                      <td className="px-3 py-3 text-gray-600">{formatThaiDate(r.checkIn)}</td>
                       {/* เข้างาน */}
                       <td className="px-3 py-3 text-gray-600">{formatThaiTime(r.checkIn)}</td>
                       {/* ออกงาน */}

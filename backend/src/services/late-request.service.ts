@@ -3,7 +3,7 @@ import type { LateRequest, ApprovalStatus, Gender, ApprovalActionType, Role } fr
 import { Prisma } from '@prisma/client';
 import { differenceInMinutes, parse } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
-import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
+import { ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
 
 /**
  * Late Request Service - จัดการการขอมาสาย
@@ -81,6 +81,34 @@ interface LateApproverSummary {
   gender?: Gender;
 }
 
+interface LateRequestUserSummary {
+  userId: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  employeeId?: string;
+  role?: string;
+  gender?: Gender;
+}
+
+interface LateRequestFrontend {
+  id: number;
+  userId: number;
+  attendanceId: number | null;
+  requestDate: Date;
+  scheduledTime: string;
+  actualTime: string;
+  lateMinutes: number;
+  reason: string;
+  status: ApprovalStatus;
+  attachmentUrl: string | null;
+  adminComment: string | null;
+  rejectionReason: string | null;
+  approvedByUserId: number | null;
+  user?: LateRequestUserSummary | null;
+  approver?: LateApproverSummary | null;
+}
+
 type LateRequestWithApprover = LateRequest & {
   approvedByUserId: number | null;
   approver: LateApproverSummary | null;
@@ -145,7 +173,15 @@ async function getLatestLateApprovalMap(lateRequestIds: number[]): Promise<Map<n
   return latestMap;
 }
 
-function mapLateRequestForFrontend(request: LateRequest & { approver?: any; adminComment?: any; rejectionReason?: any; approvedByUserId?: any; user?: any }): any {
+function mapLateRequestForFrontend(
+  request: LateRequest & {
+    approver?: LateApproverSummary | null;
+    adminComment?: string | null;
+    rejectionReason?: string | null;
+    approvedByUserId?: number | null;
+    user?: LateRequestUserSummary | null;
+  }
+): LateRequestFrontend {
   return {
     id: request.lateRequestId,
     userId: request.userId,
@@ -157,11 +193,11 @@ function mapLateRequestForFrontend(request: LateRequest & { approver?: any; admi
     reason: request.reason,
     status: request.status,
     attachmentUrl: request.attachmentUrl,
-    adminComment: request.adminComment,
-    rejectionReason: request.rejectionReason,
-    approvedByUserId: request.approvedByUserId,
-    user: request.user,
-    approver: request.approver,
+    adminComment: request.adminComment ?? null,
+    rejectionReason: request.rejectionReason ?? null,
+    approvedByUserId: request.approvedByUserId ?? null,
+    user: request.user ?? null,
+    approver: request.approver ?? null,
   };
 }
 
@@ -173,14 +209,14 @@ function attachLateApprover<T extends LateRequest>(
     const latest = latestMap.get(request.lateRequestId);
     const approver = latest
       ? {
-          userId: latest.actor.userId,
-          firstName: latest.actor.firstName,
-          lastName: latest.actor.lastName,
-          employeeId: latest.actor.employeeId,
-          email: latest.actor.email,
-          role: latest.actor.role,
-          gender: latest.actor.gender,
-        }
+        userId: latest.actor.userId,
+        firstName: latest.actor.firstName,
+        lastName: latest.actor.lastName,
+        employeeId: latest.actor.employeeId,
+        email: latest.actor.email,
+        role: latest.actor.role,
+        gender: latest.actor.gender,
+      }
       : null;
 
     return {
@@ -209,7 +245,7 @@ function calculateLateMinutes(scheduledTime: string, actualTime: string): number
 
     const minutes = differenceInMinutes(actual, scheduled);
     return minutes > 0 ? minutes : 0;
-  } catch (error) {
+  } catch (_error) {
     throw new Error('รูปแบบเวลาไม่ถูกต้อง กรุณาใช้รูปแบบ HH:MM');
   }
 }
@@ -353,7 +389,7 @@ function parseDateSearch(search: string): { start: Date; end: Date } | null {
  */
 async function createLateRequest(
   data: CreateLateRequestDTO
-): Promise<LateRequestWithApprover> {
+): Promise<LateRequestFrontend> {
   // ✅ Validate รูปแบบเวลา HH:MM (00:00 - 23:59)
   // เพื่อป้องกัน invalid format ก่อนที่จะคำนวณ
   const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -433,8 +469,8 @@ async function getLateRequestsByUser(
   skip?: number,
   take?: number,
   query?: string
-): Promise<{ data: LateRequestWithApprover[]; total: number }> {
-  const where: any = { 
+): Promise<{ data: LateRequestFrontend[]; total: number }> {
+  const where: Prisma.LateRequestWhereInput = { 
     userId,
     deletedAt: null,
   };
@@ -445,7 +481,7 @@ async function getLateRequestsByUser(
 
   const search = query?.trim();
   if (search) {
-    const orConditions: any[] = [
+    const orConditions: Prisma.LateRequestWhereInput[] = [
       { reason: { contains: search, mode: 'insensitive' } },
       { rejectionReason: { contains: search, mode: 'insensitive' } },
     ];
@@ -519,7 +555,7 @@ async function getLateRequestsByUser(
  */
 async function getLateRequestById(
   lateRequestId: number
-): Promise<LateRequestWithApprover | null> {
+): Promise<LateRequestFrontend | null> {
   const lateRequest = await prisma.lateRequest.findFirst({
     where: { 
       lateRequestId,
@@ -554,7 +590,7 @@ async function getLateRequestById(
 async function updateLateRequest(
   lateRequestId: number,
   data: UpdateLateRequestDTO
-): Promise<LateRequestWithApprover> {
+): Promise<LateRequestFrontend> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
   });
@@ -700,10 +736,10 @@ async function getAllLateRequests(
   take?: number,
   userRole?: string, // Current user's role for approval hierarchy filtering
   currentUserId?: number // Current user's ID to include self-requests
-): Promise<{ data: LateRequestWithApprover[]; total: number }> {
+): Promise<{ data: LateRequestFrontend[]; total: number }> {
   console.log('[getAllLateRequests] Called with:', { status, skip, take, userRole, currentUserId });
   
-  const where: any = { 
+  const where: Prisma.LateRequestWhereInput = { 
     deletedAt: null,
     // Default to PENDING if not specified (for approval workflow)
     status: status || 'PENDING',
@@ -716,7 +752,7 @@ async function getAllLateRequests(
   // Also include self-requests (where userId = current user)
   if (normalizedRole === 'ADMIN') {
     // ADMIN can only approve MANAGER and USER requests, OR their own requests
-    const orConditions: any[] = [
+    const orConditions: Prisma.LateRequestWhereInput[] = [
       { user: { role: { in: ['MANAGER', 'USER'] } } },
     ];
     if (currentUserId) {
@@ -725,7 +761,7 @@ async function getAllLateRequests(
     where.OR = orConditions;
   } else if (normalizedRole === 'MANAGER') {
     // MANAGER can only approve USER requests, OR their own requests
-    const orConditions: any[] = [
+    const orConditions: Prisma.LateRequestWhereInput[] = [
       { user: { role: { in: ['USER'] } } },
     ];
     if (currentUserId) {
@@ -778,7 +814,7 @@ async function getAllLateRequests(
 async function approveLateRequest(
   lateRequestId: number,
   data: ApproveLateRequestDTO
-): Promise<LateRequestWithApprover> {
+): Promise<LateRequestFrontend> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
     include: {
@@ -856,7 +892,7 @@ async function approveLateRequest(
 async function rejectLateRequest(
   lateRequestId: number,
   data: RejectLateRequestDTO
-): Promise<LateRequestWithApprover> {
+): Promise<LateRequestFrontend> {
   const lateRequest = await prisma.lateRequest.findUnique({
     where: { lateRequestId },
     include: {

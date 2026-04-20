@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Thermometer, FileText, Plane, Heart, Shield, BookOpen, Stethoscope, Sparkles, Clock, Pencil, X, Trash2, ChevronDown } from 'lucide-react';
+import { Thermometer, FileText, Plane, Heart, Shield, BookOpen, Stethoscope, Sparkles, Pencil, X, Trash2, ChevronDown } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -884,7 +884,6 @@ function MyLeaveTab() {
           </div>
         )}
         {historyRequests.length < historyTotal && (
-        {historyRequests.length < historyTotal && (
           <Button
             type="button"
             variant="outline"
@@ -1175,92 +1174,18 @@ function MyLateTab() {
   const [editAttachmentPreview, setEditAttachmentPreview] = useState<string>('');
   const [editImagePreviewUrl, setEditImagePreviewUrl] = useState<string>('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
-  const editableLateRequests = historyRequests.filter((req) => req.status === 'PENDING');
-  const readonlyLateRequests = historyRequests.filter((req) => req.status !== 'PENDING');
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const h = await lateRequestService.getMyLateRequests(buildHistoryParams(0));
-        setHistoryRequests(h.lateRequests);
-        setHistoryTotal(h.total);
-      } catch {
-        // keep empty
-      } finally {
-        setHistoryLoading(false);
-      }
-    };
-        ) : (
-          <div className="space-y-4">
-            {editableLateRequests.length > 0 && (
-              <div>
-                <div className="space-y-2">
-                  {editableLateRequests.map((req) => (
-                    <div
-                      key={req.id}
-                      onClick={() => handleEditOpen(req)}
-                      className="rounded-2xl border border-orange-200 bg-orange-50 transition-all active:scale-[0.98] cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3 p-3.5">
-                        <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
-                          <Clock className="w-5 h-5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-gray-900 text-sm">{new Date(req.requestDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
-                            <StatusBadge status={req.status} />
-                          </div>
-                          <div className="text-xs text-gray-500 mt-0.5">
-                            กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
-                          </div>
-                          <div className="text-xs text-orange-600 font-medium mt-0.5">สาย {req.lateMinutes} นาที</div>
-                          {req.reason && <div className="text-xs text-gray-600 mt-1 truncate">หมายเหตุ: {req.reason}</div>}
-                          {req.rejectionReason && <div className="text-xs text-red-600 mt-1">เหตุผล: {req.rejectionReason}</div>}
-                        </div>
-                        <div className="shrink-0 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center">
-                          <Pencil className="w-3.5 h-3.5 text-orange-500" />
-                        </div>
-                      </div>
-                      <div className="px-3.5 pb-2.5 -mt-1">
-                        <span className="text-xs text-orange-500">แตะเพื่อดูรายละเอียด / แก้ไข</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {readonlyLateRequests.length > 0 && (
-              <div>
-                <div className="space-y-2">
-                  {readonlyLateRequests.map((req) => (
-                    <div
-                      key={req.id}
-                      className="rounded-2xl border border-gray-200 bg-white"
-                    >
-                      <div className="flex items-center gap-3 p-3.5">
-                        <div className="w-10 h-10 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
-                          <Clock className="w-5 h-5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-gray-900 text-sm">{new Date(req.requestDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
-                            <StatusBadge status={req.status} />
-                          </div>
-                          <div className="text-xs text-gray-500 mt-0.5">
-                            กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
-                          </div>
-                          <div className="text-xs text-orange-600 font-medium mt-0.5">สาย {req.lateMinutes} นาที</div>
-                          {req.reason && <div className="text-xs text-gray-600 mt-1 truncate">หมายเหตุ: {req.reason}</div>}
-                          {req.rejectionReason && <div className="text-xs text-red-600 mt-1">เหตุผล: {req.rejectionReason}</div>}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const h = await lateRequestService.getMyLateRequests(buildHistoryParams(0));
+      setHistoryRequests(h.lateRequests);
+      setHistoryTotal(h.total);
+    } catch {
+      // keep empty
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [buildHistoryParams]);
   const loadMoreHistory = async () => {
     setHistoryLoadingMore(true);
     try {
@@ -1273,11 +1198,12 @@ function MyLateTab() {
   };
 
   useEffect(() => {
+    const delay = historyQuery.trim() || historyStatus !== 'ALL' ? 300 : 0;
     const timer = setTimeout(() => {
       refreshHistory();
-    }, 300);
+    }, delay);
     return () => clearTimeout(timer);
-  }, [refreshHistory]);
+  }, [historyQuery, historyStatus, refreshHistory]);
 
   const lateMinutesPreview = (() => {
     if (!scheduledTime || !actualTime) return null;

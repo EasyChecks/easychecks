@@ -38,6 +38,7 @@ export interface Attendance {
   userId: number;
   shiftId: number;
   locationId?: number;
+  eventId?: number | null;
   checkIn: string;
   checkOut?: string;
   checkInPhoto?: string;

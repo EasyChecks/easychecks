@@ -181,13 +181,20 @@ export const attendanceService = {
       const response = await api.get(`/attendance/today/${userId}`);
       const data = response.data.data;
 
-      // Backend ใช้ findMany → ส่ง array กลับมา
-      // ถ้าเป็น array → เอา record แรก (ล่าสุด, sort desc)
-      // ถ้าเป็น single object → ใช้ตรงๆ
-      const rawAttendance = Array.isArray(data)
-        ? (data.length > 0 ? data[0] : null)
-        : data;
-      const todayAttendance = rawAttendance ? mapAttendance(rawAttendance) : null;
+      // ปุ่มเข้างาน/ออกงานในโมดูลนี้ต้องอิงเฉพาะ attendance ของกะงาน
+      // จึงไม่นับ record ที่เป็น event attendance (มี eventId)
+      const rows = Array.isArray(data)
+        ? data
+        : (data ? [data] : []);
+
+      const rawShiftAttendance = rows.find((row) => {
+        if (!row) return false;
+        const hasEventId = row.eventId !== undefined && row.eventId !== null;
+        const hasShiftId = row.shiftId !== undefined && row.shiftId !== null;
+        return !hasEventId && hasShiftId;
+      }) ?? null;
+
+      const todayAttendance = rawShiftAttendance ? mapAttendance(rawShiftAttendance) : null;
 
       return {
         hasCheckedIn: !!todayAttendance,

@@ -1,150 +1,109 @@
-// ═══════════════════════════════════════════════════════════════
-// 📁 auth.controller.ts — Authentication Controller
-// ═══════════════════════════════════════════════════════════════
-// 🔐 รับ HTTP Request ที่เกี่ยวกับ Authentication แล้วส่งต่อให้ authService
-//
-// Functions ในไฟล์นี้:
-//   1️⃣ login()          — POST /api/auth/login           (public)
-//   2️⃣ logout()         — POST /api/auth/logout          (ต้องมี token)
-//   3️⃣ changePassword() — POST /api/auth/change-password (ต้องมี token)
-//   4️⃣ refresh()        — POST /api/auth/refresh         (public)
-//
-// 📌 Source: routes/auth.routes.ts → auth.controller → auth.service
-// ═══════════════════════════════════════════════════════════════
+// แยก controller ออกจาก service เพื่อให้ controller รู้แค่ HTTP, service รู้แค่ business logic — test ง่ายกว่า
+// validate ที่ controller เพื่อ fail fast ก่อนเข้า service
 
-import type { Request, Response } from 'express';  // ← Express types
-import { authService } from '../services/auth.service.js';  // ← business logic layer
+import type { Request, Response } from 'express';
+import { authService } from '../services/auth.service.js';
 
 export const authController = {
 
-  // ═══════════════════════════════════════════════════════════════
-  // 1️⃣ login() — เข้าสู่ระบบ
-  // ═══════════════════════════════════════════════════════════════
-  // POST /api/auth/login
-  // Body: { employeeId, password }
-  // password อาจเป็น: nationalId (default) | รหัสที่เปลี่ยนแล้ว | adminPassword
-  // Rate limit: 5 ครั้งต่อ 60 วินาที ต่อ IP (กำหนดใน auth.routes.ts)
+  // login — password อาจเป็น nationalId (default) / รหัสที่เปลี่ยนแล้ว / adminPassword
   async login(req: Request, res: Response) {
     try {
-      const { employeeId, password } = req.body;  // ← ดึงข้อมูลจาก body
+      const { employeeId, password } = req.body;
 
-      // ✅ STEP 1: Validate required fields
       if (!employeeId || !password) {
         return res.status(400).json({
-          error: 'employeeId และ password (nationalId) จำเป็นต้องระบุ'  // ← ข้อความ error ภาษาไทย
+          error: 'employeeId และ password (nationalId) จำเป็นต้องระบุ'
         });
       }
 
-      // ✅ STEP 2: ส่งต่อให้ authService.login()
+      // pass IP + user-agent เพื่อเก็บใน session table สำหรับ audit trail
       const result = await authService.login(
-        employeeId,               // ← รหัสพนักงาน
-        password,                 // ← รหัสผ่าน
-        req.ip,                   // ← IP ของ client (เก็บใน session)
-        req.get('user-agent')     // ← browser/device info (เก็บใน session)
+        employeeId,
+        password,
+        req.ip,
+        req.get('user-agent')
       );
 
-      return res.json(result);  // ← return { accessToken, refreshToken, user }
+      return res.json(result);
     } catch (error: any) {
-      console.error('❌ Login error:', error);  // ← log error สำหรับ debug
+      console.error('❌ Login error:', error);
       return res.status(401).json({
-        error: error.message || 'เข้าสู่ระบบล้มเหลว'  // ← 401 Unauthorized
+        error: error.message || 'เข้าสู่ระบบล้มเหลว'
       });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════
-  // 2️⃣ logout() — ออกจากระบบ
-  // ═══════════════════════════════════════════════════════════════
-  // POST /api/auth/logout
-  // Header: Authorization: Bearer <token>
-  // ลบ session ออก database → token ใช้ไม่ได้ทันที แม้ JWT ยังไม่หมดอายุ
+  // logout — ลบ session ออก DB ทำให้ token ใช้ไม่ได้ทันที แม้ JWT ยังไม่หมดอายุ
   async logout(req: Request, res: Response) {
     try {
-      const token = req.headers.authorization?.replace('Bearer ', '');  // ← ดึง token จาก header
+      const token = req.headers.authorization?.replace('Bearer ', '');
 
-      // ✅ STEP 1: ตรวจว่ามี token
       if (!token) {
         return res.status(400).json({
-          error: 'ต้องระบุ Token'  // ← ไม่มี token ใน header
+          error: 'ต้องระบุ Token'
         });
       }
 
-      // ✅ STEP 2: ส่งต่อให้ authService.logout()
-      await authService.logout(token);  // ← ลบ session ออก DB
-      res.json({ message: 'Logout สำเร็จ' });  // ← return success
+      await authService.logout(token);
+      res.json({ message: 'Logout สำเร็จ' });
     } catch (error: any) {
       res.status(400).json({
-        error: error.message || 'Logout ล้มเหลว'  // ← error response
+        error: error.message || 'Logout ล้มเหลว'
       });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════
-  // 3️⃣ changePassword() — เปลี่ยนรหัสผ่าน
-  // ═══════════════════════════════════════════════════════════════
-  // POST /api/auth/change-password
-  // Body: { currentPassword, newPassword }
-  // - currentPassword: nationalId (ถ้ายังไม่เคยเปลี่ยน) หรือรหัสที่เปลี่ยนไว้แล้ว
-  // - newPassword: ต้องมีความยาว ≥ 6 ตัวอักษร
-  // หลังเปลี่ยนสำเร็จ → session ทั้งหมดถูกลบ → บังคับ login ใหม่
+  // changePassword — หลังเปลี่ยนสำเร็จ session ทั้งหมดถูกลบ บังคับ login ใหม่ทุก device
   async changePassword(req: Request, res: Response) {
     try {
-      const { currentPassword, newPassword } = req.body;  // ← ดึงข้อมูลจาก body
+      const { currentPassword, newPassword } = req.body;
 
-      // ✅ STEP 1: Validate required fields
       if (!currentPassword || !newPassword) {
         return res.status(400).json({
-          error: 'ต้องระบุ currentPassword และ newPassword'  // ← ข้อมูลไม่ครบ
+          error: 'ต้องระบุ currentPassword และ newPassword'
         });
       }
 
-      // ✅ STEP 2: Validate password length
       if (newPassword.length < 6) {
         return res.status(400).json({
-          error: 'รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร'  // ← สั้นเกินไป
+          error: 'รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร'
         });
       }
 
-      // ✅ STEP 3: ส่งต่อให้ authService.changePassword()
+      // userId จาก auth middleware (JWT payload)
       await authService.changePassword(
-        req.user!.userId,    // ← userId จาก auth middleware (JWT payload)
-        currentPassword,     // ← รหัสเดิม
-        newPassword          // ← รหัสใหม่
+        req.user!.userId,
+        currentPassword,
+        newPassword
       );
 
-      res.json({ message: 'เปลี่ยนรหัสผ่านสำเร็จ' });  // ← return success
+      res.json({ message: 'เปลี่ยนรหัสผ่านสำเร็จ' });
     } catch (error: any) {
       res.status(400).json({
-        error: error.message || 'เปลี่ยนรหัสผ่านล้มเหลว'  // ← error response
+        error: error.message || 'เปลี่ยนรหัสผ่านล้มเหลว'
       });
     }
   },
 
-  // ═══════════════════════════════════════════════════════════════
-  // 4️⃣ refresh() — ขอ accessToken ใหม่
-  // ═══════════════════════════════════════════════════════════════
-  // POST /api/auth/refresh
-  // Body: { refreshToken }
-  // ใช้ refreshToken (อายุ 7 วัน) เพื่อออก accessToken ใหม่ (อายุ 30 นาที)
-  // Frontend ควร intercept response 401 แล้ว call endpoint นี้อัตโนมัติ
+  // refresh — ใช้ refreshToken (7 วัน) ออก accessToken ใหม่ (30 นาที)
+  // frontend ควร intercept 401 แล้ว call endpoint นี้อัตโนมัติ
   async refresh(req: Request, res: Response) {
     try {
-      const { refreshToken } = req.body;  // ← ดึง refreshToken จาก body
+      const { refreshToken } = req.body;
 
-      // ✅ STEP 1: ตรวจว่ามี refreshToken
       if (!refreshToken) {
         return res.status(400).json({
-          error: 'ต้องระบุ refreshToken'  // ← ไม่มี refreshToken
+          error: 'ต้องระบุ refreshToken'
         });
       }
 
-      // ✅ STEP 2: ส่งต่อให้ authService.refreshAccessToken()
-      const result = await authService.refreshAccessToken(refreshToken);  // ← get new accessToken
-      return res.json(result);  // ← return { accessToken }
+      const result = await authService.refreshAccessToken(refreshToken);
+      return res.json(result);
     } catch (error: any) {
-      console.error('❌ Refresh token error:', error);  // ← log error สำหรับ debug
+      console.error('❌ Refresh token error:', error);
       return res.status(401).json({
-        error: error.message || 'Refresh token ล้มเหลว'  // ← 401 Unauthorized
+        error: error.message || 'Refresh token ล้มเหลว'
       });
     }
   }

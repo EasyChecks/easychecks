@@ -2,28 +2,9 @@ import type { Request, Response } from 'express';
 import * as announcementService from '../services/announcement.service.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 
-/**
- * ─────────────────────────────────────────────────────────────
- * 📢 Announcement Controller
- * ─────────────────────────────────────────────────────────────
- * ทำหน้าที่: รับ HTTP request → parse ข้อมูล → ส่งต่อ Service → ส่ง response
- *
- * ทำไมแยก Controller ออกจาก Service?
- * → Controller รู้แค่ HTTP (parse req, return res)
- *   Service รู้แค่ business logic
- *   แยก concern ถึงจะ test ได้ทีละชั้น
- *
- * Pattern: Controller validate input → Service ทำ business logic → Controller return response
- * ─────────────────────────────────────────────────────────────
- */
+// แยก Controller ออกจาก Service เพราะ Controller รู้แค่ HTTP / Service รู้แค่ business logic — test ได้ทีละชั้น
 
-/**
- * ➕ POST /api/announcements
- *
- * ทำไม validate ที่ controller อีกทั้งที่ service ก็ validate แล้ว?
- * → Controller validate เร็วเพื่อ fail fast — เช็คค่าแล้ว reject ทันที
- *   ไม่ต้องเชื่อม DB เพื่อรู้ว่าข้อมูลไม่ครบ
- */
+// validate ที่ controller เพื่อ fail fast — reject ทันทีไม่ต้องเชื่อม DB ถ้าข้อมูลไม่ครบ
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
     const {
@@ -34,7 +15,6 @@ export const createAnnouncement = async (req: Request, res: Response) => {
       targetUserIds,
     } = req.body;
 
-    // ตรวจสอบข้อมูล
     if (!title || !content) {
       return sendError(res, 'ต้องระบุ title และ content', 400);
     }
@@ -58,13 +38,7 @@ export const createAnnouncement = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * 📋 GET /api/announcements
- *
- * ทำไม query filters เป็น optional?
- * → ใช้ endpoint เดียวกันสำหรับทั้ง ADMIN และ SUPERADMIN
- *   ADMIN อาจ filter เฉพาะของตัวเอง ส่วน SUPERADMIN เห็นทั้งหมด
- */
+// filters เป็น optional เพราะใช้ endpoint เดียวกันทั้ง ADMIN (filter เฉพาะของตัวเอง) และ SUPERADMIN (เห็นทั้งหมด)
 export const getAnnouncements = async (req: Request, res: Response) => {
   try {
     const { status, createdByUserId } = req.query;
@@ -81,13 +55,7 @@ export const getAnnouncements = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * 🔍 GET /api/announcements/:id
- *
- * ทำไม parseInt แล้ว check isNaN อีก?
- * → parseInt('abc') คืน NaN ซึ่ง truthy ในบาง context
- *   isNaN guard เพื่อไม่ให้ query ไปดึง WHERE announcement_id = NaN
- */
+// parseInt('abc') คืน NaN — ต้อง guard isNaN เพื่อไม่ให้ query ไปดึง WHERE announcement_id = NaN
 export const getAnnouncementById = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
@@ -104,14 +72,7 @@ export const getAnnouncementById = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * ✏️ PUT /api/announcements/:id
- *
- * ทำไมใส่เฉพาะ field ที่ส่งมา (partial update)?
- * → รองรับ PATCH-style update — ไม่ต้องส่งทุก field มาทุกครั้ง
- *   Service ใช้ spread conditional เพื่อไม่ overwrite field ที่ไม่ได้ส่งมา
- *   เช่น ส่งแค่ title มา → content เดิมไม่ถูกแตะ
- */
+// รองรับ partial update — ส่งแค่ field ที่ต้องการแก้ เช่น title อย่างเดียว content เดิมไม่ถูกแตะ
 export const updateAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
@@ -145,15 +106,7 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * 📤 POST /api/announcements/:id/send
- *
- * Controller นี้แค่ pass-through — logic ทั้งหมดอยู่ใน service
- *
- * ทำไม pass branchId ด้วย?
- * → Service ต้องรู้ branchId ของผู้ส่ง เพื่อสร้าง WHERE branch_id = $x guard ให้ ADMIN
- *   ถ้าไม่ส่งมา ADMIN จะสามารถส่งประกาศข้ามสาขาได้
- */
+// pass branchId ไปด้วยเพราะ service ต้องสร้าง WHERE branch_id guard สำหรับ ADMIN — ถ้าไม่ส่ง ADMIN จะส่งข้ามสาขาได้
 export const sendAnnouncement = async (req: Request, res: Response) => {
   try {
     const announcementId = parseInt(req.params.id as string);
@@ -179,9 +132,7 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * 🗑️ DELETE /api/announcements/:id
- */
+// ลบประกาศทั้งฉบับ (hard delete)
 export const deleteAnnouncement = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
@@ -210,13 +161,7 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * 🔄 DELETE /api/announcements/:announcementId/recipients/:recipientId
- *
- * ทำไมมี endpoint นี้แยกจาก clearAll?
- * → รองรับการ revoke เฉพาะราย โดยไม่กระทบคนอื่น
- *   clearAll ลบทั้งสาย — endpoint นี้ลบคนเดียวโดยการ revoke อีเมล / เปลี่ยนชื่อระบุ
- */
+// แยกจาก clearAll เพราะต้องการ revoke เฉพาะรายโดยไม่กระทบคนอื่น
 export const deleteRecipient = async (req: Request, res: Response) => {
   try {
     const userId = req.user?.userId;
@@ -251,13 +196,7 @@ export const deleteRecipient = async (req: Request, res: Response) => {
   }
 };
 
-/**
- * 🔄 DELETE /api/announcements/:announcementId/recipients
- *
- * ทำไมต้องระบุ announcementId ใน URL?
- * → ถ้าใช้แค่ :id Prisma จะไม่รู้ว่าต้องลบ recipients ของ announcement ไหน
- *   (Bug เดิมที่เคยลบ recipients ทั้งระบบโดยไม่ส่ง announcementId)
- */
+// ต้องระบุ announcementId ใน URL — ถ้าไม่ระบุ Prisma จะลบ recipients ทั้งระบบ (bug เดิมที่เคยเจอ)
 export const clearAllRecipients = async (req: Request, res: Response) => {
   try {
     if (!req.user) {

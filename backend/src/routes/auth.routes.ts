@@ -1,37 +1,19 @@
-// ═══════════════════════════════════════════════════════════════
-// 📁 auth.routes.ts — Authentication Routes
-// ═══════════════════════════════════════════════════════════════
-// 🔐 เส้นทาง API สำหรับ Authentication
-//
-// Routes ในไฟล์นี้:
-//   1️⃣ POST /api/auth/login           — เข้าสู่ระบบ (public, มี rate limit)
-//   2️⃣ POST /api/auth/refresh         — ขอ accessToken ใหม่ (public)
-//   3️⃣ POST /api/auth/logout          — ออกจากระบบ (protected)
-//   4️⃣ POST /api/auth/change-password — เปลี่ยนรหัสผ่าน (protected)
-//
-// Rate Limit สำหรับ Login:
-//   - loginRateLimit: จำกัด 5 request ต่อ 60 วินาที ต่อ IP (ป้องกัน brute force)
-//   - loginAttemptMiddleware: log ความพยายาม login ที่ผิดพลาด
-//
-// 📌 Source: index.ts → app.use('/api/auth', authRoutes)
-// ═══════════════════════════════════════════════════════════════
+import { Router } from 'express';
+import { authController } from '../controllers/auth.controller.js';
+import { authenticate } from '../middleware/auth.middleware.js';
+import { rateLimitMiddleware, loginAttemptMiddleware } from '../middleware/rateLimit.middleware.js';
 
-import { Router } from 'express';                                           // ← Express Router
-import { authController } from '../controllers/auth.controller.js';          // ← Auth Controller
-import { authenticate } from '../middleware/auth.middleware.js';              // ← JWT + Session middleware
-import { rateLimitMiddleware, loginAttemptMiddleware } from '../middleware/rateLimit.middleware.js';  // ← Rate Limit
+const router = Router();
 
-const router = Router();  // ← สร้าง router instance
+// rate limit login เพื่อป้องกัน brute force (5 ครั้ง / 60 วินาที / IP)
+const loginRateLimit = rateLimitMiddleware('login', 5, 60);
 
-// ── Rate Limit Config ────────────────────────────────────────
-const loginRateLimit = rateLimitMiddleware('login', 5, 60);  // ← 5 ครั้ง / 60 วินาที / IP
+// public routes — ไม่ต้องมี token
+router.post('/login', loginRateLimit, loginAttemptMiddleware, authController.login);
+router.post('/refresh', authController.refresh);
 
-// ── 1️⃣ 2️⃣ Public Routes (ไม่ต้องมี token) ──────────────────
-router.post('/login', loginRateLimit, loginAttemptMiddleware, authController.login);  // ← เข้าสู่ระบบ (มี rate limit + logging)
-router.post('/refresh', authController.refresh);                                     // ← ขอ accessToken ใหม่
+// protected routes — ต้อง authenticate ก่อนเพื่อรู้ว่าใครกำลัง logout/เปลี่ยนรหัส
+router.post('/logout', authenticate, authController.logout);
+router.post('/change-password', authenticate, authController.changePassword);
 
-// ── 3️⃣ 4️⃣ Protected Routes (ต้องมี token) ──────────────────
-router.post('/logout', authenticate, authController.logout);                         // ← ออกจากระบบ
-router.post('/change-password', authenticate, authController.changePassword);        // ← เปลี่ยนรหัสผ่าน
-
-export default router;  // ← export สำหรับ index.ts
+export default router;

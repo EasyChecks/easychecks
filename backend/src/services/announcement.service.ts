@@ -2,35 +2,18 @@ import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
 import { sendBulkAnnouncementEmails } from './email.service.js';
 
-/**
- * ─────────────────────────────────────────────────────────────
- * 📢 Announcement Service
- * ─────────────────────────────────────────────────────────────
- * รับผิดชอบ business logic ทั้งหมดของระบบประกาศ
- *
- * แยก logic ออกจาก controller เพื่อให้ test ได้ง่าย
- * และเพื่อให้ controller บางๆ ไม่มี if/else ซ้ำซ้อน
- *
- * Flow หลัก:
- *   1. ADMIN สร้างประกาศ → status = DRAFT
- *   2. ADMIN/SUPERADMIN กด Send → คัดผู้รับ → บันทึก recipients → ส่งอีเมล
- *   3. ถ้า SENT แล้ว แก้ไขไม่ได้ (immutable)
- * ─────────────────────────────────────────────────────────────
- */
+// แยก business logic ออกจาก controller เพื่อให้ test ได้โดยไม่ต้องมี HTTP context
+// Flow: ADMIN สร้าง DRAFT → คัดผู้รับ → กด Send → SENT (immutable)
 
-// ============================================
-// 📦 DTOs — กำหนด shape ของ input
-// แยก DTO ออกมาเพื่อให้ validate ที่ controller
-// แล้วส่งมาเป็น typed object แทน req.body raw
-// ============================================
+// DTO แยก shape ของ input เพื่อให้ controller ส่งข้อมูลมาเป็น typed object แทน raw req.body
 
 export interface CreateAnnouncementDTO {
-  title: string;            // หัวข้อประกาศ (required เสมอ)
-  content: string;          // เนื้อหาประกาศ (required เสมอ)
-  targetRoles?: string[];   // ถ้าไม่ระบุ = ส่งหาทุก role
-  targetBranchIds?: number[]; // ถ้าไม่ระบุ = ส่งหาทุกสาขา
-  targetUserIds?: number[];   // ระบุ userId เฉพาะ — ถ้ามี จะส่งเฉพาะคนเหล่านี้
-  createdByUserId: number;  // ต้องรู้ว่าใครสร้าง เพื่อ audit trail
+  title: string;
+  content: string;
+  targetRoles?: string[];
+  targetBranchIds?: number[];
+  targetUserIds?: number[];
+  createdByUserId: number;
 }
 
 export interface UpdateAnnouncementDTO {
@@ -42,25 +25,13 @@ export interface UpdateAnnouncementDTO {
 }
 
 // ============================================
-// 📋 Functions
+// Functions
 // ============================================
 
-/**
- * ➕ สร้างประกาศใหม่ (status เริ่มต้นเป็น DRAFT เสมอ)
- *
- * ทำไมต้อง DRAFT ก่อน?
- * → เพื่อให้ Admin ตรวจทานก่อนส่งจริง
- *   ถ้า Insert แล้วส่งเลย จะย้อนกลับไม่ได้
- *
- * SQL เทียบเท่า:
- *   INSERT INTO announcements
- *     (title, content, target_roles, target_branch_ids, status, created_by_user_id)
- *   VALUES
- *     ($1, $2, $3, $4, 'DRAFT', $5)
- *   RETURNING
- *     announcements.*,
- *     users.user_id, users.first_name, users.last_name  -- (JOIN creator)
- */
+// สร้างประกาศใหม่ — เริ่มต้นเป็น DRAFT เสมอเพื่อให้ Admin ตรวจทานก่อนส่งจริง ถ้า Insert แล้วส่งเลยจะย้อนกลับไม่ได้
+// SQL: INSERT INTO announcements (title, content, target_roles, target_branch_ids, status, created_by_user_id)
+//      VALUES ($1, $2, $3, $4, 'DRAFT', $5)
+//      RETURNING *, (SELECT first_name, last_name FROM users WHERE user_id = created_by_user_id)
 export const createAnnouncement = async (data: CreateAnnouncementDTO) => {
   if (!data.title || !data.content) {
     throw new Error('ต้องระบุ title และ content');
@@ -102,19 +73,11 @@ export const createAnnouncement = async (data: CreateAnnouncementDTO) => {
   return announcement;
 };
 
-/**
- * 📋 ดึงรายการประกาศทั้งหมด (รองรับ filter)
- *
- * SQL เทียบเท่า:
- *   SELECT
- *     a.*,
- *     u.user_id, u.first_name, u.last_name  -- JOIN creator
- *   FROM announcements a
- *   LEFT JOIN users u ON a.created_by_user_id = u.user_id
- *     [WHERE a.status = $1]              -- optional filter
- *     [AND a.created_by_user_id = $2]    -- optional filter
- *   ORDER BY a.announcement_id DESC
- */
+// ดึงรายการประกาศทั้งหมด — filter เป็น optional เพราะ ADMIN/SUPERADMIN ใช้ร่วมกัน
+// SQL: SELECT a.*, u.first_name, u.last_name FROM announcements a
+//      LEFT JOIN users u ON a.created_by_user_id = u.user_id
+//      [WHERE a.status = $1] [AND a.created_by_user_id = $2]
+//      ORDER BY a.announcement_id DESC
 export const getAnnouncements = async (
   filters?: {
     status?: string;
@@ -150,25 +113,13 @@ export const getAnnouncements = async (
   return announcements;
 };
 
-/**
- * 🔍 ดึงประกาศรายชิ้นพร้อมรายชื่อผู้รับ
- *
- * ทำไมต้อง include recipients ?
- * → หน้า detail ต้องแสดงว่าส่งให้ใครบ้างแล้ว
- *   ถ้าไม่ JOIN ตรงนี้ จะต้อง query แยกอีก 1 ครั้ง
- *
- * SQL เทียบเท่า:
- *   SELECT
- *     a.*,
- *     u_creator.first_name, u_creator.last_name,
- *     ar.recipient_id, ar.sent_at,
- *     u_recip.user_id, u_recip.first_name, u_recip.last_name, u_recip.email
- *   FROM announcements a
- *   LEFT JOIN users u_creator ON a.created_by_user_id = u_creator.user_id
- *   LEFT JOIN announcement_recipients ar ON a.announcement_id = ar.announcement_id
- *   LEFT JOIN users u_recip ON ar.user_id = u_recip.user_id
- *   WHERE a.announcement_id = $1
- */
+// ดึงประกาศรายชิ้นพร้อม recipients — JOIN ทีเดียวเพราะหน้า detail ต้องแสดงทั้งคู่ ถ้าแยก query จะเพิ่ม round-trip โดยไม่จำเป็น
+// SQL: SELECT a.*, u_creator.*, ar.*, u_recip.*
+//      FROM announcements a
+//      LEFT JOIN users u_creator ON a.created_by_user_id = u_creator.user_id
+//      LEFT JOIN announcement_recipients ar ON a.announcement_id = ar.announcement_id
+//      LEFT JOIN users u_recip ON ar.user_id = u_recip.user_id
+//      WHERE a.announcement_id = $1
 export const getAnnouncementById = async (announcementId: number) => {
   const announcement = await prisma.announcement.findFirst({
     where: {
@@ -205,29 +156,11 @@ export const getAnnouncementById = async (announcementId: number) => {
   return announcement;
 };
 
-/**
- * ✏️ แก้ไขประกาศ (เฉพาะ DRAFT เท่านั้น)
- *
- * ทำไมต้อง fetch existing ก่อน UPDATE?
- * → เพื่อเช็ค status ว่าเป็น DRAFT หรือ SENT
- *   ถ้า SENT แล้วแก้ไขไม่ได้ — ข้อมูลที่ส่งไปแล้วต้อง immutable
- *   และต้องการ oldValues ของเดิมเพื่อ audit trail (before/after)
- *
- * SQL เทียบเท่า:
- *   -- 1. ตรวจสอบก่อน
- *   SELECT status FROM announcements WHERE announcement_id = $1;
- *
- *   -- 2. ถ้า status = 'DRAFT' ถึงจะ update
- *   UPDATE announcements
- *   SET
- *     title             = COALESCE($2, title),
- *     content           = COALESCE($3, content),
- *     target_roles      = COALESCE($4, target_roles),
- *     target_branch_ids = COALESCE($5, target_branch_ids),
- *     updated_by_user_id = $6
- *   WHERE announcement_id = $1
- *   RETURNING *, (SELECT first_name, last_name FROM users WHERE user_id = created_by_user_id);
- */
+// แก้ไขประกาศได้เฉพาะ DRAFT — ถ้า SENT แล้วข้อมูลต้อง immutable เพราะคนรับไปแล้ว
+// ต้อง fetch existing ก่อนเพื่อ (1) เช็ค SENT guard (2) เก็บ oldValues สำหรับ audit trail
+// SQL: SELECT status FROM announcements WHERE announcement_id = $1;
+//      UPDATE announcements SET title = COALESCE($2, title), content = COALESCE($3, content), ...
+//      WHERE announcement_id = $1 RETURNING *
 export const updateAnnouncement = async (
   announcementId: number,
   data: UpdateAnnouncementDTO,
@@ -294,40 +227,11 @@ export const updateAnnouncement = async (
 
 
 
-/**
- * 📤 ส่งประกาศ — หัวใจของระบบนี้
- *
- * Flow:
- *   1. ตรวจสอบว่าประกาศมีอยู่ และยังเป็น DRAFT
- *   2. คัดผู้รับตาม targetRoles / targetBranchIds ที่ตั้งไว้
- *   3. Apply permission rules ตาม role ผู้ส่ง
- *   4. INSERT recipients ลง announcement_recipients
- *   5. UPDATE status → SENT
- *   6. ส่งอีเมลแบบ fire-and-forget (ไม่บล็อก response)
- *
- * ทำไม ADMIN ถึงส่งข้ามสาขาไม่ได้?
- * → เพื่อป้องกัน data leakage ระหว่างสาขา
- *   ADMIN ควรเห็นแค่คนใน branch ตัวเอง
- *
- * ทำไม ADMIN ส่งให้ SUPERADMIN ไม่ได้?
- * → SUPERADMIN มี privilege สูงกว่า
- *   ไม่ควรให้ ADMIN notify SUPERADMIN ได้เพื่อ security
- *
- * SQL เทียบเท่าส่วน query ผู้รับ (กรณี ADMIN):
- *   SELECT user_id, email, first_name, last_name
- *   FROM users
- *   WHERE status = 'ACTIVE'
- *     AND branch_id = $sentByUserBranchId       -- จำกัดสาขา
- *     AND role != 'SUPERADMIN'                  -- ห้ามส่งให้ SUPERADMIN
- *     [AND role IN ($targetRoles)]              -- ถ้าระบุ role ไว้
- *
- * SQL เทียบเท่าส่วน query ผู้รับ (กรณี SUPERADMIN):
- *   SELECT user_id, email, first_name, last_name
- *   FROM users
- *   WHERE status = 'ACTIVE'
- *     [AND role IN ($targetRoles)]              -- ถ้าระบุ role ไว้
- *     [AND branch_id IN ($targetBranchIds)]     -- ถ้าระบุสาขาไว้
- */
+// ส่งประกาศ — หัวใจของระบบ
+// ใช้ $transaction ป้องกัน race condition: กดส่ง 2 ครั้งพร้อมกัน request ที่ 2 เจอ status ≠ DRAFT แล้ว fail
+// ADMIN ส่งข้ามสาขาไม่ได้เพราะป้องกัน data leakage / ส่งให้ SUPERADMIN ไม่ได้เพราะ privilege สูงกว่า
+// SQL (ADMIN): SELECT user_id, email FROM users WHERE status='ACTIVE' AND branch_id=$1 AND role!='SUPERADMIN' [AND role IN ($roles)]
+// SQL (SUPERADMIN): SELECT user_id, email FROM users WHERE status='ACTIVE' [AND role IN ($roles)] [AND branch_id IN ($branches)]
 export const sendAnnouncement = async (
   announcementId: number,
   sentByUserId: number,
@@ -470,12 +374,8 @@ export const sendAnnouncement = async (
   };
 };
 
-/**
- * 🗑️ ลบประกาศ (Hard Delete)
- *
- * SQL เทียบเท่า:
- *   DELETE FROM announcements WHERE announcement_id = $1
- */
+// ลบประกาศ hard delete — ดึง existing ก่อนเพื่อเก็บ oldValues ใน audit log
+// SQL: DELETE FROM announcements WHERE announcement_id = $1
 export const deleteAnnouncement = async (
   announcementId: number,
   deletedByUserId: number
@@ -504,21 +404,9 @@ export const deleteAnnouncement = async (
   return deleted;
 };
 
-/**
- * 🗑️ ลบผู้รับออก 1 คน จาก announcement_recipients
- *
- * ทำไมต้องมี function นี้?
- * → กรณีส่งประกาศไปแล้ว แต่ต้องการ revoke การรับรู้ของคนๆ นั้น
- *   เช่น ส่งผิดคน หรือ user นั้นไม่ควรเห็น
- *
- * ทำไม Hard Delete ตรงนี้แทนที่จะ Soft Delete?
- * → recipients เป็น junction table — ไม่มี business logic ซ้อนอยู่
- *   Hard delete ทำให้ logic ง่ายกว่า อีกทั้งถ้าจะ re-send ก็ insert ใหม่ได้
- *
- * SQL เทียบเท่า:
- *   DELETE FROM announcement_recipients
- *   WHERE recipient_id = $1
- */
+// ลบผู้รับ 1 คน — ใช้ revoke การรับรู้ เช่นส่งผิดคน / hard delete เพราะ junction table ไม่มี business logic
+// ต้องตรวจ announcementId ตรงกันเพราะป้องกันลบ recipient ข้ามประกาศ
+// SQL: DELETE FROM announcement_recipients WHERE recipient_id = $1
 export const deleteRecipient = async (
   announcementId: number,
   recipientId: number,
@@ -554,26 +442,10 @@ export const deleteRecipient = async (
   return deleted;
 };
 
-/**
- * 🗑️ ล้างผู้รับประกาศทั้งหมดในประกาศที่ระบุ
- *
- * ทำไมต้องมี function นี้แยกจาก deleteRecipient?
- * → กรณีต้องการ re-send ประกาศใหม่ให้กลุ่มใหม่
- *   ต้องล้าง recipients เดิมออกก่อน แล้วค่อย call sendAnnouncement อีกครั้ง
- *   ถ้าไม่ล้าง → จะมี duplicate records ใน announcement_recipients
- *
- * ทำไมต้อง verify ว่า announcement มีอยู่ก่อน deleteMany?
- * → deleteMany ของ Prisma ไม่ throw error ถ้าไม่มีแถวที่ match
- *   ถ้าไม่ check ก่อน จะไม่รู้ว่า announcementId นั้น invalid หรือแค่ไม่มี recipients
- *
- * SQL เทียบเท่า:
- *   -- 1. เช็คว่ามี announcement
- *   SELECT 1 FROM announcements WHERE announcement_id = $1;
- *
- *   -- 2. ลบ recipients ทั้งหมดของ announcement นั้น
- *   DELETE FROM announcement_recipients
- *   WHERE announcement_id = $1;
- */
+// ล้าง recipients ทั้งหมด — ใช้ก่อน re-send ใหม่ให้กลุ่มใหม่ ป้องกัน duplicate records
+// ต้อง verify ว่า announcement มีอยู่ก่อน เพราะ deleteMany ไม่ throw ถ้า 0 rows
+// SQL: SELECT 1 FROM announcements WHERE announcement_id = $1;
+//      DELETE FROM announcement_recipients WHERE announcement_id = $1;
 export const clearAllRecipients = async (
   announcementId: number,
   clearedByUserId: number
@@ -609,9 +481,6 @@ export const clearAllRecipients = async (
   };
 };
 
-// ============================================
-// 📤 Export
-// ============================================
 
 export const announcementService = {
   createAnnouncement,

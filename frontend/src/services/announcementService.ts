@@ -1,16 +1,5 @@
-/**
- * ─────────────────────────────────────────────────────────────
- * 📢 announcementService.ts — HTTP client สำหรับระบบประกาศ
- * ─────────────────────────────────────────────────────────────
- * ทำหน้าที่: เรียก API ที่ backend แล้วคืน typed data ให้ component ใช้
- *
- * ทำไมต้องแยก service ออกมา?
- * → Component ไม่ต้องรู้เรื่อง HTTP method, URL, หรือ response wrapper
- *   แค่เรียก announcementService.getAll() แล้วได้ Announcement[] กลับมาเลย
- *
- * Base URL: /api/announcements (ต่อจาก api instance ที่ตั้ง baseURL ไว้แล้ว)
- * ─────────────────────────────────────────────────────────────
- */
+// แยก HTTP client ออกจาก component เพื่อไม่ต้องรู้ HTTP method / URL / response shape
+// component แค่เรียก announcementService.getAll() ก็ได้ Announcement[] กลับมาเลย
 
 import api from './api';
 import type {
@@ -21,56 +10,51 @@ import type {
   SendAnnouncementResult,
 } from '@/types/announcement';
 
-// ── Helper: แกะ response wrapper ──
-// API backend ห่อข้อมูลไว้ใน { data: { data: ... } }
-// function นี้แกะชั้นในสุดออกมาให้ได้ data ตรงๆ
+// แกะ response wrapper 2 ชั้น { data: { data: ... } } ของ backend
+// เพื่อให้ caller ได้ data ตรงๆ ไม่ต้อง res.data.data ทุกที่
 const unwrap = <T>(res: { data: unknown }): T => {
   const d = res.data as Record<string, unknown>;
   return (d?.data ?? d) as T;
 };
 
 const announcementService = {
-  /** ดึงประกาศทั้งหมด (รองรับ filter ตาม status, createdByUserId) */
   getAll: async (filters?: AnnouncementFilters): Promise<Announcement[]> => {
     const res = await api.get('/announcements', { params: filters });
     return unwrap<Announcement[]>(res);
   },
 
-  /** ดึงประกาศรายชิ้นตาม ID (พร้อมรายชื่อผู้รับ) */
   getById: async (id: number): Promise<Announcement> => {
     const res = await api.get(`/announcements/${id}`);
     return unwrap<Announcement>(res);
   },
 
-  /** สร้างประกาศใหม่ (สถานะเริ่มต้นเป็น DRAFT เสมอ) */
   create: async (data: CreateAnnouncementDTO): Promise<Announcement> => {
     const res = await api.post('/announcements', data);
     return unwrap<Announcement>(res);
   },
 
-  /** แก้ไขประกาศ (แก้ได้เฉพาะ DRAFT เท่านั้น) */
+  // แก้ได้เฉพาะ DRAFT — backend จะ reject ถ้าประกาศเป็น SENT แล้ว
   update: async (id: number, data: UpdateAnnouncementDTO): Promise<Announcement> => {
     const res = await api.put(`/announcements/${id}`, data);
     return unwrap<Announcement>(res);
   },
 
-  /** ส่งประกาศ — เปลี่ยนสถานะเป็น SENT และสร้าง recipients + ส่งอีเมล */
+  // เปลี่ยน DRAFT → SENT + สร้าง recipients + ส่งอีเมล fire-and-forget
   send: async (id: number): Promise<SendAnnouncementResult> => {
     const res = await api.post(`/announcements/${id}/send`);
     return unwrap<SendAnnouncementResult>(res);
   },
 
-  /** ลบประกาศทั้งฉบับ (Hard Delete) */
   delete: async (id: number): Promise<void> => {
     await api.delete(`/announcements/${id}`);
   },
 
-  /** ลบผู้รับประกาศ 1 คน (เช่น ส่งผิดคน ต้อง revoke) */
+  // revoke ผู้รับ 1 คน เช่นส่งผิดคน
   deleteRecipient: async (announcementId: number, recipientId: number): Promise<void> => {
     await api.delete(`/announcements/${announcementId}/recipients/${recipientId}`);
   },
 
-  /** ล้างผู้รับประกาศทั้งหมด (เตรียม re-send ใหม่) */
+  // ล้างทั้งหมดก่อน re-send ใหม่ เพื่อไม่ให้ duplicate
   clearAllRecipients: async (announcementId: number): Promise<{ clearedCount: number }> => {
     const res = await api.delete(`/announcements/${announcementId}/recipients`);
     return unwrap<{ clearedCount: number }>(res);

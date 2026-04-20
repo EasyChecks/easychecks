@@ -7,7 +7,6 @@ import { Card } from '@/components/ui/card';
 interface CsvImportModalProps {
   isOpen: boolean;
   csvData: CsvUserData[];
-  generateEmployeeId: (provinceCode: string, branchCode: string) => string;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -15,7 +14,6 @@ interface CsvImportModalProps {
 export default function CsvImportModal({
   isOpen,
   csvData,
-  generateEmployeeId,
   onConfirm,
   onClose
 }: CsvImportModalProps) {
@@ -57,13 +55,13 @@ export default function CsvImportModal({
                   อีเมล
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-left text-gray-700 uppercase">
-                  รหัสพนักงาน
+                  เบอร์โทร
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-left text-gray-700 uppercase">
-                  แผนก
+                  เลขบัตรประชาชน
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-left text-gray-700 uppercase">
-                  ตำแหน่ง
+                  สาขา (branchId)
                 </th>
                 <th className="px-4 py-3 text-xs font-semibold text-left text-gray-700 uppercase">
                   บทบาท
@@ -71,37 +69,33 @@ export default function CsvImportModal({
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {csvData.map((row, index) => {
-                const employeeId = generateEmployeeId(row.provinceCode, row.branchCode);
-                
-                return (
-                  <tr key={index} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {index + 1}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                      {row.name}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {row.email}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-mono text-gray-900">
-                      {employeeId}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {row.department}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {row.position}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-1 text-xs font-semibold text-gray-700 capitalize bg-gray-100 rounded-lg">
-                        {row.role}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+              {csvData.map((row, index) => (
+                <tr key={index} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {index + 1}
+                  </td>
+                  <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                    {row.firstName} {row.lastName}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {row.email}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {row.phone}
+                  </td>
+                  <td className="px-4 py-3 text-sm font-mono text-gray-600">
+                    {row.nationalId}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">
+                    {row.branchId}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-1 text-xs font-semibold text-gray-700 uppercase bg-gray-100 rounded-lg">
+                      {row.role || 'USER'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

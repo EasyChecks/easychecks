@@ -96,16 +96,21 @@ export interface BranchOption {
 }
 
 export interface CsvUserData {
-  name: string;
-  email: string;
-  provinceCode: string;
-  branchCode: string;
-  role: string;
-  department: string;
-  position: string;
+  title: string;
+  firstName: string;
+  lastName: string;
+  nickname?: string;
+  gender: string;
   nationalId: string;
-  phone?: string;
-  address?: string;
+  emergent_tel: string;
+  emergent_first_name: string;
+  emergent_last_name: string;
+  emergent_relation: string;
+  phone: string;
+  email: string;
+  password?: string;
   birthDate?: string;
+  branchId: string;
+  role?: string;
   [key: string]: string | undefined;
 }

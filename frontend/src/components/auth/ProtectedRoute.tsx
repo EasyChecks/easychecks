@@ -21,19 +21,14 @@ export default function ProtectedRoute({
   const { user, isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    // Wait for auth to initialize
     if (isLoading) return;
 
-    // Check if authentication is required
     if (requireAuth && !isAuthenticated) {
       router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
       return;
     }
 
-    // Check role-based access
-    // Allow access if:
-    // 1. User's actual role is in allowedRoles, OR
-    // 2. User is admin/manager/superadmin and route allows 'user' (frontend pages)
+    // อนุญาต admin/manager/superadmin เข้าหน้า user ได้ด้วย (role สูงกว่าเข้าได้หมด)
     const userActualRole = user?.role;
     const hasAccess =
       !allowedRoles ||
@@ -42,7 +37,7 @@ export default function ProtectedRoute({
       (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole));
     
     if (requireAuth && user && allowedRoles && userActualRole && !hasAccess) {
-      // Redirect to appropriate dashboard based on actual role
+      // redirect ไป dashboard ตาม role จริง
       if (userActualRole === 'user') {
         router.push('/user/dashboard');
       } else if (userActualRole === 'manager') {
@@ -67,9 +62,8 @@ export default function ProtectedRoute({
     );
   }
 
-  // Check authentication
+  // ถ้า sessionStorage มี authUser แต่ state ยัง null → รอ sync แทน redirect ทันที
   if (requireAuth && !isAuthenticated) {
-    // If sessionStorage has authUser, wait briefly for state to sync instead of redirecting
     if (typeof window !== 'undefined' && sessionStorage.getItem('authUser')) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -80,13 +74,9 @@ export default function ProtectedRoute({
         </div>
       );
     }
-    return null; // Will redirect in useEffect
+    return null;
   }
 
-  // Check role-based access
-  // Allow access if:
-  // 1. User's actual role is in allowedRoles, OR
-  // 2. User is admin/manager/superadmin and route allows 'user' (frontend pages)
   const userActualRole = user?.role;
   const hasAccess =
     !allowedRoles ||
@@ -95,7 +85,7 @@ export default function ProtectedRoute({
     (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole));
   
   if (requireAuth && user && allowedRoles && userActualRole && !hasAccess) {
-    return null; // Will redirect in useEffect
+    return null;
   }
 
   return <>{children}</>;

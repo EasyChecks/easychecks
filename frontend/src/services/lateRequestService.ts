@@ -18,8 +18,10 @@ export interface LateRequest {
   updatedAt: string;
   user?: {
     userId: number;
-    name: string;
-    employeeId: string;
+    name?: string;
+    firstName?: string;
+    lastName?: string;
+    employeeId?: string;
   };
   approvedBy?: {
     userId: number;

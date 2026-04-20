@@ -80,7 +80,7 @@ export function parseCsvData(csvText: string): CsvUserData[] {
  */
 export function processCsvUsers(csvData: CsvUserData[], existingUsers: User[]): User[] {
   return csvData.map((row) => {
-    const employeeId = generateEmployeeId(row.provinceCode, row.branchCode, existingUsers);
+    const employeeId = generateEmployeeId(row.provinceCode || '', row.branchCode || '', existingUsers);
     const password = row.nationalId?.substring(row.nationalId.length - 4) || '1234';
     
     const user: User = {

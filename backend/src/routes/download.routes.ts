@@ -19,26 +19,27 @@ import {
 const router = Router();
 
 /**
- * GET /api/download/report - ดาวน์โหลดรายงาน (Attendance/Shift)
+ * GET /api/download/report - ดาวน์โหลดรายงาน Attendance (Excel/PDF)
  * 
  * Security: requireRole(['ADMIN', 'SUPERADMIN'])
  * 
  * ทำไมต้อง role check?
- * - Attendance/Shift ข้อมูล sensitive (รายละเอียดการทำงาน)
+ * - Attendance ข้อมูล sensitive (รายละเอียดการทำงาน)
  * - ต้อง authorize เฉพาะผู้บริหาร/แอดมิน เท่านั้น
  * - ADMIN จะได้ download เฉพาะ branch ของตัวเอง (check ใน service)
  * - SUPERADMIN download ได้ทุก branch
  * 
  * Query Parameters:
- * - type: 'attendance' | 'shift' (required)
- * - format: 'excel' (required)
- * - startDate: ISO DateTime string (optional) - filter records from this date
- * - endDate: ISO DateTime string (optional) - filter records until this date
+ * - type: 'attendance' (required) — รองรับเฉพาะ attendance
+ * - format: 'excel' | 'pdf' (required)
+ * - startDate: ISO date string (optional)
+ * - endDate: ISO date string (optional)
  * - branchId: number (optional) - filter เฉพาะ branch นี้
+ * - filterType: 'all' | 'shift' | 'event' (optional) - กรองข้อมูลตามประเภท
  * 
  * Example:
  * GET /api/download/report?type=attendance&format=excel&startDate=2025-01-01&endDate=2025-12-31
- * GET /api/download/report?type=shift&format=excel&branchId=2
+ * GET /api/download/report?type=attendance&format=pdf&filterType=event
  */
 router.get('/report', requireRole(['ADMIN', 'SUPERADMIN']), handleDownloadReport);
 router.get('/preview', requireRole(['ADMIN', 'SUPERADMIN']), handlePreviewReport);

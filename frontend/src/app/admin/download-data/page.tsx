@@ -1,5 +1,17 @@
 ﻿'use client';
 
+/**
+ * Download Data Page (Admin)
+ * ─────────────────────────────────────
+ * ทำไมหน้านี้มีขั้นตอน preview ก่อน download?
+ * - ช่วยให้ admin ตรวจข้อมูลก่อน (max 20 rows) ช่วยลดการ download ผิด
+ * - ไม่มี branch selector เพราะ Admin เห็นเฉพาะสาขาตัวเอง (backend filter ให้)
+ *
+ * ทำไมใช้ Intl.DateTimeFormat('en-CA') สำหรับ format วันที่?
+ * - en-CA locale ได้ format YYYY-MM-DD โดยอัตโนมัติ (ISO format)
+ * - timezone: Asia/Bangkok เพื่อให้ได้วันที่ไทย (ไม่ใช่ UTC)
+ */
+
 import { useState, useCallback, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';

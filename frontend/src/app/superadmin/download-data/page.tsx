@@ -1,5 +1,18 @@
 ﻿'use client';
 
+/**
+ * Download Data Page (SuperAdmin)
+ * ─────────────────────────────────────
+ * ต่างจาก Admin download page อย่างไร?
+ * - SuperAdmin มี branch dropdown เพื่อเลือกดูข้อมูลแต่ละสาขาหรือทั้งหมด
+ * - Admin ไม่มี dropdown (เห็นเฉพาะสาขาตัวเอง)
+ * - ทั้ง 2 หน้าใช้ downloadService เดียวกัน
+ *
+ * ทำไมกรอง ALLOWED_BRANCHES?
+ * - ไม่อยากให้สาขาทดสอบ (seed data) หรือสาขาในอนาคต (ถ้ามี) แสดงใน dropdown
+ * - filter เฉพาะ 4 สาขาหลัก: กรุงเทพ, เชียงใหม่, ขอนแก่น, ภูเก็ต
+ */
+
 import { useState, useCallback, useEffect, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { Card } from '@/components/ui/card';

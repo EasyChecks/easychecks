@@ -1,5 +1,22 @@
 "use client";
 
+/**
+ * SuperAdmin Dashboard Page
+ * ─────────────────────────────────────
+ * ต่างจาก Admin Dashboard อย่างไร?
+ * - SuperAdmin มี branch selector dropdown เพื่อเลือกดูข้อมูลแต่ละสาขาหรือทั้งหมด
+ * - Admin เห็นแค่สาขาตัวเอง (backend filter ตาม branchId จาก token)
+ * - ทั้ง 2 หน้าใช้ component เดียวกัน (Donut, Table, Map) แต่ data flow ต่างกัน
+ *
+ * ทำไม fetchDashboardData ต้องรับ branchIdNum?
+ * - SuperAdmin เลือก "all" → branchIdNum=undefined → backend ส่งทุกสาขา
+ * - SuperAdmin เลือกสาขา → branchIdNum=เลข → backend filter เฉพาะสาขานั้น
+ *
+ * ทำไมมี WebSocket เหมือนกัน?
+ * - ทั้ง 2 หน้าต้องการแสดงข้อมูลสดเมื่อพนักงาน check-in/check-out
+ * - WebSocket ส่ง attendance_update event แล้ว refetch data
+ */
+
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
@@ -188,7 +205,9 @@ export default function AdminDashboard() {
     });
   }, []);
 
-  // Refs to avoid stale closure in WebSocket handler
+// ทำไมใช้ Ref สำหรับ selectedBranch/selectedDate/selectedEventId?
+  // - WebSocket callback เป็น stale closure → Ref ให้เข้าถึงค่าล่าสุด
+  // - ถ้าใช้ state ตรงๆ จะได้ค่าเก่าตอน WebSocket connect (เพราะ dependency ไม่เปลี่ยน)
   const selectedBranchRef = useRef(selectedBranch);
   const selectedDateRef = useRef(selectedDate);
   const selectedEventIdRef = useRef(selectedEventId);
@@ -196,7 +215,9 @@ export default function AdminDashboard() {
   useEffect(() => { selectedDateRef.current = selectedDate; }, [selectedDate]);
   useEffect(() => { selectedEventIdRef.current = selectedEventId; }, [selectedEventId]);
 
-  // Branch options: dynamic from API (filter out seed data branches matching "สาขา BR...")
+  // ทำไมกรอง seed data ("สาขา BR...") ออก?
+  // - database seed สร้างสาขาตัวอย่างชื่อ "สาขา BR001" ซึ่งไม่ใช่ข้อมูลจริง
+  // - ไม่ควรแสดงใน dropdown เพื่อไม่สับสน
   const branchOptions: BranchOption[] = useMemo(() => [
     { code: "all", name: "สาขา: ทั้งหมด" },
     ...branchesMap
@@ -205,6 +226,9 @@ export default function AdminDashboard() {
   ], [branchesMap]);
 
   // ── Fetch dashboard data when branch or date changes ──
+  // ทำไมต้อง pass branchIdNum + dateParam ทั้งคู่?
+  // - SuperAdmin เปลี่ยนได้ทั้ง branch และ date → ต้อง refetch ทั้ง 2 filter พร้อมกัน
+  // - Promise.all: ดึง 6 API พร้อมกัน (summary, employees, branches, events, locations, attendanceLogs)
   const fetchDashboardData = useCallback(async (branchIdNum: number | undefined, dateParam: string | undefined) => {
     try {
       const dateStr = dateParam ?? format(new Date(), 'yyyy-MM-dd');

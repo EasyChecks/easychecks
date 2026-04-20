@@ -1,5 +1,23 @@
 "use client";
 
+/**
+ * Event Management Page (Admin/SuperAdmin)
+ * ─────────────────────────────────────
+ * ทำไมหน้านี้ซับซ้อน?
+ * - CRUD กิจกรรม: สร้าง/แก้ไข/ลบ ผ่าน dialog form
+ * - แสดง event list + filter (search, participantType, isActive) + pagination
+ * - map แสดง pin ของกิจกรรมที่มีสถานที่
+ * - WebSocket อัพเดท event list real-time
+ *
+ * ทำไมใช้ dynamic import สำหรับ EventMap?
+ * - Leaflet ต้องการ window/document → SSR ไม่ได้ → ssr: false
+ *
+ * ทำไมต้อง map API types → UI types?
+ * - API response มี field ต่างจากที่ UI component ต้องการ
+ * - EventData (UI) มี status ที่คำนวณจาก start/end DateTime
+ * - LocationData (UI) เป็น simplified version สำหรับ map pin
+ */
+
 import { useState, useMemo, useCallback, useEffect, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -32,6 +50,10 @@ const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')
 const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'));
 
 // ── Helpers: map API types → UI types ──
+// ทำไมต้อง mapping?
+// - API response มี field เยอะ (เช่น creator, participants, location object)
+// - UI ต้องการแค่ flat fields (name, date, status, latitude, longitude)
+// - status (upcoming/ongoing/completed) คำนวณจาก startDateTime/endDateTime vs now
 const apiEventToEventData = (e: ApiEventItem): EventData => {
   const now = new Date();
   const start = e.startDateTime ? new Date(e.startDateTime) : null;

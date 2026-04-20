@@ -1,5 +1,21 @@
 "use client";
 
+/**
+ * Admin Dashboard Page
+ * ─────────────────────────────────────
+ * ทำไมหน้านี้ซับซ้อน?
+ * - รวม 3 data source: attendance summary (Donut), employee table, Leaflet map
+ * - มี real-time WebSocket อัพเดทข้อมูลทันทีเมื่อมีคน check-in
+ * - มี per-event stats: เลือกกิจกรรมจาก dropdown แล้วเห็นว่าใครเข้าร่วม/ยังไม่เข้าร่วม
+ *
+ * ทำไมใช้ dynamic import สำหรับ Map?
+ * - Leaflet ต้องการ window object → ใช้ SSR ไม่ได้ → ต้อง dynamic import { ssr: false }
+ *
+ * ทำไม Admin ไม่มี branch selector?
+ * - Admin เห็นเฉพาะสาขาตัวเอง (backend filter ตาม branchId จาก token)
+ * - SuperAdmin เท่านั้นที่มี branch dropdown
+ */
+
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
@@ -23,7 +39,9 @@ import eventService, { EventItem as ApiEventItem } from "@/services/eventService
 import locationService, { LocationItem } from "@/services/locationService";
 import type { DivIcon } from 'leaflet';
 
-// SVG icon HTML shared with EventMap (mapping-events page)
+// ทำไมใช้ SVG inline แทน image file?
+// - ต้องเปลี่ยนสีตาม type (location=น้ำเงิน, event=ส้ม) → CSS class ใน SVG ทำง่ายกว่า
+// - Leaflet DivIcon ต้องการ HTML string ไม่ใช่ React component
 const LOCATION_ICON_HTML = `<svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 3px 6px rgba(29,78,216,0.5))"><path d="M16 2C8.27 2 2 8.27 2 16c0 9.94 14 28 14 28S30 25.94 30 16C30 8.27 23.73 2 16 2z" fill="#2563eb"/><circle cx="16" cy="16" r="5" fill="white"/></svg>`;
 const EVENT_ICON_HTML = `<svg width="32" height="42" viewBox="0 0 32 42" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 3px 6px rgba(194,65,12,0.5))"><path d="M16 2C8.27 2 2 8.27 2 16c0 9.94 14 28 14 28S30 25.94 30 16C30 8.27 23.73 2 16 2z" fill="#ea580c"/><circle cx="16" cy="16" r="5" fill="white"/></svg>`;
 
@@ -182,6 +200,9 @@ export default function AdminDashboard() {
   useEffect(() => { selectedEventIdRef.current = selectedEventId; }, [selectedEventId]);
 
   // ── Fetch dashboard data ──
+  // ทำไมใช้ Promise.all? ดึง 5 API พร้อมกันเพื่อลดเวลารอ (parallel requests)
+  // ทำไม locationEvents ใช้ Promise.allSettled? เพราะ location events อาจ error ได้
+  // (เช่น ไม่มีสิทธิ์) แต่ไม่อยากให้ dashboard ทั้งหน้าพัง
   const fetchDashboardData = useCallback(async (dateParam?: string) => {
     try {
       const [summary, employees, branchesResp, eventsResp, locations] = await Promise.all([
@@ -239,6 +260,13 @@ export default function AdminDashboard() {
   }, [selectedEventId]);
 
   // ── Real-time WebSocket for attendance updates ──
+  // ทำไมต้องใช้ WebSocket?
+  // - Dashboard ต้องอัพเดทเรียลไทม์เมื่อพนักงาน check-in/check-out
+  // - ไม่ใช้ polling (setInterval) เพราะ WebSocket ประหยัด bandwidth กว่า
+  // ทำไมข้าม render.com / vercel?
+  // - free tier ไม่ support WebSocket → ใช้เฉพาะ local/self-hosted
+  // ทำไมใช้ Ref สำหรับ selectedDate/selectedEventId?
+  // - WebSocket callback เป็น stale closure → ใช้ ref เพื่อเข้าถึงค่าปัจจุบัน
   useEffect(() => {
     const wsBase =
       process.env.NEXT_PUBLIC_WS_URL ||
@@ -299,6 +327,10 @@ export default function AdminDashboard() {
   }, [fetchDashboardData]);
 
   // ── Map API employees → AttendanceStats ──
+  // ทำไมต้อง mapping EmployeeToday[] → AttendanceStats?
+  // - backend ส่งมาเป็น flat array, แต่ UI ต้องการ grouped (absent/late/onTime/leave)
+  // - ใช้ dashboardSummary เป็น source of truth สำหรับจำนวน (มาจาก aggregate query)
+  // - fall back เป็น manual count จาก employeesToday[] ถ้า summary ไม่มี
   const attendanceStats = useMemo((): AttendanceStats => {
     const toUser = (e: EmployeeToday, idx: number): User => ({
       id: String(e.employeeId || idx),
@@ -327,6 +359,9 @@ export default function AdminDashboard() {
   }, [dashboardSummary, employeesToday]);
 
   // ── Map API events → EventStats ──
+  // ทำไมคำนวณ active/today/completed ฝั่ง frontend?
+  // - backend ส่งมาเป็น raw event list (getAll), ตอนนี้ไม่มี endpoint สถิติ per-date
+  // - frontend filter ตาม selectedDate เองเพื่อ responsive UX (ไม่ต้องรอ API)
   const eventStats = useMemo((): EventStats => {
     const now = new Date();
     const activeEvts  = apiEvents.filter(e => e.isActive && new Date(e.startDateTime) <= now && new Date(e.endDateTime) >= now);
@@ -362,6 +397,10 @@ export default function AdminDashboard() {
   }, [apiEvents, employeesToday]);
 
   // ── Filter events for display in the event list ──
+  // ทำไมต้องกรองตาม branchId ของ Admin?
+  // - Admin เห็นเฉพาะกิจกรรมที่เกี่ยวกับสาขาตัวเอง
+  // - participantType=ALL → เห็นทุกคน, BRANCH → เห็นเฉพาะที่ branchId ตรง
+  // - INDIVIDUAL/ROLE → แสดงถ้ามีพนักงานสาขานี้เช็คอินเข้ากิจกรรมนี้แล้ว
   // วันนี้ → แสดงเฉพาะ ongoing/upcoming (ไม่โชว์ที่สิ้นสุดแล้ว) เรียงจากใกล้ปัจจุบันสูงสุด
   // วันอื่น → แสดงกิจกรรมที่ overlap กับวันนั้น เรียง startDateTime
   const displayedEvents = useMemo(() => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Thermometer, FileText, Plane, Heart, Shield, BookOpen, Stethoscope, Sparkles, ChevronDown, X, Trash2, Pencil } from 'lucide-react';
+import { Thermometer, FileText, Plane, Heart, Shield, BookOpen, Stethoscope, Sparkles, Clock, Pencil, X, Trash2, ChevronDown } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -794,7 +794,7 @@ function MyLeaveTab() {
             )}
 
       {/* History Requests */}
-      <div className="space-y-2">
+      <Card className="p-4 space-y-3">
         <div className="flex items-center justify-between px-1">
           <h3 className="font-semibold text-gray-800">ประวัติคำขอลา</h3>
           {historyTotal > 0 && (
@@ -807,7 +807,7 @@ function MyLeaveTab() {
           <input
             value={historyQuery}
             onChange={(e) => setHistoryQuery(e.target.value)}
-            placeholder="ค้นหาประเภท, เหตุผล, สถานะ"
+            placeholder="ค้นหาประเภท, วันที่, เหตุผล"
             className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
           />
           <StatusFilterSelect value={historyStatus} onChange={setHistoryStatus} />
@@ -884,6 +884,7 @@ function MyLeaveTab() {
           </div>
         )}
         {historyRequests.length < historyTotal && (
+        {historyRequests.length < historyTotal && (
           <Button
             type="button"
             variant="outline"
@@ -894,7 +895,7 @@ function MyLeaveTab() {
             {historyLoadingMore ? 'กำลังโหลด...' : 'โหลดเพิ่ม'}
           </Button>
         )}
-      </div>
+      </Card>
 
       {/* Success Modal */}
       {showSuccess && (
@@ -1174,6 +1175,8 @@ function MyLateTab() {
   const [editAttachmentPreview, setEditAttachmentPreview] = useState<string>('');
   const [editImagePreviewUrl, setEditImagePreviewUrl] = useState<string>('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
+  const editableLateRequests = historyRequests.filter((req) => req.status === 'PENDING');
+  const readonlyLateRequests = historyRequests.filter((req) => req.status !== 'PENDING');
 
   useEffect(() => {
     const load = async () => {
@@ -1187,24 +1190,77 @@ function MyLateTab() {
         setHistoryLoading(false);
       }
     };
-    load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const refreshHistory = useCallback(async () => {
-    setHistoryLoading(true);
-    try {
-      const h = await lateRequestService.getMyLateRequests(buildHistoryParams(0));
-      setHistoryRequests(h.lateRequests);
-      setHistoryTotal(h.total);
-    } catch {
-      setHistoryRequests([]);
-      setHistoryTotal(0);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, [buildHistoryParams]);
-
+        ) : (
+          <div className="space-y-4">
+            {editableLateRequests.length > 0 && (
+              <div>
+                <div className="space-y-2">
+                  {editableLateRequests.map((req) => (
+                    <div
+                      key={req.id}
+                      onClick={() => handleEditOpen(req)}
+                      className="rounded-2xl border border-orange-200 bg-orange-50 transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3 p-3.5">
+                        <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900 text-sm">{new Date(req.requestDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
+                            <StatusBadge status={req.status} />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
+                          </div>
+                          <div className="text-xs text-orange-600 font-medium mt-0.5">สาย {req.lateMinutes} นาที</div>
+                          {req.reason && <div className="text-xs text-gray-600 mt-1 truncate">หมายเหตุ: {req.reason}</div>}
+                          {req.rejectionReason && <div className="text-xs text-red-600 mt-1">เหตุผล: {req.rejectionReason}</div>}
+                        </div>
+                        <div className="shrink-0 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center">
+                          <Pencil className="w-3.5 h-3.5 text-orange-500" />
+                        </div>
+                      </div>
+                      <div className="px-3.5 pb-2.5 -mt-1">
+                        <span className="text-xs text-orange-500">แตะเพื่อดูรายละเอียด / แก้ไข</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {readonlyLateRequests.length > 0 && (
+              <div>
+                <div className="space-y-2">
+                  {readonlyLateRequests.map((req) => (
+                    <div
+                      key={req.id}
+                      className="rounded-2xl border border-gray-200 bg-white"
+                    >
+                      <div className="flex items-center gap-3 p-3.5">
+                        <div className="w-10 h-10 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-gray-900 text-sm">{new Date(req.requestDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
+                            <StatusBadge status={req.status} />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            กำหนด {req.scheduledTime} / มาจริง {req.actualTime}
+                          </div>
+                          <div className="text-xs text-orange-600 font-medium mt-0.5">สาย {req.lateMinutes} นาที</div>
+                          {req.reason && <div className="text-xs text-gray-600 mt-1 truncate">หมายเหตุ: {req.reason}</div>}
+                          {req.rejectionReason && <div className="text-xs text-red-600 mt-1">เหตุผล: {req.rejectionReason}</div>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
   const loadMoreHistory = async () => {
     setHistoryLoadingMore(true);
     try {
@@ -1360,7 +1416,7 @@ function MyLateTab() {
             <div>
               <label className="block text-sm text-gray-600 mb-1">เวลาที่กำหนด</label>
               <div className="flex gap-1 items-center">
-                <input type="number" min="0" max="23" placeholder="HH" value={scheduledTime.split(':')[0] || ''}
+                <input type="number" min="0" max="23" placeholder="ชม." value={scheduledTime.split(':')[0] || ''}
                   onChange={e => { 
                     const [h] = scheduledTime.split(':'); 
                     const newVal = String(parseInt(e.target.value) || 0).padStart(2, '0'); 
@@ -1369,7 +1425,7 @@ function MyLateTab() {
                   }}
                   className="w-12 px-2 py-3 border-2 border-gray-200 rounded-lg focus:border-orange-500 focus:outline-none text-center" />
                 <span className="text-gray-600">:</span>
-                <input type="number" min="0" max="59" placeholder="MM" value={scheduledTime.split(':')[1] || ''}
+                <input type="number" min="0" max="59" placeholder="นาที" value={scheduledTime.split(':')[1] || ''}
                   onChange={e => { 
                     const [h] = scheduledTime.split(':'); 
                     const newVal = String(parseInt(e.target.value) || 0).padStart(2, '0'); 
@@ -1382,7 +1438,7 @@ function MyLateTab() {
             <div>
               <label className="block text-sm text-gray-600 mb-1">เวลาที่มาจริง</label>
               <div className="flex gap-1 items-center">
-                <input type="number" min="0" max="23" placeholder="HH" value={actualTime.split(':')[0] || ''}
+                <input type="number" min="0" max="23" placeholder="ชม." value={actualTime.split(':')[0] || ''}
                   onChange={e => { 
                     const [h] = actualTime.split(':'); 
                     const newVal = String(parseInt(e.target.value) || 0).padStart(2, '0'); 
@@ -1391,7 +1447,7 @@ function MyLateTab() {
                   }}
                   className="w-12 px-2 py-3 border-2 border-gray-200 rounded-lg focus:border-orange-500 focus:outline-none text-center" />
                 <span className="text-gray-600">:</span>
-                <input type="number" min="0" max="59" placeholder="MM" value={actualTime.split(':')[1] || ''}
+                <input type="number" min="0" max="59" placeholder="นาที" value={actualTime.split(':')[1] || ''}
                   onChange={e => { 
                     const [h] = actualTime.split(':'); 
                     const newVal = String(parseInt(e.target.value) || 0).padStart(2, '0'); 
@@ -1477,7 +1533,7 @@ function MyLateTab() {
           <input
             value={historyQuery}
             onChange={(e) => setHistoryQuery(e.target.value)}
-            placeholder="ค้นหาวันที่, เหตุผล, สถานะ"
+            placeholder="ค้นหาวันที่, เหตุผล"
             className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none text-sm"
           />
           <StatusFilterSelect value={historyStatus} onChange={setHistoryStatus} />
@@ -1560,7 +1616,7 @@ function MyLateTab() {
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่กำหนด</label>
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                   <div className="min-w-0">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editScheduledHour}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="ชม." value={editScheduledHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledHour(val);
@@ -1569,7 +1625,7 @@ function MyLateTab() {
                   </div>
                   <div className="text-lg text-gray-400">:</div>
                   <div className="min-w-0">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editScheduledMin}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="นาที" value={editScheduledMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditScheduledMin(val);
@@ -1584,7 +1640,7 @@ function MyLateTab() {
                 <label className="block text-base font-semibold text-gray-700 mb-2">เวลาที่มาจริง</label>
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                   <div className="min-w-0">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="HH" value={editActualHour}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="ชม." value={editActualHour}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualHour(val);
@@ -1593,7 +1649,7 @@ function MyLateTab() {
                   </div>
                   <div className="text-lg text-gray-400">:</div>
                   <div className="min-w-0">
-                    <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={editActualMin}
+                    <input type="text" inputMode="numeric" maxLength={2} placeholder="นาที" value={editActualMin}
                       onChange={e => { 
                         const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 2);
                         setEditActualMin(val);

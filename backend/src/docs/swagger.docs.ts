@@ -2922,6 +2922,18 @@
  *           enum: ["true", "false"]
  *         description: กรองตามสถานะ (true = active, false = inactive)
  *       - in: query
+ *         name: includeDeleted
+ *         schema:
+ *           type: boolean
+ *         description: รวมกิจกรรมที่ถูกลบไว้ด้วย
+ *         example: false
+ *       - in: query
+ *         name: onlyDeleted
+ *         schema:
+ *           type: boolean
+ *         description: แสดงเฉพาะกิจกรรมที่ถูกลบ
+ *         example: false
+ *       - in: query
  *         name: startDate
  *         schema:
  *           type: string
@@ -4911,6 +4923,12 @@
  *           type: boolean
  *         description: กรองตามสถานะ (true = เปิดใช้งาน)
  *       - in: query
+ *         name: onlyDeleted
+ *         schema:
+ *           type: boolean
+ *         description: แสดงเฉพาะที่ถูกลบ (soft delete)
+ *         example: false
+ *       - in: query
  *         name: skip
  *         schema:
  *           type: integer
@@ -4920,7 +4938,7 @@
  *         name: take
  *         schema:
  *           type: integer
- *           default: 10
+ *           default: 20
  *         description: จำนวน record ที่ต้องการ (pagination)
  *     responses:
  *       200:
@@ -4930,7 +4948,7 @@
  *             example:
  *               success: true
  *               data:
- *                 items:
+ *                 data:
  *                   - locationId: 1
  *                     locationName: "สำนักงานใหญ่"
  *                     locationType: "OFFICE"
@@ -4939,8 +4957,8 @@
  *                     radius: 150
  *                     isActive: true
  *                 total: 1
- *                 skip: 0
- *                 take: 10
+ *                 active: 1
+ *                 inactive: 0
  *       401:
  *         description: ไม่ได้ login
  */
@@ -5004,7 +5022,7 @@
 
 /**
  * @swagger
- * /api/locations/statistics:
+ * /api/locations/admin/statistics:
  *   get:
  *     summary: ดึงสถิติสถานที่ (Admin/SuperAdmin เท่านั้น)
  *     tags: [Locations]
@@ -5249,6 +5267,98 @@
 
 /**
  * @swagger
+ * /api/leave-requests/upload-attachment:
+ *   post:
+ *     summary: อัปโหลดไฟล์แนบใบลา
+ *     tags: [Leave Requests]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - base64
+ *               - mimeType
+ *             properties:
+ *               base64:
+ *                 type: string
+ *                 description: ไฟล์ในรูปแบบ Base64
+ *               mimeType:
+ *                 type: string
+ *                 example: "application/pdf"
+ *               filename:
+ *                 type: string
+ *                 description: ชื่อไฟล์ (optional)
+ *           example:
+ *             base64: "data:application/pdf;base64,..."
+ *             mimeType: "application/pdf"
+ *             filename: "leave-attachment.pdf"
+ *     responses:
+ *       200:
+ *         description: อัปโหลดสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 url: "https://storage.example.com/leave-attachment.pdf"
+ *       400:
+ *         description: ต้องระบุ base64 และ mimeType
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
+ * /api/late-requests/upload-attachment:
+ *   post:
+ *     summary: อัปโหลดไฟล์หลักฐานคำขอมาสาย
+ *     tags: [Late Requests]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - base64
+ *               - mimeType
+ *             properties:
+ *               base64:
+ *                 type: string
+ *                 description: ไฟล์ในรูปแบบ Base64
+ *               mimeType:
+ *                 type: string
+ *                 example: "image/jpeg"
+ *               filename:
+ *                 type: string
+ *                 description: ชื่อไฟล์ (optional)
+ *           example:
+ *             base64: "data:image/jpeg;base64,..."
+ *             mimeType: "image/jpeg"
+ *             filename: "late-evidence.jpg"
+ *     responses:
+ *       200:
+ *         description: อัปโหลดสำเร็จ
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 url: "https://storage.example.com/late-evidence.jpg"
+ *       400:
+ *         description: ต้องระบุ base64 และ mimeType
+ *       401:
+ *         description: ไม่ได้ login
+ */
+
+/**
+ * @swagger
  * /api/late-requests:
  *   post:
  *     summary: สร้างคำขอมาสายใหม่
@@ -5375,7 +5485,7 @@
  *             example:
  *               success: true
  *               data:
- *                 items:
+ *                 data:
  *                   - lateRequestId: 10
  *                     userId: 5
  *                     requestDate: "2026-03-10"
@@ -5408,6 +5518,14 @@
  *           enum: [PENDING, APPROVED, REJECTED]
  *         description: กรองตามสถานะ
  *       - in: query
+ *         name: query
+ *         schema:
+ *           type: string
+ *         description: |-
+ *           คำค้นหา (reason/หมายเหตุ/วันที่มาสาย)
+ *           รองรับรูปแบบวันที่: YYYY-MM-DD, DD/MM/YYYY, "D เดือน YYYY" (เช่น 10 มี.ค 2026)
+ *           รองรับ "เดือน YYYY" (เช่น มี.ค 2026), เลขวัน (เช่น 7) และ prefix ชื่อเดือนภาษาไทย
+ *       - in: query
  *         name: skip
  *         schema:
  *           type: integer
@@ -5425,7 +5543,7 @@
  *             example:
  *               success: true
  *               data:
- *                 items:
+ *                 data:
  *                   - lateRequestId: 10
  *                     requestDate: "2026-03-10"
  *                     scheduledTime: "08:30"
@@ -5705,6 +5823,267 @@
  */
 
 // ============================================================
+// 📊 LEAVE QUOTA ENDPOINTS
+// ============================================================
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Leave Quotas
+ *     description: |
+ *       📊 API สำหรับจัดการโควต้าวันลา (Leave Quotas)
+ *
+ *       **Scope:** `GLOBAL` `BRANCH` `DEPARTMENT` `USER`
+ *
+ *       **สิทธิ์การเข้าถึง:** Admin / SuperAdmin เท่านั้น
+ */
+
+/**
+ * @swagger
+ * /api/leave-quotas/effective:
+ *   get:
+ *     summary: ดึงโควต้าที่มีผลใช้งาน (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Leave Quotas]
+ *     description: |
+ *       ดึงโควต้าที่มีผลใช้งานตาม scope/target
+ *
+ *       **หมายเหตุ:** หากเป็น Admin ระบบจะบังคับ scope = BRANCH และใช้สาขาของผู้ดูแลระบบ
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: scope
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [GLOBAL, BRANCH, DEPARTMENT, USER]
+ *         description: ขอบเขตของโควต้า
+ *       - in: query
+ *         name: branchCode
+ *         schema:
+ *           type: string
+ *         description: ต้องระบุเมื่อ scope=BRANCH
+ *       - in: query
+ *         name: department
+ *         schema:
+ *           type: string
+ *         description: ต้องระบุเมื่อ scope=DEPARTMENT
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *         description: ต้องระบุเมื่อ scope=USER
+ *     responses:
+ *       200:
+ *         description: โควต้าที่มีผลใช้งาน
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 - leaveType: "SICK"
+ *                   displayName: "ลาป่วย"
+ *                   displayNameEng: "Sick Leave"
+ *                   iconName: "health"
+ *                   rules:
+ *                     maxDaysPerYear: 30
+ *                     maxPaidDaysPerYear: 30
+ *                     maxDaysTotal: null
+ *                     paid: true
+ *                     requireDocument: true
+ *                     documentAfterDays: 3
+ *                     genderRestriction: null
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ */
+
+/**
+ * @swagger
+ * /api/leave-quotas/overrides:
+ *   get:
+ *     summary: ดึงรายการ override ตาม scope/target (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Leave Quotas]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: scope
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [GLOBAL, BRANCH, DEPARTMENT, USER]
+ *       - in: query
+ *         name: branchCode
+ *         schema:
+ *           type: string
+ *         description: ต้องระบุเมื่อ scope=BRANCH
+ *       - in: query
+ *         name: department
+ *         schema:
+ *           type: string
+ *         description: ต้องระบุเมื่อ scope=DEPARTMENT
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *         description: ต้องระบุเมื่อ scope=USER
+ *     responses:
+ *       200:
+ *         description: รายการ override
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 - overrideId: 101
+ *                   scope: "BRANCH"
+ *                   leaveType: "VACATION"
+ *                   branchCode: "BKK"
+ *                   department: null
+ *                   userId: null
+ *                   maxPaidDaysPerYear: 10
+ *                   maxDaysPerYear: 10
+ *                   maxDaysTotal: null
+ *                   paid: true
+ *                   requireDocument: false
+ *                   documentAfterDays: null
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ */
+
+/**
+ * @swagger
+ * /api/leave-quotas/overrides/all:
+ *   get:
+ *     summary: ดึง override ทั้งหมดตาม scope (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Leave Quotas]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: scope
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [GLOBAL, BRANCH, DEPARTMENT, USER]
+ *     responses:
+ *       200:
+ *         description: รายการ override ตาม scope
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ */
+
+/**
+ * @swagger
+ * /api/leave-quotas:
+ *   put:
+ *     summary: บันทึก override โควต้า (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Leave Quotas]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - scope
+ *               - leaveType
+ *             properties:
+ *               scope:
+ *                 type: string
+ *                 enum: [GLOBAL, BRANCH, DEPARTMENT, USER]
+ *               leaveType:
+ *                 type: string
+ *               branchCode:
+ *                 type: string
+ *               department:
+ *                 type: string
+ *               userId:
+ *                 type: integer
+ *               maxPaidDaysPerYear:
+ *                 type: number
+ *                 nullable: true
+ *               maxDaysPerYear:
+ *                 type: number
+ *                 nullable: true
+ *               maxDaysTotal:
+ *                 type: number
+ *                 nullable: true
+ *               paid:
+ *                 type: boolean
+ *                 nullable: true
+ *               requireDocument:
+ *                 type: boolean
+ *                 nullable: true
+ *               documentAfterDays:
+ *                 type: number
+ *                 nullable: true
+ *           examples:
+ *             แก้โควต้าสาขา:
+ *               value:
+ *                 scope: "BRANCH"
+ *                 leaveType: "VACATION"
+ *                 branchCode: "BKK"
+ *                 maxPaidDaysPerYear: 10
+ *                 maxDaysPerYear: 10
+ *                 paid: true
+ *     responses:
+ *       200:
+ *         description: บันทึก override สำเร็จ
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ *   delete:
+ *     summary: ลบ override โควต้า (Admin/SuperAdmin เท่านั้น)
+ *     tags: [Leave Quotas]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - scope
+ *               - leaveType
+ *             properties:
+ *               scope:
+ *                 type: string
+ *                 enum: [GLOBAL, BRANCH, DEPARTMENT, USER]
+ *               leaveType:
+ *                 type: string
+ *               branchCode:
+ *                 type: string
+ *               department:
+ *                 type: string
+ *               userId:
+ *                 type: integer
+ *           examples:
+ *             ลบโควต้าพนักงาน:
+ *               value:
+ *                 scope: "USER"
+ *                 leaveType: "SICK"
+ *                 userId: 12
+ *     responses:
+ *       200:
+ *         description: ลบ override สำเร็จ
+ *       401:
+ *         description: ไม่ได้ login
+ *       403:
+ *         description: ไม่มีสิทธิ์ — ต้องเป็น Admin/SuperAdmin
+ */
+
+// ============================================================
 // 🏖️ LEAVE REQUEST ENDPOINTS
 // ============================================================
 
@@ -5854,7 +6233,7 @@
  *             example:
  *               success: true
  *               data:
- *                 items:
+ *                 data:
  *                   - leaveRequestId: 20
  *                     userId: 5
  *                     leaveType: "SICK"
@@ -5887,6 +6266,14 @@
  *           enum: [PENDING, APPROVED, REJECTED]
  *         description: กรองตามสถานะ
  *       - in: query
+ *         name: query
+ *         schema:
+ *           type: string
+ *         description: |-
+ *           คำค้นหา (reason/หมายเหตุ/ประเภทการลา/สถานะ/วันที่ลา)
+ *           รองรับรูปแบบวันที่: YYYY-MM-DD, DD/MM/YYYY, "D เดือน YYYY" (เช่น 10 มี.ค 2026)
+ *           รองรับ "เดือน YYYY" (เช่น มี.ค 2026), เลขวัน (เช่น 7) และ prefix ชื่อเดือนภาษาไทย
+ *       - in: query
  *         name: skip
  *         schema:
  *           type: integer
@@ -5904,7 +6291,7 @@
  *             example:
  *               success: true
  *               data:
- *                 items:
+ *                 data:
  *                   - leaveRequestId: 20
  *                     leaveType: "SICK"
  *                     startDate: "2026-03-15"

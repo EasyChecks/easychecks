@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
-import type { LeaveRequest, LeaveStatus, LeaveType, Gender, Prisma, Role } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { LeaveRequest, LeaveStatus, LeaveType, Gender, Role } from '@prisma/client';
 import { differenceInBusinessDays, differenceInCalendarDays, startOfYear, endOfYear } from 'date-fns';
 import { createAuditLog, AuditAction } from './audit.service.js';
 import { BadRequestError, ConflictError, NotFoundError, ForbiddenError } from '../utils/custom-errors.js';
@@ -96,6 +97,130 @@ export interface UpdateLeaveRequestDTO {
 
 function isValidTimeFormat(time: string): boolean {
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(time);
+}
+
+const THAI_MONTHS: Record<string, number> = {
+  'ม.ค': 1,
+  'มกราคม': 1,
+  'ก.พ': 2,
+  'กุมภาพันธ์': 2,
+  'มี.ค': 3,
+  'มีนาคม': 3,
+  'เม.ย': 4,
+  'เมษายน': 4,
+  'พ.ค': 5,
+  'พฤษภาคม': 5,
+  'มิ.ย': 6,
+  'มิถุนายน': 6,
+  'ก.ค': 7,
+  'กรกฎาคม': 7,
+  'ส.ค': 8,
+  'สิงหาคม': 8,
+  'ก.ย': 9,
+  'กันยายน': 9,
+  'ต.ค': 10,
+  'ตุลาคม': 10,
+  'พ.ย': 11,
+  'พฤศจิกายน': 11,
+  'ธ.ค': 12,
+  'ธันวาคม': 12,
+};
+
+function normalizeSearchYear(rawYear: string): number | null {
+  const yearNum = Number(rawYear);
+  if (!Number.isFinite(yearNum)) return null;
+
+  if (rawYear.length === 4) {
+    return yearNum > 2400 ? yearNum - 543 : yearNum;
+  }
+
+  if (rawYear.length === 2) {
+    const currentYear = new Date().getFullYear();
+    const candidateA = 2000 + yearNum;
+    const candidateB = 1957 + yearNum;
+    return Math.abs(candidateA - currentYear) <= Math.abs(candidateB - currentYear)
+      ? candidateA
+      : candidateB;
+  }
+
+  return yearNum;
+}
+
+function toDateRange(year: number, month: number, day: number): { start: Date; end: Date } | null {
+  const start = new Date(year, month - 1, day);
+  if (
+    start.getFullYear() !== year ||
+    start.getMonth() !== month - 1 ||
+    start.getDate() !== day
+  ) {
+    return null;
+  }
+  const end = new Date(year, month - 1, day + 1);
+  return { start, end };
+}
+
+function toMonthRange(year: number, month: number): { start: Date; end: Date } {
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 1);
+  return { start, end };
+}
+
+function normalizeMonthKey(raw: string): string {
+  return raw.replace(/\./g, '').trim();
+}
+
+function matchThaiMonthPrefix(search: string): number[] {
+  const normalized = normalizeMonthKey(search);
+  if (!normalized) return [];
+
+  const months = new Set<number>();
+  for (const [rawKey, monthValue] of Object.entries(THAI_MONTHS)) {
+    const key = normalizeMonthKey(rawKey);
+    if (key.startsWith(normalized)) {
+      months.add(monthValue);
+    }
+  }
+
+  return Array.from(months);
+}
+
+function parseDateSearch(search: string): { start: Date; end: Date } | null {
+  const trimmed = search.trim();
+
+  let match = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (match) {
+    const year = normalizeSearchYear(match[1]);
+    if (!year) return null;
+    return toDateRange(year, Number(match[2]), Number(match[3]));
+  }
+
+  match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (match) {
+    const year = normalizeSearchYear(match[3]);
+    if (!year) return null;
+    return toDateRange(year, Number(match[2]), Number(match[1]));
+  }
+
+  match = trimmed.match(/^(\d{1,2})\s+([^\s]+)\s+(\d{2,4})$/);
+  if (match) {
+    const day = Number(match[1]);
+    const monthKey = match[2].replace(/\./g, '').trim();
+    const month = THAI_MONTHS[monthKey];
+    const year = normalizeSearchYear(match[3]);
+    if (!month || !year) return null;
+    return toDateRange(year, month, day);
+  }
+
+  match = trimmed.match(/^([^\s]+)\s+(\d{2,4})$/);
+  if (match) {
+    const monthKey = match[1].replace(/\./g, '').trim();
+    const month = THAI_MONTHS[monthKey];
+    const year = normalizeSearchYear(match[2]);
+    if (!month || !year) return null;
+    return toMonthRange(year, month);
+  }
+
+  return null;
 }
 
 function calculateLeaveHours(startTime: string, endTime: string): number {
@@ -757,7 +882,6 @@ async function getLeaveRequestsByUser(
     if (lower.includes('รอ') || lower.includes('pending')) statusMatches.push('PENDING');
 
     const or: Prisma.LeaveRequestWhereInput[] = [
-      { leaveType: { contains: search, mode: 'insensitive' } },
       { reason: { contains: search, mode: 'insensitive' } },
       { rejectionReason: { contains: search, mode: 'insensitive' } },
     ];
@@ -766,6 +890,54 @@ async function getLeaveRequestsByUser(
     }
     if (statusMatches.length) {
       or.push({ status: { in: statusMatches } });
+    }
+
+    const dateRange = parseDateSearch(search);
+    if (dateRange) {
+      or.push({
+        OR: [
+          { startDate: { lt: dateRange.end }, endDate: { gte: dateRange.start } },
+          { startDate: { gte: dateRange.start, lt: dateRange.end } },
+          { endDate: { gte: dateRange.start, lt: dateRange.end } },
+        ],
+      });
+    }
+
+    const dayMatch = search.match(/^\d{1,2}$/);
+    if (dayMatch) {
+      const dayPrefix = dayMatch[0];
+      const rows = await prisma.$queryRaw<Array<{ leaveId: number }>>`
+        SELECT leave_id AS "leaveId"
+        FROM leave_requests
+        WHERE user_id = ${userId}
+          AND deleted_at IS NULL
+          AND (
+            to_char(start_date, 'FMDD') LIKE ${`${dayPrefix}%`}
+            OR to_char(end_date, 'FMDD') LIKE ${`${dayPrefix}%`}
+          )
+      `;
+      const ids = rows.map((row) => row.leaveId).filter((id) => Number.isFinite(id));
+      if (ids.length) {
+        or.push({ leaveId: { in: ids } });
+      }
+    }
+
+    const monthCandidates = matchThaiMonthPrefix(search);
+    if (monthCandidates.length) {
+      const rows = await prisma.$queryRaw<Array<{ leaveId: number }>>`
+        SELECT leave_id AS "leaveId"
+        FROM leave_requests
+        WHERE user_id = ${userId}
+          AND deleted_at IS NULL
+          AND (
+            EXTRACT(MONTH FROM start_date) IN (${Prisma.join(monthCandidates)})
+            OR EXTRACT(MONTH FROM end_date) IN (${Prisma.join(monthCandidates)})
+          )
+      `;
+      const ids = rows.map((row) => row.leaveId).filter((id) => Number.isFinite(id));
+      if (ids.length) {
+        or.push({ leaveId: { in: ids } });
+      }
     }
     where.OR = or;
   }

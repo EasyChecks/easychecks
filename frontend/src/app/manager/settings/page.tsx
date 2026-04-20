@@ -71,8 +71,12 @@ export default function ManagerSettingsPage() {
         className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center gap-4 active:bg-gray-50 transition-colors"
       >
         {/* Avatar */}
-        <div className="w-16 h-16 bg-gradient-to-br from-[#f26623] to-[#ea580c] rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md shrink-0">
-          {user?.name?.charAt(0) || 'U'}
+        <div className="w-16 h-16 bg-gradient-to-br from-[#f26623] to-[#ea580c] rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md shrink-0 overflow-hidden">
+          {user?.avatar ? (
+            <img src={user.avatar} alt="avatar" className="w-16 h-16 object-cover rounded-full" />
+          ) : (
+            user?.name?.charAt(0) || 'U'
+          )}
         </div>
 
         {/* Info */}

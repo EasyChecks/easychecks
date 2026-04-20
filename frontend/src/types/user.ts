@@ -28,6 +28,7 @@ export interface AttendanceCheckData {
   };
   status?: 'onTime' | 'late';
   note?: string;
+  photo?: string;
 }
 
 export interface AttendanceRecord {

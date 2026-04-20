@@ -166,6 +166,7 @@ function mapBackendUserToFrontend(backendUser: Record<string, unknown>): User {
           relation: String(backendUser.emergent_relation ?? backendUser.emergentRelation ?? ''),
         }
       : undefined,
+    adminPassword: backendUser.adminPassword ? String(backendUser.adminPassword) : undefined,
     attendanceRecords: [],
   };
 }

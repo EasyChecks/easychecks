@@ -201,7 +201,28 @@ export function splitName(fullName: string): { firstName: string; lastName: stri
 }
 
 /**
- * 🔢 Generate Employee ID จาก branchCode + running number
+ * � Generate adminPassword สำหรับ ADMIN/SUPERADMIN
+ * - ADMIN → admXXXX (running number 4 หลัก)
+ * - SUPERADMIN → supXXXX (running number 4 หลัก)
+ */
+async function generateAdminPassword(role: string): Promise<string | null> {
+  if (role === 'ADMIN') {
+    const count = await prisma.user.count({
+      where: { role: 'ADMIN', adminPassword: { not: null } },
+    });
+    return `adm${String(count + 1).padStart(4, '0')}`;
+  }
+  if (role === 'SUPERADMIN') {
+    const count = await prisma.user.count({
+      where: { role: 'SUPERADMIN', adminPassword: { not: null } },
+    });
+    return `sup${String(count + 1).padStart(4, '0')}`;
+  }
+  return null;
+}
+
+/**
+ * �🔢 Generate Employee ID จาก branchCode + running number
  * Format: {branchCode}{3-digit running number}
  * เช่น BKK001, CNX002, HKT003
  */
@@ -398,6 +419,11 @@ export const createUser = async (data: CreateUserDTO) => {
   // ถ้าเปลี่ยนรหัสภายหลัง hash ใหม่จะ overwrite ค่านี้
   const hashedPassword = await hashPassword(data.password ?? data.nationalId);  // ← hash ด้วย bcrypt (salt rounds 10)
 
+  // ✅ STEP 6.5: Auto-generate adminPassword สำหรับ ADMIN/SUPERADMIN
+  // ═══════════════════════════════════════════════════════════════
+  const effectiveRole = data.role || 'USER';
+  const adminPassword = await generateAdminPassword(effectiveRole);
+
   // ✅ STEP 7: Upload avatar ไปยัง Supabase Storage
   // ════════════════════════════════════════════════
   // fallback เป็น ui-avatars.com ถ้า upload ล้มเหลว
@@ -443,6 +469,7 @@ export const createUser = async (data: CreateUserDTO) => {
       branchId: data.branchId,                       // ← สาขา
       role: data.role || 'USER',                     // ← role (default = USER)
       status: data.status || 'ACTIVE',               // ← status (default = ACTIVE)
+      adminPassword,                                  // ← auto-generated (admXXXX / supXXXX / null)
       department: data.department || null,            // ← แผนก
       position: data.position || null,               // ← ตำแหน่ง
       bloodType: data.bloodType || null,             // ← กรุ๊ปเลือด
@@ -564,6 +591,7 @@ export const getUsers = async (
       branchId: true,               // ← สาขา
       role: true,                   // ← role
       status: true,                 // ← status
+      adminPassword: true,          // ← adminPassword (admXXXX / supXXXX / null)
       createdAt: true,              // ← วันที่สร้าง
       updatedAt: true,              // ← วันที่อัปเดตล่าสุด
       branch: {                     // ← JOIN กับ branches table
@@ -639,6 +667,7 @@ export const getUserById = async (
       branchId: true,               // ← สาขา
       role: true,                   // ← role
       status: true,                 // ← status
+      adminPassword: true,          // ← adminPassword (admXXXX / supXXXX / null)
       createdAt: true,              // ← วันที่สร้าง
       updatedAt: true,              // ← วันที่อัปเดตล่าสุด
       branch: {                     // ← JOIN กับ branches table
@@ -761,6 +790,20 @@ export const updateUser = async (
   if (data.branchId !== undefined) updateData.branchId = data.branchId;               // ← อัปเดตสาขา
   if (data.role !== undefined) updateData.role = data.role;                           // ← อัปเดต role
   if (data.status !== undefined) updateData.status = data.status;                     // ← อัปเดต status
+
+  // Auto-generate adminPassword เมื่อเปลี่ยน role เป็น ADMIN/SUPERADMIN
+  if (data.role !== undefined) {
+    const newRole = String(data.role).toUpperCase();
+    const oldRole = existingUser.role;
+    if ((newRole === 'ADMIN' || newRole === 'SUPERADMIN') && newRole !== oldRole) {
+      // role เปลี่ยนเป็น admin/superadmin → gen adminPassword ใหม่
+      updateData.adminPassword = await generateAdminPassword(newRole);
+    } else if (newRole !== 'ADMIN' && newRole !== 'SUPERADMIN' && existingUser.adminPassword) {
+      // role เปลี่ยนออกจาก admin/superadmin → ลบ adminPassword
+      updateData.adminPassword = null;
+    }
+  }
+
   if (data.department !== undefined) updateData.department = data.department || null;  // ← อัปเดตแผนก (หรือ null)
   if (data.position !== undefined) updateData.position = data.position || null;       // ← อัปเดตตำแหน่ง (หรือ null)
   if (data.bloodType !== undefined) updateData.bloodType = data.bloodType || null;    // ← อัปเดตกรุ๊ปเลือด (หรือ null)
@@ -816,6 +859,7 @@ export const updateUser = async (
       branchId: true,               // ← สาขา
       role: true,                   // ← role
       status: true,                 // ← status
+      adminPassword: true,          // ← adminPassword (admXXXX / supXXXX / null)
       createdAt: true,              // ← วันที่สร้าง
       updatedAt: true,              // ← วันที่อัปเดตล่าสุด
       branch: {                     // ← JOIN กับ branches table

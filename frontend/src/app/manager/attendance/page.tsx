@@ -1,20 +1,6 @@
 'use client';
 
-/**
- * หน้า Attendance (src/app/manager/attendance/page.tsx)
- * ────────────────────────────────────────────────────
- * ทำหน้าที่: ให้ manager บันทึกเวลาเข้า-ออกงาน (เหมือน user 100%)
- *
- * Flow การใช้งาน:
- *  1. โหลดหน้า → ดึงสถานะวันนี้ + สถิติเดือนนี้ + กะที่ใช้ได้วันนี้
- *  2. กดปุ่ม "เข้างาน" หรือ "ออกงาน" → เปิดกล้อง + ดึง GPS อัตโนมัติ
- *  3. ถ่ายรูป → เลือกกะ (ถ้ามีหลายกะ) → กด "ยืนยัน"
- *  4. ส่งข้อมูลไป backend → แสดง popup สำเร็จ → reload สถิติ
- *
- * Component มี 2 โหมด UI:
- *  - mode = null     → หน้าหลัก (แสดงสถานะ + ปุ่ม + สถิติ)
- *  - mode = 'checkIn' | 'checkOut' → หน้ากล้อง + ยืนยันตำแหน่ง
- */
+
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -29,7 +15,6 @@ export default function ManagerAttendancePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // ถ้าเข้ามาโดยไม่มี ?mode= → redirect ไปที่ dashboard
   useEffect(() => {
     const m = searchParams.get('mode');
     if (!m || (m !== 'checkIn' && m !== 'checkOut')) {
@@ -37,7 +22,6 @@ export default function ManagerAttendancePage() {
     }
   }, [searchParams, router]);
 
-  // ── State หลักของ UI ──
   const [mode, setMode] = useState<'checkIn' | 'checkOut' | null>(() => {
     const m = searchParams.get('mode');
     if (m === 'checkIn' || m === 'checkOut') return m;
@@ -64,7 +48,6 @@ export default function ManagerAttendancePage() {
     setMessageModal({ open: true, message });
   }, []);
 
-  // ── Refs สำหรับกล้อง ──
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -115,7 +98,7 @@ export default function ManagerAttendancePage() {
     if (mode) {
       navigator.geolocation?.getCurrentPosition(
         (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => {/* GPS ไม่บังคับ */}
+        () => undefined
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,6 +173,11 @@ export default function ManagerAttendancePage() {
   }, [startCamera]);
 
   const handleSubmit = useCallback(async () => {
+    if (mode === 'checkIn' && shifts.length === 0) {
+      openMessageModal('วันนี้ไม่มีกะงานที่สามารถลงเวลาได้');
+      return;
+    }
+
     if (!photo.data) {
       openMessageModal('กรุณาถ่ายรูปก่อนยืนยัน');
       return;
@@ -271,14 +259,11 @@ export default function ManagerAttendancePage() {
   }, [stopCamera, router]);
 
 
-  // ─────────────────────────────────────────────────────────────
-  // UI โหมดกล้อง — fullscreen overlay matching Figma design
-  // ─────────────────────────────────────────────────────────────
   if (mode) {
     return (
       <div className="fixed inset-0 z-9999 flex flex-col bg-[#f5f6f7]">
 
-        {/* ── Orange gradient header ── */}
+        
         <div className="bg-linear-to-r from-[#f26623] to-[#ea580c] px-4 pt-12 pb-5">
           <div className="flex items-center gap-3 mb-1">
             <button onClick={handleCancel} className="text-white p-1 -ml-1 rounded-full hover:bg-white/20 transition-colors">
@@ -291,15 +276,15 @@ export default function ManagerAttendancePage() {
           <p className="text-white/80 text-sm ml-9">ถ่ายรูปเพื่อบันทึกเวลา</p>
         </div>
 
-        {/* ── Body ── */}
+        
         <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto">
 
-          {/* ── Camera area ── */}
+          
           <div
             className="relative bg-[#1e293b] rounded-2xl overflow-hidden flex items-center justify-center border-2 border-[#f26623]"
             style={{ minHeight: '340px' }}
           >
-            {/* State 1: กล้องยังไม่เปิด */}
+            
             {!ui.isCameraActive && !photo.taken && (
               <div className="flex flex-col items-center gap-4 text-white/40 select-none">
                 <div className="w-24 h-24 rounded-full border-2 border-white/15 flex items-center justify-center">
@@ -311,7 +296,7 @@ export default function ManagerAttendancePage() {
               </div>
             )}
 
-            {/* State 2: กล้องเปิดแล้ว (live preview) */}
+            
             <video
               ref={videoRef}
               autoPlay
@@ -323,7 +308,7 @@ export default function ManagerAttendancePage() {
               style={{ minHeight: '340px' }}
             />
 
-            {/* Shutter button */}
+            
             {ui.isCameraActive && !photo.taken && (
               <button
                 onClick={takePhoto}
@@ -333,7 +318,7 @@ export default function ManagerAttendancePage() {
               </button>
             )}
 
-            {/* State 3: photo taken */}
+            
             {photo.taken && photo.data && (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
@@ -345,10 +330,10 @@ export default function ManagerAttendancePage() {
             )}
           </div>
 
-          {/* hidden canvas for capture */}
+          
           <canvas ref={canvasRef} className="hidden" />
 
-          {/* ── GPS status indicator ── */}
+          
           <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm ${
             location && !(location.lat === 0 && location.lng === 0)
               ? 'bg-green-100 text-green-800'
@@ -369,7 +354,7 @@ export default function ManagerAttendancePage() {
             )}
           </div>
 
-          {/* ── Shift selector (when multiple shifts & photo taken) ── */}
+          
           {shifts.length > 1 && photo.taken && (
             <div className="bg-white rounded-2xl p-4 space-y-2 shadow-sm">
               <p className="text-gray-700 text-sm font-bold mb-2">เลือกกะทำงาน</p>
@@ -402,8 +387,8 @@ export default function ManagerAttendancePage() {
             </div>
           )}
 
-          {/* ── Bottom buttons ── */}
-          {/* State 1: Camera not open → open camera button */}
+          
+          
           {!ui.isCameraActive && !photo.taken && (
             <button
               onClick={startCamera}
@@ -417,7 +402,7 @@ export default function ManagerAttendancePage() {
             </button>
           )}
 
-          {/* State 3: Photo taken → cancel + confirm */}
+          
           {photo.taken && (
             <div className="flex gap-3">
               <button
@@ -445,7 +430,7 @@ export default function ManagerAttendancePage() {
           )}
         </div>
 
-        {/* ── Success Modal (พร้อมนับถอยหลัง redirect) ── */}
+        
         {ui.showSuccess && (
           <div className="fixed inset-0 z-99999 flex items-end justify-center bg-black/60">
             <div className="w-full bg-white rounded-t-3xl p-6 text-center space-y-4 pb-10">
@@ -506,6 +491,5 @@ export default function ManagerAttendancePage() {
     );
   }
 
-  // ถ้า mode ไม่ถูกตั้ง → ไม่แสดงอะไร (ระบบจะ redirect ไปที่ dashboard อัตโนมัติผ่าน useEffect)
   return null;
 }

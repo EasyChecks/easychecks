@@ -176,7 +176,7 @@
  *       ค่า default: gracePeriodMinutes=15, lateThresholdMinutes=30
  *
  *       **shiftType:**
- *       - `REGULAR` — ใช้ทุกวัน ไม่กำหนดวัน
+ *       - `REGULAR` — ใช้วันจันทร์-ศุกร์
  *       - `SPECIFIC_DAY` — ต้องระบุ specificDays เช่น ["MONDAY","FRIDAY"]
  *       - `CUSTOM` — ต้องระบุ customDate วันเดียว เช่น "2026-03-15"
  *
@@ -203,7 +203,7 @@
  *             $ref: '#/components/schemas/CreateShiftRequest'
  *           examples:
  *             กะเช้าประจำ:
- *               summary: กะเช้า REGULAR ทุกวัน
+ *               summary: กะเช้า REGULAR วันจันทร์-ศุกร์
  *               value:
  *                 name: "กะเช้า"
  *                 shiftType: "REGULAR"
@@ -374,7 +374,7 @@
  *       ไม่ต้องแสดงกะวันอื่น เพื่อลด confusion
  *
  *       **Logic:**
- *       - REGULAR → ใช้ได้ทุกวัน
+ *       - REGULAR → ใช้ได้วันจันทร์-ศุกร์
  *       - SPECIFIC_DAY → ต้องตรงกับวันในสัปดาห์วันนี้
  *       - CUSTOM → ต้อง customDate ตรงกับวันนี้
  *     tags:
@@ -1681,92 +1681,6 @@
 
 /**
  * @swagger
- * /api/users/statistics:
- *   get:
- *     summary: ดึงสถิติพนักงาน (สำหรับ Dashboard)
- *     description: |
- *       ดึงข้อมูลสรุปจำนวนพนักงานตาม role และสถานะ
- *       ใช้แสดงการ์ดสถิติบน Admin Dashboard
- *     tags:
- *       - Users
- *     security:
- *       - BearerAuth: []
- *     responses:
- *       200:
- *         description: ข้อมูลสถิติพนักงาน
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     total:
- *                       type: integer
- *                       example: 85
- *                       description: จำนวนพนักงานทั้งหมด
- *                     active:
- *                       type: integer
- *                       example: 80
- *                       description: จำนวนพนักงาน Active
- *                     inactive:
- *                       type: integer
- *                       example: 3
- *                       description: จำนวนพนักงาน Inactive
- *                     resigned:
- *                       type: integer
- *                       example: 2
- *                       description: จำนวนพนักงานที่ลาออกแล้ว
- *                     byRole:
- *                       type: object
- *                       properties:
- *                         USER:
- *                           type: integer
- *                           example: 70
- *                         MANAGER:
- *                           type: integer
- *                           example: 8
- *                         ADMIN:
- *                           type: integer
- *                           example: 5
- *       400:
- *         description: ไม่ระบุ requesterRole
- *       401:
- *         description: ไม่ได้ login
- */
-
-/**
- * @swagger
- * /api/users/csv-template:
- *   get:
- *     summary: ดาวน์โหลด CSV Template สำหรับ Bulk Import
- *     description: |
- *       ดาวน์โหลดไฟล์ CSV ตัวอย่างสำหรับนำเข้าพนักงานจำนวนมาก
- *       ไฟล์มี header row และ 2 row ตัวอย่าง
- *
- *       **หมายเหตุ:** `employeeId` ไม่ต้องใส่ ระบบจะ auto-generate ให้
- *     tags:
- *       - Users
- *     security:
- *       - BearerAuth: []
- *     responses:
- *       200:
- *         description: ไฟล์ CSV template
- *         content:
- *           text/csv:
- *             schema:
- *               type: string
- *               example: |
- *                 title,firstName,lastName,nickname,gender,nationalId,...
- *                 MR,สมชาย,ใจดี,ชาย,MALE,1234567890123,...
- */
-
-/**
- * @swagger
  * /api/users/bulk:
  *   post:
  *     summary: นำเข้าพนักงานจำนวนมากจาก CSV (Bulk Import)
@@ -2746,6 +2660,154 @@
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 
+/**
+ * @swagger
+ * /api/dashboard/event-stats/{eventId}:
+ *   get:
+ *     summary: สถิติการเข้าร่วมกิจกรรมรายกิจกรรม (Admin/SuperAdmin only)
+ *     description: |
+ *       ดึงรายชื่อผู้เข้าร่วม + ยังไม่เข้าร่วม ของกิจกรรมที่เลือก
+ *       ใช้แสดงใน Dashboard เมื่อ Admin เลือกกิจกรรมจาก dropdown
+ *
+ *       **Logic:**
+ *       - ดึง event พร้อม participants + attendance records
+ *       - ADMIN เห็นเฉพาะ attendance ของสาขาตัวเอง
+ *       - participantType=ALL → `isOpenEvent=true`, ไม่สามารถคำนวณ "ยังไม่เข้าร่วม" ได้ (เพราะทุกคนมีสิทธิ์)
+ *       - participantType อื่น → เปรียบเทียบ participants กับ attendance → หา notJoined
+ *     tags:
+ *       - Dashboard
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: eventId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *         description: Event ID ที่ต้องการดูสถิติ
+ *     responses:
+ *       200:
+ *         description: ดึงสถิติกิจกรรมสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     eventId:
+ *                       type: integer
+ *                       example: 1
+ *                     eventName:
+ *                       type: string
+ *                       example: "กิจกรรม Team Building"
+ *                     participantType:
+ *                       type: string
+ *                       enum: [ALL, INDIVIDUAL, BRANCH, ROLE]
+ *                     isOpenEvent:
+ *                       type: boolean
+ *                       example: false
+ *                       description: true ถ้า participantType=ALL (ไม่สามารถนับ notJoined)
+ *                     joined:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           userId:
+ *                             type: integer
+ *                           employeeId:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           branch:
+ *                             type: string
+ *                           checkIn:
+ *                             type: string
+ *                             example: "08:30"
+ *                           status:
+ *                             type: string
+ *                             example: "ON_TIME"
+ *                     notJoined:
+ *                       type: array
+ *                       description: ว่างถ้า isOpenEvent=true
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           userId:
+ *                             type: integer
+ *                           employeeId:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           branch:
+ *                             type: string
+ *                     joinedCount:
+ *                       type: integer
+ *                       example: 12
+ *                     notJoinedCount:
+ *                       type: integer
+ *                       example: 3
+ *                       description: 0 ถ้า isOpenEvent=true
+ *             examples:
+ *               กิจกรรม BRANCH:
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     eventId: 1
+ *                     eventName: "ประชุมสาขา"
+ *                     participantType: "BRANCH"
+ *                     isOpenEvent: false
+ *                     joined:
+ *                       - userId: 1
+ *                         employeeId: "EMP001"
+ *                         name: "สมชาย ใจดี"
+ *                         branch: "สาขากรุงเทพ"
+ *                         checkIn: "08:30"
+ *                         status: "ON_TIME"
+ *                     notJoined:
+ *                       - userId: 2
+ *                         employeeId: "EMP002"
+ *                         name: "สมหญิง รักดี"
+ *                         branch: "สาขากรุงเทพ"
+ *                     joinedCount: 1
+ *                     notJoinedCount: 1
+ *               กิจกรรม ALL (open):
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     eventId: 5
+ *                     eventName: "Team Building"
+ *                     participantType: "ALL"
+ *                     isOpenEvent: true
+ *                     joined:
+ *                       - userId: 1
+ *                         employeeId: "EMP001"
+ *                         name: "สมชาย ใจดี"
+ *                         branch: "สาขากรุงเทพ"
+ *                         checkIn: "09:00"
+ *                         status: "ON_TIME"
+ *                     notJoined: []
+ *                     joinedCount: 1
+ *                     notJoinedCount: 0
+ *       404:
+ *         description: ไม่พบกิจกรรม
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
 // ════════════════════════════════════════════════════════════
 // 🎉 EVENT ENDPOINTS
 // ════════════════════════════════════════════════════════════
@@ -3339,14 +3401,19 @@
  *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin/SuperAdmin)
  *
  *   delete:
- *     summary: ลบกิจกรรม — Soft Delete (Admin/SuperAdmin only)
+ *     summary: ลบกิจกรรม — Hard Delete (Admin/SuperAdmin only)
  *     description: |
- *       Soft delete กิจกรรม (set deleteReason + isActive=false)
+ *       ลบกิจกรรมออกจากฐานข้อมูลถาวร (Hard Delete)
  *
- *       **ข้อจำกัด:**
- *       - ไม่สามารถลบกิจกรรมที่กำลังดำเนินการอยู่ (startDateTime <= now <= endDateTime)
- *       - ไม่สามารถลบกิจกรรมที่ถูก soft delete แล้ว
- *       - สามารถกู้คืนได้ด้วย POST /api/events/:id/restore
+ *       **ขั้นตอนการลบ:**
+ *       1. ตรวจสอบว่ากิจกรรมมีอยู่จริง
+ *       2. Security check: Admin ลบได้เฉพาะกิจกรรมที่สร้างโดยคนในสาขาเดียวกัน
+ *       3. ลบ event_participants (FK constraint)
+ *       4. ลบ attendance records ที่เกี่ยวข้อง
+ *       5. ลบตัวกิจกรรม
+ *       6. บันทึก Audit Log
+ *
+ *       **⚠️ คำเตือน:** ข้อมูลถูกลบถาวร ไม่สามารถกู้คืนได้
  *     tags:
  *       - Events
  *     security:
@@ -3359,17 +3426,6 @@
  *           type: integer
  *           example: 1
  *         description: Event ID
- *         example: 1
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               deleteReason:
- *                 type: string
- *                 example: "ยกเลิกกิจกรรมเนื่องจากสถานที่ไม่พร้อม"
- *                 description: เหตุผลในการลบ (optional)
  *     responses:
  *       200:
  *         description: ลบกิจกรรมสำเร็จ
@@ -3386,65 +3442,8 @@
  *                   example: "ลบกิจกรรมเรียบร้อยแล้ว"
  *                 data:
  *                   $ref: '#/components/schemas/Event'
- *       400:
- *         description: ไม่สามารถลบกิจกรรมที่กำลังดำเนินการ หรือถูกลบแล้ว
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       404:
- *         description: ไม่พบกิจกรรม
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       401:
- *         description: ไม่ได้ login
  *       403:
- *         description: ไม่มีสิทธิ์ (ต้องเป็น Admin/SuperAdmin)
- */
-
-/**
- * @swagger
- * /api/events/{id}/restore:
- *   post:
- *     summary: กู้คืนกิจกรรมที่ถูกลบ (Admin/SuperAdmin only)
- *     description: |
- *       กู้คืนกิจกรรมที่ถูก soft delete กลับมา
- *       (set deleteReason=null, isActive=true)
- *
- *       **หมายเหตุ:** isActive จะถูก set เป็น true อัตโนมัติ
- *     tags:
- *       - Events
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *           example: 1
- *         description: Event ID
- *         example: 1
- *     responses:
- *       200:
- *         description: กู้คืนกิจกรรมสำเร็จ
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "กู้คืนกิจกรรมเรียบร้อยแล้ว"
- *                 data:
- *                   $ref: '#/components/schemas/Event'
- *       400:
- *         description: กิจกรรมนี้ยังไม่ถูกลบ
+ *         description: ไม่มีสิทธิ์ลบกิจกรรมของสาขาอื่น (Admin)
  *         content:
  *           application/json:
  *             schema:
@@ -3749,23 +3748,27 @@
  * @swagger
  * /api/download/report:
  *   get:
- *     summary: ดาวน์โหลดรายงาน Attendance/Shift (Excel)
+ *     summary: ดาวน์โหลดรายงาน Attendance (Excel/PDF)
  *     description: |
- *       สร้างและดาวน์โหลดรายงานเป็นไฟล์ Excel (.xlsx)
+ *       สร้างและดาวน์โหลดรายงานเป็นไฟล์ Excel (.xlsx) หรือ PDF
  *
  *       **ประเภทรายงาน:**
  *       - `attendance` — ประวัติเข้า-ออกงาน (Employee ID, Name, Check In/Out, Status, Late Minutes)
- *       - `shift` — ข้อมูลกะงาน (Employee ID, Name, Shift Name, Type, Start/End Time, Active)
+ *       - ⚠️ `shift` ไม่รองรับแล้ว — ใช้ `filterType` แทนเพื่อกรองข้อมูลกะงาน/กิจกรรม
+ *
+ *       **filterType (ตัวกรองข้อมูล attendance):**
+ *       - `all` — ดึงทุก attendance record (default)
+ *       - `shift` — เฉพาะ attendance ที่เกี่ยวกับกะงาน (shiftId != null)
+ *       - `event` — เฉพาะ attendance ที่เกี่ยวกับกิจกรรม (eventId != null)
  *
  *       **Role-based:**
  *       - ADMIN → ดาวน์โหลดเฉพาะสาขาตัวเอง
  *       - SUPERADMIN → ดาวน์โหลดได้ทั้งองค์กร + filter branchId ได้
  *
  *       **Response:** Binary file (ไม่ใช่ JSON)
- *       - Content-Type: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+ *       - Excel: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+ *       - PDF: `application/pdf`
  *       - Content-Disposition: `attachment; filename="..."`
- *
- *       **ข้อจำกัด:** ดึงสูงสุด 100 records ต่อครั้ง
  *     tags:
  *       - Download Report
  *     security:
@@ -3776,19 +3779,29 @@
  *         required: true
  *         schema:
  *           type: string
- *           enum: [attendance, shift]
+ *           enum: [attendance]
  *           example: "attendance"
- *         description: ประเภทรายงาน — attendance หรือ shift
- *         example: "attendance"
+ *         description: ประเภทรายงาน — รองรับเฉพาะ `attendance`
  *       - in: query
  *         name: format
  *         required: true
  *         schema:
  *           type: string
- *           enum: [excel]
+ *           enum: [excel, pdf]
  *           example: "excel"
- *         description: รูปแบบไฟล์ (excel เท่านั้น)
- *         example: "excel"
+ *         description: รูปแบบไฟล์ — excel (.xlsx) หรือ pdf
+ *       - in: query
+ *         name: filterType
+ *         schema:
+ *           type: string
+ *           enum: [all, shift, event]
+ *           default: "all"
+ *           example: "all"
+ *         description: |
+ *           ตัวกรองข้อมูล attendance:
+ *           - `all` = ทุก record (default)
+ *           - `shift` = เฉพาะกะงาน
+ *           - `event` = เฉพาะกิจกรรม
  *       - in: query
  *         name: startDate
  *         schema:
@@ -3816,8 +3829,16 @@
  *             schema:
  *               type: string
  *               format: binary
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
  *       400:
- *         description: ข้อมูลไม่ครบ (type หรือ format ไม่ถูกต้อง)
+ *         description: |
+ *           ข้อมูลไม่ถูกต้อง:
+ *           - ไม่ระบุ type หรือ format
+ *           - type ไม่ใช่ "attendance"
+ *           - format ไม่ใช่ "excel" หรือ "pdf"
  *         content:
  *           application/json:
  *             schema:
@@ -3830,6 +3851,102 @@
  *               $ref: '#/components/schemas/ErrorResponse'
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/download/preview:
+ *   get:
+ *     summary: ดึงข้อมูลตัวอย่างก่อนดาวน์โหลด (JSON)
+ *     description: |
+ *       ดึงข้อมูลตัวอย่างสูงสุด 20 rows สำหรับแสดง Preview Table ก่อนดาวน์โหลดจริง
+ *
+ *       **ข้อมูลที่ได้:**
+ *       - `columns` — ชื่อ column ทั้งหมด
+ *       - `rows` — ข้อมูลตัวอย่าง (max 20 records)
+ *       - `total` — จำนวน record ทั้งหมด (ก่อน limit)
+ *
+ *       **Role-based:** เหมือน /api/download/report
+ *     tags:
+ *       - Download Report
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [attendance]
+ *           example: "attendance"
+ *         description: ประเภทรายงาน — รองรับเฉพาะ `attendance`
+ *       - in: query
+ *         name: filterType
+ *         schema:
+ *           type: string
+ *           enum: [all, shift, event]
+ *           default: "all"
+ *           example: "all"
+ *         description: ตัวกรองข้อมูล attendance
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-01-01"
+ *         description: วันเริ่มต้น
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *           example: "2026-12-31"
+ *         description: วันสิ้นสุด
+ *       - in: query
+ *         name: branchId
+ *         schema:
+ *           type: integer
+ *         description: Filter สาขา (SUPERADMIN only)
+ *     responses:
+ *       200:
+ *         description: ข้อมูลตัวอย่างสำเร็จ
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     columns:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: ["รหัสพนักงาน", "ชื่อ-นามสกุล", "สาขา", "วันที่", "เวลาเข้า", "เวลาออก", "สถานะ", "สาย (นาที/ชั่วโมง)"]
+ *                     rows:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                       description: ข้อมูลตัวอย่างสูงสุด 20 rows
+ *                     total:
+ *                       type: integer
+ *                       example: 150
+ *                       description: จำนวน record ทั้งหมด (ก่อน limit 20)
+ *       400:
+ *         description: ข้อมูลไม่ถูกต้อง
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: ไม่ได้ login
  *         content:
  *           application/json:
  *             schema:
@@ -4570,7 +4687,7 @@
 // ============================================================
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * tags:
  *   - name: Audit
  *     description: |
@@ -4587,7 +4704,7 @@
  */
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * /api/audit:
  *   get:
  *     summary: ดึง Audit Logs
@@ -4669,7 +4786,7 @@
  */
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * /api/audit/actions:
  *   get:
  *     summary: ดึงรายชื่อ Action ทั้งหมด
@@ -4705,7 +4822,7 @@
  */
 
 /**
- * @swagger
+ * swagger-disabled (ปิดใช้งานชั่วคราว)
  * components:
  *   schemas:
  *     AuditLog:

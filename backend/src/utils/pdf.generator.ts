@@ -1,4 +1,27 @@
 import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const FONTS_DIR = path.join(__dirname, '../assets/fonts');
+const THAI_FONT_REGULAR = path.join(FONTS_DIR, 'NotoSansThai-Regular.ttf');
+const THAI_FONT_BOLD = path.join(FONTS_DIR, 'NotoSansThai-Bold.ttf');
+
+function hasThaiFonts(): boolean {
+  return fs.existsSync(THAI_FONT_REGULAR) && fs.existsSync(THAI_FONT_BOLD);
+}
+
+function registerFonts(doc: InstanceType<typeof PDFDocument>): { regular: string; bold: string } {
+  if (hasThaiFonts()) {
+    doc.registerFont('ThaiFont-Regular', THAI_FONT_REGULAR);
+    doc.registerFont('ThaiFont-Bold', THAI_FONT_BOLD);
+    return { regular: 'ThaiFont-Regular', bold: 'ThaiFont-Bold' };
+  }
+  return { regular: 'Helvetica', bold: 'Helvetica-Bold' };
+}
 
 /**
  * 📄 PDFGenerator - สร้างไฟล์ PDF จากข้อมูล
@@ -29,121 +52,116 @@ export interface PDFOptions {
 export function generatePDF(options: PDFOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     try {
-      const {
-        title,
-        columns,
-        data,
-        pageSize = 'A4',
-      } = options;
+      const { title, columns, data, pageSize = 'A4' } = options;
+      const landscape = options.landscape !== false;
 
-      /**
-       * สร้าง PDFDocument instance
-       * 
-       * ทำไมใช้ margin = 20?
-       * - ให้มีพื้นที่เว้นขอบ (ปลายน้อยเวลาพิมพ์)
-       * - ทำให้ PDF อ่านง่าย เอกสารดูสุดมืออาชีพ
-       */
       const doc = new PDFDocument({
         size: pageSize,
-        margin: 20,
+        layout: landscape ? 'landscape' : 'portrait',
+        margin: 30,
       });
 
-      /**
-       * Collect chunks เพื่อ concatenate เป็น single Buffer
-       * 
-       * เหตุผล:
-       * - PDFKit emit data events ทีละ chunk
-       * - ต้องรวมเข้าด้วยกันเป็น complete PDF buffer
-       * - Resolve promise เมื่อเขียน complete PDFDocument
-       */
+      const fonts = registerFonts(doc);
+
       const chunks: Buffer[] = [];
-
       doc.on('data', (chunk) => chunks.push(chunk));
-      doc.on('end', () => {
-        resolve(Buffer.concat(chunks));
-      });
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      /**
-       * เพิ่มชื่อเรื่องด้านบน
-       * 
-       * ทำไม?
-       * - ให้ผู้อ่านรู้เลยว่ารายงานนี้คืออะไร (title page)
-       * - ใช้ Bold + Font size 16 เพื่อให้เด่น
-       */
-      doc.fontSize(16).font('Helvetica-Bold').text(title, { align: 'center' });
-      doc.moveDown(0.5);
+      // ── Column widths (fixed for 8-column attendance, A4 landscape ~782px usable) ──
+      // colWidths[i] maps to columns[i] in order
+      const DEFAULT_COL_W = Math.floor((doc.page.width - 60) / columns.length);
+      const COL_W_MAP: Record<string, number> = {
+        'รหัสพนักงาน':           60,
+        'ชื่อ-นามสกุล':           120,
+        'เวลาเข้างาน':             95,
+        'เวลาออกงาน':             95,
+        'สาย (นาที/ชั่วโมง)':     85,
+        'สถานะ':                  65,
+        'ประเภท':                 90,
+        'หมายเหตุ':               172,
+      };
+      const colWidths = columns.map(c => COL_W_MAP[c] ?? DEFAULT_COL_W);
+      const TABLE_W = colWidths.reduce((a, b) => a + b, 0);
+      const LEFT = 30;
+      const PAGE_BOTTOM = doc.page.height - 40;
 
-      /**
-       * คำนวณ column width ให้เท่ากัน
-       * 
-       * SQL (Pseudo-code):
-       * total_width = page_width - margins
-       * column_width = total_width / number_of_columns
-       * 
-       * เหตุผล:
-       * - ใช้ width ตรง ๆ เวลา render text
-       * - ข้อมูลขนาดใหญ่ต้อง truncate (ellipsis) เพื่อไม่ให้ overflow
-       */
-      const columnWidths = columns.map(() => 
-        (doc.page.width - 40) / columns.length
-      );
-
-      /**
-       * Header row - Column names
-       * 
-       * ทำไม?
-       * - ให้ผู้อ่าน Excel รู้คอลัมน์ไหนคืออะไร
-       * - ใช้ Bold font เพื่อให้เห็นความแตกต่าง
-       */
-      doc.fontSize(10).font('Helvetica-Bold').fillColor('black');
-      let x = 20;
-      columns.forEach((col, i) => {
-        const width = columnWidths[i] ?? 0;
-        doc.text(col, x, doc.y, {
-          width: width,
-          align: 'left',
-          ellipsis: true,
+      // ── Title ──────────────────────────────────────────────────────────────
+      doc.fontSize(14).font(fonts.bold).fillColor('#1f2937')
+        .text(title, LEFT, 30, { width: TABLE_W, align: 'center' });
+      doc.fontSize(8).font(fonts.regular).fillColor('#6b7280')
+        .text(`สร้างเมื่อ ${new Date().toLocaleString('th-TH')}`, LEFT, 48, {
+          width: TABLE_W, align: 'center',
         });
-        x += width;
-      });
-      doc.moveDown();
 
-      /**
-       * Data rows - Loop through all data
-       * 
-       * เหตุผล:
-       * - Render แต่ละ row จากข้อมูล
-       * - ใช้ column widths มาก่อนเพื่อให้ align กระทั่งกับ header
-       * - ellipsis ข้อมูล long string เพื่อไม่ให้ overflow
-       */
-      doc.font('Helvetica').fontSize(9);
-      data.forEach((row) => {
-        x = 20;
+      let y = 66;
+
+      // ── Draw header ────────────────────────────────────────────────────────
+      const drawHeader = () => {
+        // Orange background
+        doc.save().rect(LEFT, y, TABLE_W, 22).fill('#f97316').restore();
+
+        doc.fontSize(9).font(fonts.bold).fillColor('#ffffff');
+        let startX = LEFT;
         columns.forEach((col, i) => {
-          const width = columnWidths[i] ?? 0;
-          const value = row[col]?.toString() ?? '';
-          doc.text(value, x, doc.y, {
-            width: width,
-            align: 'left',
-            ellipsis: true,
-          });
-          x += width;
+          doc.text(col, startX + 3, y + 5, { width: colWidths[i] - 6, lineBreak: false });
+          startX += colWidths[i];
         });
-        doc.moveDown();
+
+        // Underline
+        doc.save().strokeColor('#ea580c').lineWidth(1.5)
+          .moveTo(LEFT, y + 22).lineTo(LEFT + TABLE_W, y + 22).stroke().restore();
+
+        y += 22;
+      };
+
+      drawHeader();
+
+      // ── Data rows ──────────────────────────────────────────────────────────
+      data.forEach((row, idx) => {
+        // Measure tallest cell in this row
+        doc.fontSize(9).font(fonts.regular);
+        let maxH = 0;
+        columns.forEach((col, i) => {
+          const text = String(row[col] ?? '');
+          const h = doc.heightOfString(text, { width: colWidths[i] - 6 });
+          if (h > maxH) maxH = h;
+        });
+        const rowH = Math.max(maxH + 8, 18);
+
+        // Page overflow → new page + repeat header
+        if (y + rowH > PAGE_BOTTOM) {
+          doc.addPage();
+          y = 30;
+          drawHeader();
+        }
+
+        // Zebra stripe (odd rows)
+        if (idx % 2 === 1) {
+          doc.save().rect(LEFT, y, TABLE_W, rowH).fill('#fff7ed').restore();
+        }
+
+        // Draw all cells in this row at the SAME y position
+        doc.fontSize(9).font(fonts.regular).fillColor('#374151');
+        let startX = LEFT;
+        columns.forEach((col, i) => {
+          const text = String(row[col] ?? '');
+          doc.text(text, startX + 3, y + 4, { width: colWidths[i] - 6, lineBreak: false });
+          startX += colWidths[i];
+        });
+
+        // Row bottom border
+        doc.save().strokeColor('#e5e7eb').lineWidth(0.4)
+          .moveTo(LEFT, y + rowH).lineTo(LEFT + TABLE_W, y + rowH).stroke().restore();
+
+        y += rowH;
       });
 
-      /**
-       * Footer - Generated timestamp
-       * 
-       * ทำไม?
-       * - ให้รู้ว่ารายงานสร้างเมื่อไร (audit trail)
-       * - ประโยชน์ถ้ามีการเปรียบเทียบ report เวลาต่างกัน
-       */
-      doc.fontSize(8).text(
-        `Generated on ${new Date().toLocaleString()}`,
-        { align: 'center' }
-      );
+      // ── Footer ─────────────────────────────────────────────────────────────
+      doc.fontSize(7).font(fonts.regular).fillColor('#9ca3af')
+        .text(`ทั้งหมด ${data.length} รายการ`, LEFT, y + 5, {
+          width: TABLE_W, align: 'right',
+        });
 
       doc.end();
     } catch (error) {

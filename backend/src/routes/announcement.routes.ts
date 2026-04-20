@@ -4,90 +4,18 @@ import { authenticate, authorizeRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
-/**
- * 📢 Announcement Routes - เส้นทาง API สำหรับประกาศ/ข่าวสาร
- */
+// authenticate ทุก endpoint เพราะต้อง login ก่อนถึงจะเห็นประกาศ
+// authorizeRole จำกัดเฉพาะ ADMIN/SUPERADMIN เพราะ USER/MANAGER ไม่ควรสร้าง/แก้/ลบประกาศ
 
-/**
- * @route   POST /api/announcements
- * @desc    สร้างประกาศใหม่
- * @access  Admin/SuperAdmin only
- * @body    {
- *            title: string,              // หัวข้อประกาศ (จำเป็น)
- *            content: string,            // เนื้อหาประกาศ (จำเป็น)
- *            targetRoles?: Role[],       // ประเภทบุคคลากร (ว่าง = EVERYONE)
- *            targetBranchIds?: number[], // ID สาขา (ว่าง = EVERYONE)
- *            createdByUserId: number,    // ID ผู้สร้าง (จำเป็น)
- *          }
- */
 router.post('/', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.createAnnouncement);
-
-/**
- * @route   GET /api/announcements
- * @desc    ดึงประกาศทั้งหมด
- * @access  Authenticated users
- * @query   {
- *            status?: string,              // DRAFT | SENT
- *            createdByUserId?: number
- *          }
- */
 router.get('/', authenticate, announcementController.getAnnouncements);
-
-/**
- * @route   GET /api/announcements/:id
- * @desc    ดึงประกาศตาม ID
- * @access  Authenticated users
- */
 router.get('/:id', authenticate, announcementController.getAnnouncementById);
-
-/**
- * @route   PUT /api/announcements/:id
- * @desc    อัปเดตประกาศ
- * @access  Admin/SuperAdmin only
- * @body    {
- *            title?: string,
- *            content?: string,
- *            targetRoles?: Role[],
- *            targetBranchIds?: number[],
- *            updatedByUserId: number     // ID ผู้แก้ไข (จำเป็น)
- *          }
- */
 router.put('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.updateAnnouncement);
-
-/**
- * @route   POST /api/announcements/:id/send
- * @desc    ส่งประกาศ
- * @access  SuperAdmin/Admin only
- * @body    {
- *            sentByUserId: number,       // ID ผู้ส่ง (จำเป็น)
- *            sentByUserRole: string,     // Role ผู้ส่ง (จำเป็น) - ADMIN | SUPER_ADMIN
- *            sentByUserBranchId?: number // Branch ID (สำหรับ ADMIN เท่านั้น)
- *          }
- */
 router.post('/:id/send', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.sendAnnouncement);
-
-/**
- * @route   DELETE /api/announcements/:id
- * @desc    ลบประกาศ
- * @access  SuperAdmin/Admin only
- */
 router.delete('/:id', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.deleteAnnouncement);
 
-/**
- * @route   DELETE /api/announcements/:announcementId/recipients/:recipientId
- * @desc    ลบผู้รับประกาศเพียงคนเดียว
- * @access  Admin/SuperAdmin only
- */
+// แยก deleteRecipient กับ clearAllRecipients เพราะคนละ 1 คน vs ล้างทั้งหมด — use case ต่างกัน
 router.delete('/:announcementId/recipients/:recipientId', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.deleteRecipient);
-
-/**
- * @route   DELETE /api/announcements/:announcementId/recipients
- * @desc    ล้างผู้รับประกาศทั้งหมด
- * @access  Admin/SuperAdmin only
- * @body    {
- *            sentByUserId: number        // ID ผู้ส่ง (จำเป็น)
- *          }
- */
 router.delete('/:announcementId/recipients', authenticate, authorizeRole('ADMIN', 'SUPERADMIN'), announcementController.clearAllRecipients);
 
 export default router;

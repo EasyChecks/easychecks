@@ -852,7 +852,8 @@ async function eventCheckIn(data: EventCheckInDTO) {
   if (!event.isActive) throw new Error('กิจกรรมนี้ถูกปิดใช้งานแล้ว'); // ปิดโดย Admin
 
   const now = new Date();
-  if (now < event.startDateTime) throw new Error('กิจกรรมยังไม่เริ่ม'); // ยังไม่ถึงเวลาเริ่ม
+  const allowedCheckInTime = new Date(event.startDateTime.getTime() - 30 * 60 * 1000);
+  if (now < allowedCheckInTime) throw new Error('กิจกรรมยังไม่เริ่ม (สามารถเช็คอินล่วงหน้าได้ 30 นาที)'); // ยังไม่ถึงเวลาเริ่ม
   if (now > event.endDateTime) throw new Error('กิจกรรมสิ้นสุดแล้ว');   // เลยเวลาสิ้นสุดไปแล้ว
 
   // ── ② ตรวจสอบสิทธิ์การเข้าร่วม ──────────────────────────────────────────────────

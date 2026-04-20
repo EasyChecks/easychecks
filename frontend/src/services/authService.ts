@@ -1,46 +1,22 @@
-/**
- * authService.ts (src/services/authService.ts)
- * ──────────────────────────────────────────────
- * HTTP client สำหรับ Authentication API
- *
- * ทำหน้าที่: ส่ง request ไปยัง backend /api/auth/*
- * ถูกเรียกใช้โดย: AuthContext.tsx (ใน login flow เส้นทาง Real API)
- *
- * API Endpoints ที่รองรับ:
- *  POST /auth/login               → login ได้ token + user
- *  POST /auth/refresh             → ขอ access token ใหม่ด้วย refresh token
- *  POST /auth/logout              → แจ้ง backend ว่า logout แล้ว
- *  POST /auth/request-password-reset → ขอ reset password
- *  GET  /auth/verify-reset-token/:token → ตรวจ token reset ว่ายังใช้ได้ไหม
- *  POST /auth/reset-password      → reset password จริง
- *  POST /auth/change-password     → เปลี่ยน password สำหรับผู้ที่ login อยู่
- */
-
+// HTTP client สำหรับ auth API — ถูกเรียกจาก AuthContext.tsx
 import api from './api';
 import { AuthUser, UserRole } from '@/types/auth';
 
-// ── Types สำหรับ request / response ──
 export interface LoginRequest {
-  employeeId: string; // username ที่ผู้ใช้กรอก ส่งไปเป็น employeeId
+  employeeId: string;
   password: string;
 }
 
 export interface LoginResponse {
-  accessToken: string;  // JWT สำหรับแนบกับ API request ถัดไปทั้งหมด
-  refreshToken: string; // ใช้ขอ accessToken ใหม่เมื่อหมดอายุ
-  expiresIn: number;    // อายุของ accessToken (วินาที)
-  dashboardMode: 'superadmin' | 'admin' | 'manager' | 'user'; // redirect target หลัง login
-  user: AuthUser;       // ข้อมูล user ที่ map มาจาก backend แล้ว
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  dashboardMode: 'superadmin' | 'admin' | 'manager' | 'user';
+  user: AuthUser;
 }
 
 export const authService = {
-  /**
-   * login() — ส่ง employeeId + password ไป POST /auth/login
-   *
-   * backend ตอบกลับด้วย: { accessToken, refreshToken, user: {...} }
-   * แต่ข้อมูล user จาก backend มีโครงสร้างต่างกับ AuthUser (frontend)
-   * → mapBackendUserToAuthUser() แปลงก่อนส่งกลับ
-   */
+  // backend ส่ง raw user object → ต้อง map เป็น AuthUser ก่อน return
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     try {
       const response = await api.post<LoginResponse>('/auth/login', {
@@ -48,10 +24,8 @@ export const authService = {
         password: credentials.password
       });
 
-      // แปลง backend user → AuthUser format ที่ frontend ใช้
-      // cast เป็น unknown ก่อน เพราะ backend ส่งมาเป็น raw object ไม่ใช่ AuthUser จริงๆ
       const user = mapBackendUserToAuthUser(response.data.user as unknown as Record<string, unknown>);
-      // เซ็ต dashboardMode จาก backend เพื่อให้ ProtectedRoute ใช้ตัดสิน access จริง
+      // dashboardMode กำหนด redirect target หลัง login
       user.dashboardMode = response.data.dashboardMode as UserRole;
 
       return {
@@ -65,10 +39,7 @@ export const authService = {
     }
   },
 
-  /**
-   * refreshToken() — ขอ accessToken ใหม่โดยใช้ refreshToken เดิม
-   * เรียกเมื่อ accessToken หมดอายุ (HTTP 401) เพื่อให้ผู้ใช้ไม่ต้อง login ซ้ำ
-   */
+  // เรียกเมื่อ accessToken หมดอายุ → ต่ออายุ session โดยไม่ต้อง login ใหม่
   async refreshToken(refreshToken: string): Promise<string> {
     try {
       const response = await api.post<{ accessToken: string; expiresIn: number }>(
@@ -83,25 +54,19 @@ export const authService = {
     }
   },
 
-  /**
-   * logout() — แจ้ง backend ว่า logout แล้ว (invalidate token ฝั่ง server)
-   * ล้าง sessionStorage ไม่ว่า API จะสำเร็จหรือไม่
-   * (การล้าง sessionStorage ซ้ำก็ทำใน AuthContext.logout() ด้วย เพื่อความแน่ใจ)
-   */
+  // ล้าง sessionStorage เสมอแม้ API ล้มเหลว (AuthContext.logout() ก็ล้างซ้ำอีกชั้น)
   async logout(): Promise<void> {
     try {
       await api.post('/auth/logout');
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      // ล้างเสมอแม้ API ล้มเหลว
       sessionStorage.removeItem('token');
       sessionStorage.removeItem('refreshToken');
       sessionStorage.removeItem('authUser');
     }
   },
 
-  /** ขอ reset password → backend ส่ง link ไปทาง email ของ employeeId นั้น */
   async requestPasswordReset(employeeId: string): Promise<void> {
     try {
       await api.post('/auth/request-password-reset', { employeeId });
@@ -112,7 +77,6 @@ export const authService = {
     }
   },
 
-  /** ตรวจสอบว่า reset token ยังใช้ได้อยู่ไหม (ก่อนแสดงหน้ากรอก password ใหม่) */
   async verifyResetToken(token: string): Promise<boolean> {
     try {
       await api.get(`/auth/verify-reset-token/${token}`);
@@ -122,7 +86,6 @@ export const authService = {
     }
   },
 
-  /** ยืนยัน reset password ด้วย token ที่ได้จาก email */
   async resetPassword(token: string, newPassword: string): Promise<void> {
     try {
       await api.post('/auth/reset-password', { token, newPassword });
@@ -133,7 +96,6 @@ export const authService = {
     }
   },
 
-  /** เปลี่ยน password เอง (ต้อง login อยู่) */
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
     try {
       await api.post('/auth/change-password', { currentPassword, newPassword });
@@ -145,22 +107,8 @@ export const authService = {
   }
 };
 
-/**
- * mapBackendUserToAuthUser()
- * ─────────────────────────
- * แปลง object ที่ได้จาก backend → AuthUser ที่ frontend ใช้
- *
- * Backend ส่งมา:  { userId, employeeId, firstName, lastName, email, role, avatarUrl, ... }
- * Frontend ต้องการ: { id, employeeId, name, email, username, role (lowercase), status, ... }
- *
- * จุดสำคัญ:
- *  - role: backend ใช้ uppercase (USER/ADMIN/SUPERADMIN) → map เป็น lowercase
- *  - name: ต่อ firstName + lastName เป็น string เดียว
- *  - id:   แปลง userId (number) เป็น string
- *  - username: ใช้ employeeId แทน (ไม่มี field username แยกใน backend)
- */
+// แปลง backend user → AuthUser: role uppercase→lowercase, firstName+lastName→name
 function mapBackendUserToAuthUser(backendUser: Record<string, unknown>): AuthUser {
-  // ตาราง map role: รองรับทั้ง uppercase (จาก backend) และ lowercase (fallback)
   const roleMap: Record<string, string> = {
     'USER': 'user',
     'MANAGER': 'manager',

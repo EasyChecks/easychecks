@@ -20,9 +20,10 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ClipboardList, Search, FileX, FilePenLine, Trash2 } from 'lucide-react';
+import { ClipboardList, Search, FileX, FilePenLine, Trash2, Camera, X } from 'lucide-react';
 import { attendanceService } from '@/services/attendance';
 import { Attendance, UpdateAttendanceRequest } from '@/types/attendance';
+import Image from 'next/image';
 
 // ========== ค่าคงที่ ==========
 
@@ -64,6 +65,28 @@ function formatThaiTime(iso: string | undefined): string {
   });
 }
 
+/** format ISO string → "DD/MM/YYYY" (วันที่ไทย) */
+function formatThaiDate(iso: string | undefined): string {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleDateString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+/** format minutes → "X ชม. Y น." or "Y น." */
+function fmtLate(minutes: number): string {
+  if (!minutes || minutes <= 0) return '-';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0 && m > 0) return `${h} ชม. ${m} น.`;
+  if (h > 0) return `${h} ชม.`;
+  return `${m} น.`;
+}
+
 // ========== Component ==========
 
 export default function AttendanceLogPage() {
@@ -91,6 +114,7 @@ export default function AttendanceLogPage() {
 
   // --- State: Modal ดูรายละเอียด ---
   const [detailRecord, setDetailRecord] = useState<Attendance | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   // ========== โหลดข้อมูล ==========
   const loadData = useCallback(async () => {
@@ -287,10 +311,11 @@ export default function AttendanceLogPage() {
                 <tr className="text-left border-b border-gray-200">
                   <th className="px-3 py-3 font-semibold text-gray-600">พนักงาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">กะงาน</th>
+                  <th className="px-3 py-3 font-semibold text-gray-600">วันที่</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">เข้างาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">ออกงาน</th>
                   <th className="px-3 py-3 font-semibold text-gray-600">สถานะ</th>
-                  <th className="px-3 py-3 font-semibold text-gray-600">สาย (นาที)</th>
+                  <th className="px-3 py-3 font-semibold text-gray-600">สาย</th>
                   <th className="px-3 py-3 font-semibold text-gray-600 text-right">จัดการ</th>
                 </tr>
               </thead>
@@ -312,6 +337,8 @@ export default function AttendanceLogPage() {
                           <span className="text-gray-400">-</span>
                         )}
                       </td>
+                      {/* วันที่ */}
+                      <td className="px-3 py-3 text-gray-600">{formatThaiDate(r.checkIn)}</td>
                       {/* เข้างาน */}
                       <td className="px-3 py-3 text-gray-600">{formatThaiTime(r.checkIn)}</td>
                       {/* ออกงาน */}
@@ -321,7 +348,7 @@ export default function AttendanceLogPage() {
                         <Badge className={`${st.color} border-0 text-xs`}>{st.label}</Badge>
                       </td>
                       {/* สาย */}
-                      <td className="px-3 py-3 text-gray-600">{r.lateMinutes ?? 0}</td>
+                      <td className="px-3 py-3 text-gray-600">{fmtLate(r.lateMinutes ?? 0)}</td>
                       {/* ปุ่มจัดการ */}
                       <td className="px-3 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -415,7 +442,7 @@ export default function AttendanceLogPage() {
               <DetailRow label="เข้างาน" value={formatThaiDateTime(detailRecord.checkIn)} />
               <DetailRow label="ออกงาน" value={formatThaiDateTime(detailRecord.checkOut)} />
               <DetailRow label="สถานะ" value={getStatusOption(detailRecord.status).label} />
-              <DetailRow label="สาย (นาที)" value={String(detailRecord.lateMinutes ?? 0)} />
+              <DetailRow label="สาย" value={fmtLate(detailRecord.lateMinutes ?? 0)} />
               <DetailRow label="เวลาทำงานรวม (นาที)" value={detailRecord.workedMinutes != null ? String(detailRecord.workedMinutes) : '-'} />
               <DetailRow label="หักพัก (นาที)" value={detailRecord.breakDeductedMinutes != null ? String(detailRecord.breakDeductedMinutes) : '-'} />
               <DetailRow label="หักลารายชั่วโมง (นาที)" value={detailRecord.leaveDeductedMinutes != null ? String(detailRecord.leaveDeductedMinutes) : '-'} />
@@ -425,11 +452,100 @@ export default function AttendanceLogPage() {
               <DetailRow label="ระยะห่าง (เข้า)" value={detailRecord.checkInDistance != null ? `${detailRecord.checkInDistance.toFixed(0)} ม.` : '-'} />
               <DetailRow label="ที่อยู่ออกงาน" value={detailRecord.checkOutAddress ?? '-'} />
               <DetailRow label="ระยะห่าง (ออก)" value={detailRecord.checkOutDistance != null ? `${detailRecord.checkOutDistance.toFixed(0)} ม.` : '-'} />
+
+              {/* === รูปถ่ายเข้างาน-ออกงาน === */}
+              {(detailRecord.checkInPhoto || detailRecord.checkOutPhoto) && (
+                <div className="pt-3 mt-3 border-t border-gray-100">
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Camera className="w-4 h-4 text-gray-500" />
+                    <span className="text-sm font-medium text-gray-500">รูปถ่ายบันทึกงาน</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* รูปเข้างาน */}
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-gray-500">เข้างาน</p>
+                      {detailRecord.checkInPhoto ? (
+                        <button
+                          type="button"
+                          onClick={() => setLightboxUrl(detailRecord.checkInPhoto!)}
+                          className="relative w-full overflow-hidden transition-all border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:shadow-md group aspect-square"
+                        >
+                          <Image
+                            src={detailRecord.checkInPhoto}
+                            alt="รูปเข้างาน"
+                            fill
+                            className="object-cover transition-transform group-hover:scale-105"
+                            sizes="200px"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center transition-opacity opacity-0 bg-black/30 group-hover:opacity-100">
+                            <Search className="w-5 h-5 text-white" />
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-center text-gray-300 border-2 border-dashed border-gray-200 rounded-xl aspect-square">
+                          <Camera className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+                    {/* รูปออกงาน */}
+                    <div>
+                      <p className="mb-1.5 text-xs font-medium text-gray-500">ออกงาน</p>
+                      {detailRecord.checkOutPhoto ? (
+                        <button
+                          type="button"
+                          onClick={() => setLightboxUrl(detailRecord.checkOutPhoto!)}
+                          className="relative w-full overflow-hidden transition-all border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:shadow-md group aspect-square"
+                        >
+                          <Image
+                            src={detailRecord.checkOutPhoto}
+                            alt="รูปออกงาน"
+                            fill
+                            className="object-cover transition-transform group-hover:scale-105"
+                            sizes="200px"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center transition-opacity opacity-0 bg-black/30 group-hover:opacity-100">
+                            <Search className="w-5 h-5 text-white" />
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-center text-gray-300 border-2 border-dashed border-gray-200 rounded-xl aspect-square">
+                          <Camera className="w-6 h-6" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end mt-6">
               <Button variant="outline" onClick={() => setDetailRecord(null)}>ปิด</Button>
             </div>
+
+            {/* === Lightbox: ขยายรูปเต็มจอ === */}
+            {lightboxUrl && (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
+                onClick={() => setLightboxUrl(null)}
+              >
+                <button
+                  type="button"
+                  onClick={() => setLightboxUrl(null)}
+                  className="absolute p-2 text-white transition-colors rounded-full top-4 right-4 hover:bg-white/20"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+                <div className="relative w-full max-w-2xl max-h-[85vh] rounded-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <Image
+                    src={lightboxUrl}
+                    alt="รูปถ่ายบันทึกงาน"
+                    width={800}
+                    height={800}
+                    className="object-contain w-full h-full"
+                  />
+                </div>
+              </div>
+            )}
           </Card>
         </div>
       )}

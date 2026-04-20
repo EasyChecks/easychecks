@@ -395,6 +395,7 @@ export const checkIn = async (data: CheckInDTO) => {
     where: {
       userId,
       isDeleted: false,
+      eventId: null,                               // ไม่นับ record ที่เป็นของ Event
       ...(shiftId !== undefined && { shiftId }), // spread ว่างถ้า shiftId ไม่มี → ตรวจทุกกะ
       checkIn: { gte: today, lt: tomorrow },       // ช่วงวันนี้เท่านั้น
     },
@@ -695,7 +696,7 @@ export const getTodayAttendance = async (userId: number) => {
   const { start: today, end: tomorrow } = getThaiDayRange();
 
   const rows = await prisma.attendance.findMany({
-    where: { userId, isDeleted: false, checkIn: { gte: today, lt: tomorrow } },
+    where: { userId, isDeleted: false, eventId: null, checkIn: { gte: today, lt: tomorrow } },
     include: { shift: true, location: true },
     orderBy: { checkIn: 'desc' },
   });
@@ -722,6 +723,7 @@ export const getAttendanceHistory = async (
     where: {
       userId,
       isDeleted: false,
+      eventId: null,
       ...(filters?.startDate !== undefined && { checkIn: { gte: filters.startDate } }),
       ...(filters?.endDate !== undefined && { checkIn: { lte: filters.endDate } }),
       ...(filters?.status !== undefined && { status: filters.status }),
@@ -757,6 +759,7 @@ export const getAllAttendances = async (filters?: {
   const rows = await prisma.attendance.findMany({
     where: {
       isDeleted: false,
+      eventId: null,
       ...(filters?.userId !== undefined && { userId: filters.userId }),
       ...(filters?.startDate !== undefined && { checkIn: { gte: filters.startDate } }),
       ...(filters?.endDate !== undefined && { checkIn: { lte: filters.endDate } }),
@@ -764,7 +767,7 @@ export const getAllAttendances = async (filters?: {
     },
     include: {
       user: {
-        select: { userId: true, firstName: true, lastName: true, employeeId: true, role: true },
+        select: { userId: true, firstName: true, lastName: true, employeeId: true, role: true, avatarUrl: true },
       },
       shift: true,
       location: true,

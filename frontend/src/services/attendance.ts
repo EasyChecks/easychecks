@@ -1,15 +1,3 @@
-/**
- * attendance.ts (src/services/attendance.ts)
- * ─────────────────────────────────────────────
- * HTTP client สำหรับ Attendance API
- *
- * ทำหน้าที่: ส่ง request ไปยัง backend /api/attendance/*
- * ถูกเรียกใช้โดย: src/app/user/attendance/page.tsx
- *
- * ทุก method ที่ต้องการ userId ต้องได้ค่านั้นมาจาก useAuth() ใน component ก่อน
- * เพราะ backend อ่าน userId จาก JWT token แต่ history/today endpoint ต้องการ userId ใน URL ด้วย
- */
-
 import api from './api';
 import {
   Attendance,
@@ -20,10 +8,7 @@ import {
   UpdateAttendanceRequest,
 } from '@/types/attendance';
 
-/**
- * แปลง Attendance จาก backend (attendanceId, shiftId, locationId)
- * → frontend (id) + nested shift/location/user id
- */
+// normalize โครง response ที่หลากหลายจาก endpoint เก่า/ใหม่ให้ UI ใช้ shape เดียวกัน
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapAttendance(raw: any): Attendance {
   if (!raw) return raw;
@@ -67,83 +52,47 @@ function mapAttendance(raw: any): Attendance {
       ...raw.user,
       id: raw.user.userId ?? raw.user.id,
       name: raw.user.name ?? `${raw.user.firstName ?? ''} ${raw.user.lastName ?? ''}`.trim(),
+      avatarUrl: raw.user.avatarUrl ?? undefined,
     } : undefined,
   };
 }
 
 export const attendanceService = {
-  /**
-   * checkIn() — บันทึกเวลาเข้างาน
-   * POST /api/attendance/check-in
-   *
-   * ส่ง: shiftId, photo (Base64), latitude, longitude, address (optional)
-   * backend อ่าน userId จาก JWT token เองอัตโนมัติ (ไม่ต้องส่ง userId)
-   * backend ตรวจสอบ GPS radius และกำหนด status: ON_TIME / LATE
-   */
   async checkIn(data: CheckInRequest): Promise<Attendance> {
     const response = await api.post('/attendance/check-in', data);
     return mapAttendance(response.data.data);
   },
 
-  /**
-   * checkOut() — บันทึกเวลาออกงาน
-   * POST /api/attendance/check-out
-   *
-   * ส่ง: shiftId, photo (Base64), latitude, longitude
-   * backend จะหา record check-in ที่ยังไม่มี checkOut อยู่ แล้ว update
-   */
   async checkOut(data: CheckOutRequest): Promise<Attendance> {
     const response = await api.post('/attendance/check-out', data);
     return mapAttendance(response.data.data);
   },
 
-  /**
-   * getMyHistory() — ดึงประวัติการเข้างานของ user คนนั้น
-   * GET /api/attendance/history/:userId
-   *
-   * @param userId  - ได้จาก useAuth().user.id (แปลงเป็น number แล้ว)
-   * @param params  - filter: startDate, endDate, status (optional)
-   *
-   * ใช้ในหน้า attendance เพื่อคำนวณสถิติรายเดือน
-   */
   async getMyHistory(userId: number, params?: AttendanceHistoryParams): Promise<Attendance[]> {
     const response = await api.get(`/attendance/history/${userId}`, { params });
     return (response.data.data ?? []).map(mapAttendance);
   },
 
-  /**
-   * getAll() — ดึงประวัติการเข้างานทั้งหมด (Admin เท่านั้น)
-   * GET /api/attendance
-   *
-   * @param params - filter เพิ่มเติม: userId, startDate, endDate, status
-   */
   async getAll(params?: AttendanceListParams): Promise<Attendance[]> {
     const response = await api.get('/attendance', { params });
     return (response.data.data ?? []).map(mapAttendance);
   },
 
-  /** ดึง attendance record เดี่ยวโดย id — GET /api/attendance/:id */
   async getById(id: number): Promise<Attendance> {
     const response = await api.get(`/attendance/${id}`);
     return mapAttendance(response.data.data);
   },
 
-  /** แก้ไข attendance record (Admin เท่านั้น) — PUT /api/attendance/:id */
   async update(id: number, data: UpdateAttendanceRequest): Promise<Attendance> {
     const response = await api.put(`/attendance/${id}`, data);
     return mapAttendance(response.data.data);
   },
 
-  /** ลบ attendance record (Admin เท่านั้น, Soft Delete) — DELETE /api/attendance/:id */
   async delete(id: number, deleteReason: string): Promise<void> {
     await api.delete(`/attendance/${id}`, { data: { deleteReason } });
   },
 
-  /**
-   * POST /api/attendance/check-gps
-   * ตรวจสอบว่า GPS ของพนักงานอยู่ในพื้นที่อนุญาตหรือไม่
-   * — การคำนวณระยะทางทั้งหมดอยู่ฝั่ง backend
-   */
+  // ตรึงแหล่งคำนวณระยะไว้ที่ backend เพื่อลดความต่างผลลัพธ์ข้ามอุปกรณ์
   async checkGps(params: {
     latitude: number;
     longitude: number;
@@ -160,18 +109,6 @@ export const attendanceService = {
     return res.data.data;
   },
 
-  /**
-   * getTodayStatus() — ดึงสถานะการเข้างานวันนี้ของ user
-   * GET /api/attendance/today/:userId
-   *
-   * @param userId - ได้จาก useAuth().user.id
-   * @returns { hasCheckedIn, hasCheckedOut, attendance? }
-   *
-   * ใช้กำหนดว่าปุ่ม "เข้างาน" หรือ "ออกงาน" ควร active ไหม
-   * ถ้ายังไม่ check-in → ปุ่ม "เข้างาน" active, ปุ่ม "ออกงาน" disabled
-   * ถ้า check-in แล้วแต่ยังไม่ check-out → ปุ่ม "ออกงาน" active
-   * ถ้า check-out แล้ว → ทั้งคู่ disabled
-   */
   async getTodayStatus(userId: number): Promise<{
     hasCheckedIn: boolean;
     hasCheckedOut: boolean;
@@ -181,8 +118,7 @@ export const attendanceService = {
       const response = await api.get(`/attendance/today/${userId}`);
       const data = response.data.data;
 
-      // ปุ่มเข้างาน/ออกงานในโมดูลนี้ต้องอิงเฉพาะ attendance ของกะงาน
-      // จึงไม่นับ record ที่เป็น event attendance (มี eventId)
+      // ตัด event attendance ออกเพื่อไม่ให้ปุ่มเข้า/ออกงานในกะผิดสถานะ
       const rows = Array.isArray(data)
         ? data
         : (data ? [data] : []);
@@ -203,7 +139,7 @@ export const attendanceService = {
       };
     } catch (error) {
       console.error('Error fetching today status:', error);
-      // ถ้า API ล้มเหลว → ถือว่ายังไม่ได้ check-in (แสดง UI ที่ safe ที่สุด)
+      // fallback เป็นยังไม่ลงเวลาเพื่อป้องกัน UI ล็อกผู้ใช้ผิดฝั่ง
       return {
         hasCheckedIn: false,
         hasCheckedOut: false,

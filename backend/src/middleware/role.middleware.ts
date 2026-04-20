@@ -1,53 +1,36 @@
-// ═══════════════════════════════════════════════════════════════
-// 📁 role.middleware.ts — Role Authorization Middleware
-// ═══════════════════════════════════════════════════════════════
-// 🔐 ตรวจสอบสิทธิ์ตาม Role ของ user
-//
-// Functions ในไฟล์นี้:
-//   1️⃣ requireRole() — ตรวจว่า user มี role ที่อนุญาต
-//
-// วิธีใช้ (ใส่หลัง authenticate middleware):
-//   router.post('/admin-action', authenticate, requireRole(['ADMIN', 'SUPERADMIN']), handler);
-//   router.get('/superadmin-only', authenticate, requireRole('SUPERADMIN'), handler);
-//
-// 📌 Source: routes → authenticate → requireRole → controller
-// ═══════════════════════════════════════════════════════════════
+// requireRole — ใช้ร่วมกับ authenticate เพื่อจำกัดสิทธิ์ตาม role
+// แยกจาก authorizeRole ใน auth.middleware เพราะรองรับทั้ง array และ single role
+// และส่ง debug info (yourRole, allowedRoles) กลับไปด้วย
 
-import type { Request, Response, NextFunction } from '../types/express.js';  // ← Express types (custom)
-import type { Role } from '@prisma/client';                                  // ← Prisma Role enum
+import type { Request, Response, NextFunction } from '../types/express.js';
+import type { Role } from '@prisma/client';
 
-// ═══════════════════════════════════════════════════════════════
-// 1️⃣ requireRole() — ตรวจสอบ Role ที่อนุญาต
-// ═══════════════════════════════════════════════════════════════
-// รองรับทั้ง array และ single role:
-//   requireRole(['ADMIN', 'SUPERADMIN'])  ← array
-//   requireRole('SUPERADMIN')             ← single
+// รองรับทั้ง requireRole(['ADMIN', 'SUPERADMIN']) และ requireRole('SUPERADMIN')
 export function requireRole(allowedRoles: Role[] | Role) {
-  const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];  // ← รองรับทั้ง array และ single
+  const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
   
   return (req: Request, res: Response, next: NextFunction): void => {
-    const userRole = req.user?.role as Role | undefined;  // ← ดึง role จาก req.user (ผ่าน authenticate)
+    const userRole = req.user?.role as Role | undefined;
     
-    // ✅ STEP 1: ตรวจว่ามี user (ต้อง authenticate ก่อน)
     if (!userRole) {
       res.status(401).json({
         success: false,
-        error: 'Unauthorized'  // ← 401 ไม่มี token / ยังไม่ authenticate
+        error: 'Unauthorized'
       });
       return;
     }
     
-    // ✅ STEP 2: ตรวจว่า role อยู่ใน allowed list
     if (!roles.includes(userRole)) {
+      // ส่ง yourRole + allowedRoles กลับเพื่อให้ frontend แสดง error ได้ชัดเจน
       res.status(403).json({
         success: false,
-        error: 'Forbidden - ไม่มีสิทธิ์เข้าถึง',  // ← 403 role ไม่ตรง
-        yourRole: userRole,        // ← role ปัจจุบันของ user (สำหรับ debug)
-        allowedRoles: roles        // ← role ที่อนุญาต (สำหรับ debug)
+        error: 'Forbidden - ไม่มีสิทธิ์เข้าถึง',
+        yourRole: userRole,
+        allowedRoles: roles
       });
       return;
     }
     
-    next();  // ← ผ่าน → ส่งต่อให้ handler ถัดไป
+    next();
   };
 }

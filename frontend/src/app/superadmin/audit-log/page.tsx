@@ -1,5 +1,5 @@
-import AuditLogPage from '@/components/audit/AuditLogPage';
+import { redirect } from 'next/navigation';
 
 export default function SuperAdminAuditLogPage() {
-  return <AuditLogPage />;
+  redirect('/superadmin/dashboard');
 }

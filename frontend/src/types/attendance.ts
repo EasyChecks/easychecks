@@ -65,6 +65,7 @@ export interface Attendance {
     id: number;
     name: string;
     employeeId: string;
+    avatarUrl?: string;
   };
   location?: {
     id: number;

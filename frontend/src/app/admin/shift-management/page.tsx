@@ -25,7 +25,7 @@ const weekDays = [
 ];
 
 const shiftTypes = [
-  { value: 'REGULAR', label: 'ทุกวัน', description: 'ทำงานทุกวันตามที่กำหนด' },
+  { value: 'REGULAR', label: 'จันทร์-ศุกร์', description: 'ทำงานวันจันทร์ถึงศุกร์ตามที่กำหนด' },
   { value: 'SPECIFIC_DAY', label: 'เฉพาะวัน', description: 'เลือกวันที่ทำงาน (จ-อา)' },
 ];
 
@@ -305,7 +305,6 @@ export default function ShiftManagementPage() {
           }
         }
       } else {
-        // Create new shifts in one bulk request (all-or-nothing)
         const bulkCreateData: CreateShiftRequest = {
           name: formData.name,
           shiftType: formData.shiftType,
@@ -656,7 +655,7 @@ export default function ShiftManagementPage() {
   return (
     <div className="min-h-screen p-4 bg-slate-50 sm:p-6">
       <Card className="p-6 border border-orange-100 shadow-sm">
-        {/* Header */}
+        
         <div className="flex flex-col items-start justify-between gap-4 mb-6 sm:flex-row sm:items-center">
           <div>
             <h1 className="flex items-center gap-2 text-3xl font-bold text-gray-900">
@@ -679,7 +678,7 @@ export default function ShiftManagementPage() {
           </Button>
         </div>
 
-        {/* Filters */}
+        
         <Card className="p-4 mb-6 border border-gray-200">
           <div className="grid grid-cols-2 gap-3 mb-4 md:grid-cols-4">
             <div className="p-3 rounded-xl border bg-white">
@@ -715,7 +714,7 @@ export default function ShiftManagementPage() {
               className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
             >
               <option value="ALL">ทุกประเภทกะ</option>
-              <option value="REGULAR">ทุกวัน</option>
+              <option value="REGULAR">จันทร์-ศุกร์</option>
               <option value="SPECIFIC_DAY">เฉพาะวัน</option>
             </select>
 
@@ -759,7 +758,7 @@ export default function ShiftManagementPage() {
           )}
         </Card>
 
-        {/* Shift List */}
+        
         <div className="space-y-4">
           {filteredShifts.length === 0 ? (
             <Card className="p-12 text-center">
@@ -937,7 +936,7 @@ export default function ShiftManagementPage() {
         </div>
       </Card>
 
-      {/* Create/Edit Modal */}
+      
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -957,7 +956,7 @@ export default function ShiftManagementPage() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Shift Name */}
+                
                 <div>
                   <label className="block mb-2 text-sm font-medium text-gray-700">
                     ชื่อกะงาน <span className="text-red-500">*</span>
@@ -972,7 +971,7 @@ export default function ShiftManagementPage() {
                   />
                 </div>
 
-                {/* Shift Type */}
+                
                 <div>
                   <label className="block mb-2 text-sm font-medium text-gray-700">
                     ประเภทกะงาน <span className="text-red-500">*</span>
@@ -996,7 +995,7 @@ export default function ShiftManagementPage() {
                   </div>
                 </div>
 
-                {/* Time Range */}
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -1024,7 +1023,7 @@ export default function ShiftManagementPage() {
                   </div>
                 </div>
 
-                {/* Grace Period and Late Threshold */}
+                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -1052,7 +1051,7 @@ export default function ShiftManagementPage() {
                   </div>
                 </div>
 
-                {/* Specific Days (for SPECIFIC_DAY type) */}
+                
                 {formData.shiftType === 'SPECIFIC_DAY' && (
                   <div>
                     <label className="block mb-3 text-sm font-medium text-gray-700">
@@ -1077,7 +1076,7 @@ export default function ShiftManagementPage() {
                   </div>
                 )}
 
-                {/* Custom Date (for CUSTOM type) */}
+                
                 {formData.shiftType === 'CUSTOM' && (
                   <div>
                     <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -1112,7 +1111,7 @@ export default function ShiftManagementPage() {
                   </select>
                 </div>
 
-                {/* Employee Assignment */}
+                
                 <div>
                   <label className="block mb-2 text-sm font-medium text-gray-700">
                     มอบหมายพนักงาน <span className="text-red-500">*</span>
@@ -1176,7 +1175,7 @@ export default function ShiftManagementPage() {
                   )}
                 </div>
 
-                {/* Submit Buttons */}
+                
                 <div className="flex gap-3 pt-4">
                   <Button
                     type="button"
@@ -1201,7 +1200,7 @@ export default function ShiftManagementPage() {
         </div>
       )}
 
-      {/* Detail Modal */}
+      
       {showDetailModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -1219,7 +1218,7 @@ export default function ShiftManagementPage() {
               </div>
 
               <div className="space-y-6">
-                {/* Shift Info */}
+                
                 <div className="p-6 bg-orange-50 rounded-2xl">
                   <div className="flex items-center gap-3 mb-4">
                     <h3 className="text-2xl font-bold text-gray-900">{showDetailModal.name}</h3>
@@ -1278,7 +1277,7 @@ export default function ShiftManagementPage() {
                   </div>
                 </div>
 
-                {/* Work Days for SPECIFIC_DAY */}
+                
                 {showDetailModal.shiftType === 'SPECIFIC_DAY' && showDetailModal.specificDays && showDetailModal.specificDays.length > 0 && (
                   <div>
                     <h4 className="flex items-center gap-2 mb-3 text-lg font-bold text-gray-900">
@@ -1295,7 +1294,7 @@ export default function ShiftManagementPage() {
                   </div>
                 )}
 
-                {/* Custom Date for CUSTOM */}
+                
                 {showDetailModal.shiftType === 'CUSTOM' && showDetailModal.customDate && (
                   <div>
                     <h4 className="flex items-center gap-2 mb-3 text-lg font-bold text-gray-900">
@@ -1327,7 +1326,7 @@ export default function ShiftManagementPage() {
         </div>
       )}
 
-      {/* Toggle Active Confirm Modal */}
+      
       {toggleTargetShift && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-md p-6 bg-white">
@@ -1356,7 +1355,7 @@ export default function ShiftManagementPage() {
         </div>
       )}
 
-      {/* Delete Reason Modal */}
+      
       {deleteTargetShift && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-lg p-6 bg-white">
@@ -1395,7 +1394,7 @@ export default function ShiftManagementPage() {
         </div>
       )}
 
-      {/* Reassign Confirmation Modal */}
+      
       {reassignModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-2xl p-6 bg-white">
@@ -1434,7 +1433,7 @@ export default function ShiftManagementPage() {
         </div>
       )}
 
-      {/* Feedback Modal */}
+      
       {feedbackModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-md p-6 bg-white">

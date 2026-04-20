@@ -37,8 +37,8 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
       return;
     }
 
-    const { type, format, startDate, endDate, branchId } = req.query;
-    console.log('📥 Download request:', { type, format, startDate, endDate, branchId });
+    const { type, format, startDate, endDate, branchId, filterType } = req.query;
+    console.log('📥 Download request:', { type, format, startDate, endDate, branchId, filterType });
 
     /**
      * Validate required parameters
@@ -62,10 +62,10 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
      * - attendance: attendance records
      * - shift: shift records
      */
-    if (!['attendance', 'shift'].includes(type as string)) {
+    if (type !== 'attendance') {
       res.status(400).json({
         success: false,
-        error: 'Invalid type. Must be "attendance" or "shift"',
+        error: 'Invalid type. Must be "attendance"',
       });
       return;
     }
@@ -77,10 +77,10 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
      * - excel: XLSX spreadsheet (วิเคราะห์ได้ง่าย)
      * - pdf: PDF document (พิมพ์เป็นเอกสารลายประมาณ)
      */
-    if (!['excel'].includes(format as string)) {
+    if (!['excel', 'pdf'].includes(format as string)) {
       res.status(400).json({
         success: false,
-        error: 'Invalid format. Must be "excel"',
+        error: 'Invalid format. Must be "excel" or "pdf"',
       });
       return;
     }
@@ -97,15 +97,18 @@ export async function handleDownloadReport(req: Request, res: Response): Promise
      *   AND (branchId IS NULL OR branchId = ?)
      */
     const downloadQuery = {
-      type: type as 'attendance' | 'shift',
-      format: format as 'excel',
+      type: type as 'attendance',
+      format: format as 'excel' | 'pdf',
       ...(startDate && { startDate: new Date(startDate as string) }),
       ...(endDate && (() => {
         const d = new Date(endDate as string);
-        d.setUTCHours(23, 59, 59, 999);
+        d.setHours(23, 59, 59, 999);
         return { endDate: d };
       })()),
       ...(branchId && { branchId: parseInt(branchId as string) }),
+      ...(filterType && ['all', 'shift', 'event'].includes(filterType as string) && {
+        filterType: filterType as 'all' | 'shift' | 'event',
+      }),
     };
 
     /**
@@ -152,22 +155,25 @@ export async function handlePreviewReport(req: Request, res: Response): Promise<
       return;
     }
 
-    const { type, startDate, endDate, branchId } = req.query;
+    const { type, startDate, endDate, branchId, filterType } = req.query;
 
-    if (!type || !['attendance', 'shift'].includes(type as string)) {
-      res.status(400).json({ success: false, error: 'Invalid type. Must be "attendance" or "shift"' });
+    if (!type || type !== 'attendance') {
+      res.status(400).json({ success: false, error: 'Invalid type. Must be "attendance"' });
       return;
     }
 
     const result = await previewReport(user, {
-      type: type as 'attendance' | 'shift',
+      type: type as 'attendance',
       ...(startDate && { startDate: new Date(startDate as string) }),
       ...(endDate && (() => {
         const d = new Date(endDate as string);
-        d.setUTCHours(23, 59, 59, 999);
+        d.setHours(23, 59, 59, 999);
         return { endDate: d };
       })()),
       ...(branchId && { branchId: parseInt(branchId as string) }),
+      ...(filterType && ['all', 'shift', 'event'].includes(filterType as string) && {
+        filterType: filterType as 'all' | 'shift' | 'event',
+      }),
     });
 
     res.json({ success: true, data: result });

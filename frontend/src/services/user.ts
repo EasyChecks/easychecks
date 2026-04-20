@@ -110,9 +110,7 @@ function mapBackendUserToServiceUser(backendUser: Record<string, unknown>, index
   };
 }
 
-/**
- * แปลง backend user object → frontend User type
- */
+// แปลง backend user → frontend User type (role uppercase→lowercase, status map, branch extract)
 function mapBackendUserToFrontend(backendUser: Record<string, unknown>): User {
   const roleMap: Record<string, string> = {
     'USER': 'user', 'MANAGER': 'manager', 'ADMIN': 'admin', 'SUPERADMIN': 'superadmin',
@@ -172,16 +170,12 @@ function mapBackendUserToFrontend(backendUser: Record<string, unknown>): User {
 }
 
 export const userService = {
-  /**
-   * ดึงรายชื่อสมาชิกสำหรับหน้า manage-users
-   *  - superadmin: เห็นทุกคน
-   *  - admin: เห็นเฉพาะสาขาตัวเอง
-   */
+  // ดึงรายชื่อสมาชิก — superadmin เห็นทุกคน, admin เห็นเฉพาะสาขาตัวเอง
   async getManageUsers(
     _currentUser: AuthUser,
     filters?: { status?: string; search?: string; branchId?: number; page?: number; limit?: number }
   ): Promise<GetUsersResponse> {
-    // requester identity comes from Bearer token — no need to pass in params
+    // requester identity มาจาก Bearer token ไม่ต้องส่ง params
     const params: Record<string, string | number> = {
       limit: filters?.limit ?? 500,
     };
@@ -218,33 +212,22 @@ export const userService = {
     };
   },
 
-  /**
-   * Get all users (legacy — ไม่ส่ง params, ใช้เป็น fallback)
-   */
   async getAll(): Promise<UserServiceUser[]> {
     const response = await api.get('/users');
     return normalizeUserArray(response.data?.data ?? response.data);
   },
 
-  /**
-   * Get user by ID
-   */
   async getById(id: number): Promise<UserServiceUser> {
     const response = await api.get(`/users/${id}`);
     return response.data.data || response.data;
   },
 
-  /**
-   * Get current user profile
-   */
   async getProfile(): Promise<UserServiceUser> {
     const response = await api.get('/users/profile');
     return response.data.data || response.data;
   },
 
-  /**
-   * Update user by ID
-   */
+  // แปลง frontend form → backend format (name→firstName/lastName, role→uppercase)
   async updateUser(id: string, data: Record<string, unknown>): Promise<User> {
     // แปลง frontend form → backend format
     const payload: Record<string, unknown> = {};
@@ -279,9 +262,7 @@ export const userService = {
     return mapBackendUserToFrontend(backendUser);
   },
 
-  /**
-   * สร้างผู้ใช้ใหม่ — แปลง frontend form data → backend format แล้วส่ง POST /users
-   */
+  // แปลง frontend form → backend format แล้ว POST /users
   async createUser(data: Record<string, unknown>): Promise<User> {
     const payload: Record<string, unknown> = {};
 
@@ -292,11 +273,9 @@ export const userService = {
       payload.lastName = parts.slice(1).join(' ') || parts[0];
     }
 
-    // คำนำหน้า & เพศ (backend บังคับ)
     if (data.title) payload.title = String(data.title).toUpperCase();
     if (data.gender) payload.gender = String(data.gender).toUpperCase();
 
-    // ข้อมูลพื้นฐาน
     if (data.email !== undefined) payload.email = data.email;
     if (data.phone !== undefined) payload.phone = data.phone;
     if (data.nationalId !== undefined) payload.nationalId = data.nationalId;
@@ -308,7 +287,6 @@ export const userService = {
     if (data.role !== undefined) payload.role = String(data.role).toUpperCase();
     if (data.password && String(data.password).trim()) payload.password = data.password;
 
-    // สาขา: branchId หรือ branchCode
     if (data.branchId !== undefined) {
       payload.branchId = data.branchId;
     }
@@ -316,7 +294,6 @@ export const userService = {
       payload.branchCode = data.branchCode;
     }
 
-    // ผู้ติดต่อฉุกเฉิน
     if (data.emergencyContact && typeof data.emergencyContact === 'object') {
       const ec = data.emergencyContact as Record<string, unknown>;
       payload.emergent_first_name = String(ec.name ?? '').split(' ')[0] ?? '';
@@ -330,9 +307,6 @@ export const userService = {
     return mapBackendUserToFrontend(backendUser);
   },
 
-  /**
-   * Bulk import users from CSV data
-   */
   async bulkCreateUsers(csvData: string): Promise<{ success: number; failed: number; errors: string[] }> {
     const response = await api.post('/users/bulk', { csvData });
     return response.data.data ?? response.data;

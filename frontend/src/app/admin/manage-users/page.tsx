@@ -11,7 +11,6 @@ import {
   generateEmployeeId, 
   validateUserData, 
   parseCsvData, 
-  processCsvUsers,
   generateUserPDF
 } from '@/utils/adminUserUtils';
 import { Button } from '@/components/ui/button';
@@ -767,7 +766,6 @@ export default function AdminManageUser() {
           <CsvImportModal
             isOpen={modals.csv}
             csvData={csvData}
-            generateEmployeeId={(provinceCode, branchCode) => generateEmployeeId(provinceCode, branchCode, users)}
             onConfirm={confirmCsvImport}
             onClose={closeCsvModal}
           />

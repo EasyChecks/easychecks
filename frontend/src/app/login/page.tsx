@@ -1,15 +1,6 @@
 'use client';
 
-/**
- * หน้า Login (src/app/login/page.tsx)
- * ────────────────────────────────────
- * ทำหน้าที่: รับ username + password จากผู้ใช้ ส่งให้ AuthContext.login()
- * แล้ว redirect ไปหน้า dashboard ตาม role ที่ได้กลับมา
- *
- * Flow:
- *   ผู้ใช้กรอกฟอร์ม → handleSubmit → AuthContext.login() → ได้ role → redirect
- */
-
+// หน้า Login: รับ username+password → AuthContext.login() → redirect ตาม role
 import { useState, useEffect, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,15 +9,13 @@ import { Button } from '@/components/ui/button';
 
 export default function LoginPage() {
   const router = useRouter();
-  // ดึงฟังก์ชัน login มาจาก AuthContext (จัดการ authentication ทั้งหมดอยู่ที่นั่น)
   const { login } = useAuth();
   
-  // State สำหรับ form fields
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
 
-  // โหลด username ที่จำไว้จาก localStorage (ถ้ามี)
+  // โหลด username ที่จำไว้จาก localStorage
   useEffect(() => {
     const saved = localStorage.getItem('rememberedUsername');
     if (saved) {
@@ -34,32 +23,19 @@ export default function LoginPage() {
       setRememberMe(true);
     }
   }, []);
-  const [showPassword, setShowPassword] = useState(false); // toggle ดูรหัสผ่าน
-  const [isLoading, setIsLoading] = useState(false);       // แสดง spinner ระหว่าง login
-  const [error, setError] = useState('');                  // ข้อความผิดพลาดจาก API
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  /**
-   * handleSubmit — เรียกเมื่อกดปุ่ม "เข้าสู่ระบบ"
-   *
-   * 1. ป้องกัน form refresh หน้า (e.preventDefault)
-   * 2. เรียก login() ซึ่ง return role กลับมา
-   * 3. redirect ไปหน้า dashboard ตาม role
-   *    - superadmin → /superadmin/dashboard
-   *    - admin      → /admin/dashboard
-   *    - manager    → /manager/dashboard
-   *    - user       → /user/dashboard
-   * 4. ถ้า login ล้มเหลว → แสดง error message ใต้ฟอร์ม
-   */
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
-      // login() คืนค่า role ของผู้ใช้ที่ login สำเร็จ
+      // login() คืน role → redirect ไป dashboard ที่ตรงกับ role
       const role = await login({ username, password, rememberMe });
       
-      // redirect ตาม role - แต่ละ role ไปที่ dashboard ของตัวเอง
       if (role === 'superadmin') {
         router.push('/superadmin/dashboard');
       } else if (role === 'admin') {
@@ -70,19 +46,15 @@ export default function LoginPage() {
         router.push('/user/dashboard');
       }
     } catch (err) {
-      // แสดง error message ที่ได้จาก AuthContext (เช่น "รหัสผ่านผิด", "บัญชีถูกระงับ")
       setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
     } finally {
-      // ซ่อน spinner ไม่ว่าจะสำเร็จหรือล้มเหลว
       setIsLoading(false);
     }
   };
 
   return (
-    // พื้นหลัง gradient แบบ full-screen
     <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-slate-50 via-orange-50 to-slate-100 p-4">
       <div className="w-full max-w-md">
-        {/* ── ส่วนหัว: โลโก้ + ชื่อแอป ── */}
         <div className="text-center mb-8">
           <div className="w-20 h-20 bg-linear-to-br from-orange-500 to-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -93,11 +65,11 @@ export default function LoginPage() {
           <p className="text-gray-600">ระบบบันทึกเวลาเข้า-ออกงาน</p>
         </div>
 
-        {/* ── Card หลัก: ฟอร์ม login ── */}
+        {/* Card หลัก: ฟอร์ม login */}
         <Card className="p-8 shadow-xl border-2 border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">เข้าสู่ระบบ</h2>
 
-          {/* แสดง error message เมื่อ login ล้มเหลว */}
+          {/* error message เมื่อ login ล้มเหลว */}
           {error && (
             <div className="mb-4 p-3 bg-red-50 border-2 border-red-200 rounded-lg">
               <p className="text-sm text-red-700 text-center font-medium">{error}</p>
@@ -105,7 +77,7 @@ export default function LoginPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* ── ช่องกรอก Username ── */}
+            {/* Username */}
             <div>
               <label htmlFor="username" className="block text-sm font-semibold text-gray-700 mb-2">
                 ชื่อผู้ใช้
@@ -121,7 +93,7 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* ── ช่องกรอก Password (มีปุ่ม toggle แสดง/ซ่อน) ── */}
+            {/* Password + toggle แสดง/ซ่อน */}
             <div>
               <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
                 รหัสผ่าน
@@ -143,13 +115,11 @@ export default function LoginPage() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
                 >
                   {showPassword ? (
-                    // ไอคอน "ตา" = กำลังแสดงรหัส → กดเพื่อซ่อน
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                     </svg>
                   ) : (
-                    // ไอคอน "ตาขีด" = กำลังซ่อนรหัส → กดเพื่อแสดง
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
                     </svg>
@@ -158,8 +128,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* ── Checkbox "จดจำฉันไว้" ── */}
-            {/* เมื่อติ๊ก → AuthContext จะบันทึก username ไว้ใน sessionStorage */}
+            {/* จดจำฉันไว้ — บันทึก username ไว้ใน localStorage */}
             <div className="flex items-center">
               <input
                 id="remember"
@@ -173,15 +142,13 @@ export default function LoginPage() {
               </label>
             </div>
 
-            {/* ── ปุ่ม Submit ── */}
-            {/* disabled ระหว่าง loading เพื่อป้องกัน double submit */}
+            {/* disabled ระหว่าง loading ป้องกัน double submit */}
             <Button
               type="submit"
               disabled={isLoading}
               className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
-                // แสดง spinner + ข้อความระหว่างรอ API ตอบกลับ
                 <div className="flex items-center justify-center gap-2">
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                   <span>กำลังเข้าสู่ระบบ...</span>

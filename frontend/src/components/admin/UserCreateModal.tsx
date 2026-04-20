@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { User } from '@/types/user';
+import type { AuthUser } from '@/types/auth';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -12,7 +13,7 @@ interface UserCreateModalProps {
   onSubmit: (user: User) => void;
   generateEmployeeId: (provinceCode: string, branchCode: string) => string;
   users: User[];
-  currentUser?: User | null;
+  currentUser?: User | AuthUser | null;
 }
 
 export default function UserCreateModal({
@@ -26,6 +27,9 @@ export default function UserCreateModal({
   const { user: authUser } = useAuth();
   const currentUser = currentUserProp || authUser;
   
+  const isAdmin = currentUser?.role?.toLowerCase() === 'admin';
+  const adminBranchCode = isAdmin ? (currentUser?.branchCode || currentUser?.provinceCode || '') : '';
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -35,7 +39,7 @@ export default function UserCreateModal({
     role: 'user' as 'user' | 'manager' | 'admin' | 'superadmin',
     title: 'MR' as 'MR' | 'MRS' | 'MISS',
     gender: 'MALE' as 'MALE' | 'FEMALE',
-    provinceCode: 'BKK',
+    provinceCode: adminBranchCode || 'BKK',
     branchCode: '001',
     nationalId: '',
     birthDate: '',
@@ -185,13 +189,17 @@ export default function UserCreateModal({
               <select
                 value={formData.provinceCode}
                 onChange={(e) => setFormData({ ...formData, provinceCode: e.target.value })}
-                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none"
+                className={`w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-gray-900 focus:outline-none ${isAdmin ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
                 required
+                disabled={isAdmin}
               >
                 <option value="BKK">BKK (กรุงเทพ)</option>
                 <option value="CNX">CNX (เชียงใหม่)</option>
                 <option value="PKT">PKT (ภูเก็ต)</option>
               </select>
+              {isAdmin && (
+                <p className="mt-1 text-xs text-gray-400">Admin สร้างผู้ใช้ได้เฉพาะสาขาของตนเอง</p>
+              )}
             </div>
             <FormField
               label="เลขบัตรประชาชน *"

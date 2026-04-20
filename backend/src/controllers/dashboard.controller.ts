@@ -237,7 +237,8 @@ export async function handleEventStats(req: Request, res: Response): Promise<voi
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
-    const eventId = parseInt(req.params.eventId);
+    const eventIdRaw = Array.isArray(req.params.eventId) ? req.params.eventId[0] : req.params.eventId;
+    const eventId = parseInt(eventIdRaw ?? '', 10);
     if (isNaN(eventId)) {
       res.status(400).json({ success: false, error: 'Invalid eventId' });
       return;

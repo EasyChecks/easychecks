@@ -146,12 +146,14 @@ export const authService = {
       // ✅ STEP 5: ดึง branch name (ถ้า user มี branchId)
       // ═════════════════════════════════════════════════
       let branchName: string | undefined;  // ← ชื่อสาขา (optional)
+      let branchCode: string | undefined;  // ← รหัสสาขา (optional)
       if (user.branchId) {  // ← ถ้า user สังกัดสาขา
         const branch = await prisma.branch.findUnique({
           where: { branchId: user.branchId },  // ← ค้นหาสาขาจาก branchId
           select: { name: true, code: true },  // ← เลือกเฉพาะ name และ code
         });
         branchName = branch?.name ?? undefined;  // ← ถ้าพบใช้ชื่อสาขา, ไม่พบ = undefined
+        branchCode = branch?.code ?? undefined;  // ← ถ้าพบใช้รหัสสาขา, ไม่พบ = undefined
       }
 
       // ✅ STEP 6: สร้าง response object สำหรับส่งกลับ frontend
@@ -176,6 +178,7 @@ export const authService = {
           position: user.position ?? undefined,      // ← ตำแหน่ง (ถ้ามี)
           phone: user.phone ?? undefined,            // ← เบอร์โทร (ถ้ามี)
           branch: branchName,                        // ← ชื่อสาขา (ถ้ามี)
+          branchCode,                                // ← รหัสสาขา (ถ้ามี)
         }
       };
 

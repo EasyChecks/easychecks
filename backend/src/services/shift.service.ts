@@ -92,6 +92,15 @@ function isValidTimeFormat(time: string): boolean {
   return timeRegex.test(time); // คืน true ถ้าผ่าน, false ถ้าไม่ผ่าน
 }
 
+function toMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map((value) => Number(value));
+  return (hours ?? 0) * 60 + (minutes ?? 0);
+}
+
+function isEndTimeAfterStartTime(startTime: string, endTime: string): boolean {
+  return toMinutes(endTime) > toMinutes(startTime);
+}
+
 // ตรวจว่าคนที่ทำรายการ (requester) มีสิทธิ์เข้าถึงสาขาของ target หรือเปล่า
 function canAccessBranch(
   role: string,                         // role ของ requester: SUPERADMIN / ADMIN / อื่นๆ
@@ -136,6 +145,10 @@ export const createShift = async (data: CreateShiftDTO) => {
   // ตรวจรูปแบบเวลาทั้งเริ่มและสิ้นสุด ก่อนทำอะไรทั้งนั้น
   if (!isValidTimeFormat(data.startTime) || !isValidTimeFormat(data.endTime)) {
     throw new Error('รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM เช่น 08:30)');
+  }
+
+  if (!isEndTimeAfterStartTime(data.startTime, data.endTime)) {
+    throw new Error('เวลาเลิกงานต้องมากกว่าเวลาเริ่มงาน (เวลาออกต้องหลังเวลาเข้า)');
   }
 
   // ถ้าระบุ locationId มา ให้ตรวจว่า location นั้นมีอยู่จริงใน DB
@@ -260,6 +273,15 @@ export const createBulkShift = async (data: CreateBulkShiftDTO) => {
       400,
       'INVALID_PAYLOAD',
       [{ code: 'INVALID_PAYLOAD', message: 'รูปแบบเวลาไม่ถูกต้อง (ต้องเป็น HH:MM เช่น 08:30)' }],
+    );
+  }
+
+  if (!isEndTimeAfterStartTime(data.startTime, data.endTime)) {
+    throw new BulkShiftCreateError(
+      'เวลาเลิกงานต้องมากกว่าเวลาเริ่มงาน (เวลาออกต้องหลังเวลาเข้า)',
+      400,
+      'INVALID_PAYLOAD',
+      [{ code: 'INVALID_PAYLOAD', message: 'เวลาเลิกงานต้องมากกว่าเวลาเริ่มงาน (เวลาออกต้องหลังเวลาเข้า)' }],
     );
   }
 
@@ -685,6 +707,12 @@ export const updateShift = async (
   }
   if (data.endTime && !isValidTimeFormat(data.endTime)) {
     throw new Error('รูปแบบเวลาสิ้นสุดไม่ถูกต้อง (ต้องเป็น HH:MM)');
+  }
+
+  const effectiveStartTime = data.startTime ?? existingShift.startTime;
+  const effectiveEndTime = data.endTime ?? existingShift.endTime;
+  if (!isEndTimeAfterStartTime(effectiveStartTime, effectiveEndTime)) {
+    throw new Error('เวลาเลิกงานต้องมากกว่าเวลาเริ่มงาน (เวลาออกต้องหลังเวลาเข้า)');
   }
 
   if (data.locationId !== undefined && data.locationId !== null) {

@@ -41,7 +41,6 @@ export default function DownloadData() {
       setIsPreviewing(true);
       const data = await downloadService.previewReport({
         type: selectedReportType,
-        format: 'excel',
         startDate: startDate || undefined,
         endDate: endDate || undefined,
       });
@@ -189,7 +188,8 @@ export default function DownloadData() {
               <div className="p-6 overflow-y-auto flex-1 space-y-6">
                 {!previewStep ? (
                   <>
-                    {/* Date Range */}
+                    {/* Date Range - แสดงเฉพาะ Attendance */}
+                    {selectedReportType === 'attendance' && (
                     <div>
                       <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -222,6 +222,7 @@ export default function DownloadData() {
                         </div>
                       </div>
                     </div>
+                    )}
 
                     {/* Format Info */}
                     <div>

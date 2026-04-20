@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { shiftService } from '@/services/shift';
 import { userService, type UserServiceUser } from '@/services/user';
+import { locationService, type LocationItem } from '@/services/locationService';
 import {
   Shift,
   CreateShiftRequest,
@@ -26,16 +27,30 @@ const weekDays = [
 const shiftTypes = [
   { value: 'REGULAR', label: 'ทุกวัน', description: 'ทำงานทุกวันตามที่กำหนด' },
   { value: 'SPECIFIC_DAY', label: 'เฉพาะวัน', description: 'เลือกวันที่ทำงาน (จ-อา)' },
-  { value: 'CUSTOM', label: 'กำหนดเอง', description: 'ระบุวันที่เฉพาะเจาะจง' },
 ];
+
+type ShiftAssignee = {
+  id: number;
+  name: string;
+  employeeId: string;
+};
+
+type ShiftGroup = {
+  key: string;
+  representative: Shift;
+  shifts: Shift[];
+  assignees: ShiftAssignee[];
+};
 
 export default function ShiftManagementPage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [users, setUsers] = useState<UserServiceUser[]>([]);
+  const [locations, setLocations] = useState<LocationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState<Shift | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [editingShiftGroup, setEditingShiftGroup] = useState<ShiftGroup | null>(null);
   const [searchText, setSearchText] = useState('');
   const [filterShiftType, setFilterShiftType] = useState<'ALL' | 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM'>('ALL');
   const [filterActive, setFilterActive] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
@@ -80,6 +95,7 @@ export default function ShiftManagementPage() {
     lateThresholdMinutes: number;
     specificDays: ('MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY')[];
     customDate: string;
+    locationId?: number;
     userIds: number[];
   }>({
     name: '',
@@ -90,6 +106,7 @@ export default function ShiftManagementPage() {
     lateThresholdMinutes: 30,
     specificDays: [],
     customDate: '',
+    locationId: undefined,
     userIds: [],
   });
 
@@ -100,12 +117,14 @@ export default function ShiftManagementPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [shiftsData, usersData] = await Promise.all([
+      const [shiftsData, usersData, locationsData] = await Promise.all([
         shiftService.getAll(),
         userService.getAll(),
+        locationService.getAll({ isActive: true, take: 200 }),
       ]);
       setShifts(shiftsData);
-      setUsers(usersData.filter(u => u.isActive));
+      setUsers(usersData.filter(isUserActive));
+      setLocations(locationsData.data ?? []);
     } catch (error) {
       console.error('Error loading data:', error);
       setFeedbackModal({ type: 'error', message: 'เกิดข้อผิดพลาดในการโหลดข้อมูล' });
@@ -116,6 +135,7 @@ export default function ShiftManagementPage() {
 
   const handleCreateShift = () => {
     setEditingShift(null);
+    setEditingShiftGroup(null);
     setEmployeeSearchText('');
     setEmployeeBranchFilter('ALL');
     setFormData({
@@ -127,13 +147,16 @@ export default function ShiftManagementPage() {
       lateThresholdMinutes: 30,
       specificDays: [],
       customDate: '',
+      locationId: undefined,
       userIds: [],
     });
     setShowCreateModal(true);
   };
 
-  const handleEditShift = (shift: Shift) => {
+  const handleEditShift = (group: ShiftGroup) => {
+    const shift = group.representative;
     setEditingShift(shift);
+    setEditingShiftGroup(group);
     setEmployeeSearchText('');
     setEmployeeBranchFilter('ALL');
     setFormData({
@@ -145,7 +168,8 @@ export default function ShiftManagementPage() {
       lateThresholdMinutes: shift.lateThresholdMinutes,
       specificDays: shift.specificDays || [],
       customDate: shift.customDate || '',
-      userIds: shift.userId ? [shift.userId] : [],
+      locationId: shift.locationId ?? shift.location?.id,
+      userIds: group.assignees.map((assignee) => assignee.id),
     });
     setShowCreateModal(true);
   };
@@ -167,6 +191,33 @@ export default function ShiftManagementPage() {
     };
 
     return raw.branch?.name || raw.branchName || raw.branch?.code || raw.branchCode || 'ไม่ระบุสาขา';
+  };
+
+  const formatAssigneeLabel = (user: UserServiceUser): string => {
+    const employeeCode = user.employeeId || '-';
+    const fullName = user.name?.trim() || 'ไม่พบชื่อ';
+    return `(${employeeCode}) ${fullName} - ${getUserBranchName(user)}`;
+  };
+
+  const isUserActive = (user: UserServiceUser): boolean => {
+    if (typeof user.isActive === 'boolean') {
+      return user.isActive;
+    }
+
+    const raw = user as unknown as {
+      status?: string;
+      isDeleted?: boolean;
+    };
+
+    if (typeof raw.status === 'string') {
+      return raw.status.toUpperCase() === 'ACTIVE';
+    }
+
+    if (typeof raw.isDeleted === 'boolean') {
+      return !raw.isDeleted;
+    }
+
+    return true;
   };
 
   const finalizeSaveSuccess = async (message: string) => {
@@ -207,45 +258,51 @@ export default function ShiftManagementPage() {
       return;
     }
 
-    if (editingShift && formData.userIds.length > 1) {
-      setFeedbackModal({ type: 'error', message: 'การแก้ไขกะรองรับพนักงานได้ครั้งละ 1 คน' });
+    const [startHour, startMinute] = formData.startTime.split(':').map((v) => Number(v));
+    const [endHour, endMinute] = formData.endTime.split(':').map((v) => Number(v));
+    const startMinutes = (startHour ?? 0) * 60 + (startMinute ?? 0);
+    const endMinutes = (endHour ?? 0) * 60 + (endMinute ?? 0);
+    if (endMinutes <= startMinutes) {
+      setFeedbackModal({ type: 'error', message: 'เวลาออกต้องหลังเวลาเข้า (เวลาเลิกงานต้องมากกว่าเวลาเริ่มงาน)' });
       return;
     }
 
     setLoading(true);
     try {
       if (editingShift) {
-        // Update existing shift
-        const targetUserId = formData.userIds[0];
-        const updateData: UpdateShiftRequest = {
+        const bulkUpdateData: CreateShiftRequest = {
           name: formData.name,
           shiftType: formData.shiftType,
           startTime: formData.startTime,
           endTime: formData.endTime,
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
-          userId: targetUserId,
+          locationId: formData.locationId,
+          userIds: formData.userIds,
+          replaceExisting: true,
         };
 
         if (formData.shiftType === 'SPECIFIC_DAY') {
-          updateData.specificDays = formData.specificDays;
+          bulkUpdateData.specificDays = formData.specificDays;
         } else if (formData.shiftType === 'CUSTOM') {
-          updateData.customDate = formData.customDate;
+          bulkUpdateData.customDate = formData.customDate;
         }
 
-        try {
-          await shiftService.update(editingShift.id, updateData);
-        } catch (error: any) {
-          const message = error?.response?.data?.message || error?.message || '';
-          if (!isActiveShiftConflictError(message)) throw error;
+        await shiftService.create(bulkUpdateData);
 
-          setReassignModal({
-            mode: 'edit',
-            message,
-            shiftId: editingShift.id,
-            updateData,
-          });
-          return;
+        if (editingShiftGroup) {
+          const selectedSet = new Set(formData.userIds);
+          const removedShiftIds = editingShiftGroup.shifts
+            .filter((shift) => typeof shift.userId === 'number' && !selectedSet.has(shift.userId))
+            .map((shift) => shift.id);
+
+          if (removedShiftIds.length > 0) {
+            await Promise.all(
+              removedShiftIds.map((shiftId) =>
+                shiftService.delete(shiftId, 'ปรับปรุงรายชื่อพนักงานในกะ'),
+              ),
+            );
+          }
         }
       } else {
         // Create new shifts in one bulk request (all-or-nothing)
@@ -256,6 +313,7 @@ export default function ShiftManagementPage() {
           endTime: formData.endTime,
           gracePeriodMinutes: formData.gracePeriodMinutes,
           lateThresholdMinutes: formData.lateThresholdMinutes,
+          locationId: formData.locationId,
           userIds: formData.userIds,
         };
 
@@ -305,7 +363,7 @@ export default function ShiftManagementPage() {
       console.error('Error saving shift:', error);
       setFeedbackModal({
         type: 'error',
-        message: error.response?.data?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล',
+        message: error?.response?.data?.error || error?.response?.data?.message || error?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล',
       });
     } finally {
       setLoading(false);
@@ -417,6 +475,22 @@ export default function ShiftManagementPage() {
     return weekDays.find(d => d.en === day)?.th || day;
   };
 
+  const getShiftGroupKey = (shift: Shift): string => {
+    const sortedDays = [...(shift.specificDays ?? [])].sort().join(',');
+    return [
+      shift.name,
+      shift.shiftType,
+      shift.startTime,
+      shift.endTime,
+      String(shift.gracePeriodMinutes),
+      String(shift.lateThresholdMinutes),
+      shift.customDate ?? '',
+      String(shift.locationId ?? shift.location?.id ?? ''),
+      sortedDays,
+      shift.isActive ? '1' : '0',
+    ].join('|');
+  };
+
   const branchOptions = useMemo(() => {
     const names = shifts
       .map((s) => s.user?.branch?.name)
@@ -452,6 +526,12 @@ export default function ShiftManagementPage() {
     });
   }, [users, employeeSearchText, employeeBranchFilter]);
 
+  const selectedAssignedUsers = useMemo(() => {
+    if (!formData.userIds.length) return [];
+    const selectedSet = new Set(formData.userIds);
+    return users.filter((user) => selectedSet.has(user.id));
+  }, [users, formData.userIds]);
+
   const filteredShifts = useMemo(() => {
     const q = searchText.trim().toLowerCase();
 
@@ -481,6 +561,52 @@ export default function ShiftManagementPage() {
     filterBranchName,
   ]);
 
+  const groupedFilteredShifts = useMemo<ShiftGroup[]>(() => {
+    const groups = new Map<string, ShiftGroup>();
+
+    filteredShifts.forEach((shift) => {
+      const key = getShiftGroupKey(shift);
+      const existing = groups.get(key);
+      const assignee = shift.user
+        ? {
+            id: shift.user.id,
+            name: shift.user.name,
+            employeeId: shift.user.employeeId,
+          }
+        : null;
+
+      if (!existing) {
+        groups.set(key, {
+          key,
+          representative: shift,
+          shifts: [shift],
+          assignees: assignee ? [assignee] : [],
+        });
+        return;
+      }
+
+      existing.shifts.push(shift);
+      if (assignee && !existing.assignees.some((item) => item.id === assignee.id)) {
+        existing.assignees.push(assignee);
+      }
+    });
+
+    return Array.from(groups.values());
+  }, [filteredShifts]);
+
+  const groupedAssigneesByKey = useMemo(() => {
+    const map = new Map<string, ShiftAssignee[]>();
+    groupedFilteredShifts.forEach((group) => {
+      map.set(group.key, group.assignees);
+    });
+    return map;
+  }, [groupedFilteredShifts]);
+
+  const detailAssignees = useMemo<ShiftAssignee[]>(() => {
+    if (!showDetailModal) return [];
+    return groupedAssigneesByKey.get(getShiftGroupKey(showDetailModal)) ?? [];
+  }, [showDetailModal, groupedAssigneesByKey]);
+
   const hasActiveFilters = useMemo(() => {
     return Boolean(
       searchText.trim()
@@ -498,15 +624,15 @@ export default function ShiftManagementPage() {
       total,
       active,
       inactive,
-      filtered: filteredShifts.length,
+      filtered: groupedFilteredShifts.length,
     };
-  }, [shifts, filteredShifts]);
+  }, [shifts, groupedFilteredShifts]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredShifts.length / pageSize));
-  const paginatedShifts = useMemo(() => {
+  const totalPages = Math.max(1, Math.ceil(groupedFilteredShifts.length / pageSize));
+  const paginatedShiftGroups = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return filteredShifts.slice(start, start + pageSize);
-  }, [filteredShifts, page]);
+    return groupedFilteredShifts.slice(start, start + pageSize);
+  }, [groupedFilteredShifts, page]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -591,7 +717,6 @@ export default function ShiftManagementPage() {
               <option value="ALL">ทุกประเภทกะ</option>
               <option value="REGULAR">ทุกวัน</option>
               <option value="SPECIFIC_DAY">เฉพาะวัน</option>
-              <option value="CUSTOM">กำหนดเอง</option>
             </select>
 
             <select
@@ -653,8 +778,10 @@ export default function ShiftManagementPage() {
           ) : (
             <>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {paginatedShifts.map((shift) => (
-                  <Card key={shift.id} className="h-full p-6">
+                {paginatedShiftGroups.map((group) => {
+                  const shift = group.representative;
+                  return (
+                  <Card key={group.key} className="h-full p-6">
                 <div className="flex h-full flex-col gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-3">
@@ -708,14 +835,23 @@ export default function ShiftManagementPage() {
                         </div>
                       )}
 
-                      {shift.user && (
+                      {group.assignees.length > 0 && (
                         <div className="flex items-center gap-2 text-gray-700">
                           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                           </svg>
                           <span className="font-medium">พนักงาน:</span>
-                          <span>{shift.user.name} ({shift.user.employeeId})</span>
+                          {group.assignees.length === 1 ? (
+                            <span>{group.assignees[0].name} ({group.assignees[0].employeeId})</span>
+                          ) : (
+                            <span>{group.assignees.length} คน</span>
+                          )}
                         </div>
+                      )}
+                      {group.assignees.length > 1 && (
+                        <p className="ml-7 mt-1 text-xs text-gray-500">
+                          {group.assignees.map((assignee) => `${assignee.employeeId} ${assignee.name}`).join(', ')}
+                        </p>
                       )}
 
                       {shift.location && (
@@ -741,7 +877,7 @@ export default function ShiftManagementPage() {
                       ดูรายละเอียด
                     </Button>
                     <Button
-                      onClick={() => handleEditShift(shift)}
+                      onClick={() => handleEditShift(group)}
                       variant="outline"
                       size="sm"
                       disabled={loading}
@@ -770,12 +906,12 @@ export default function ShiftManagementPage() {
                   </div>
                 </div>
                   </Card>
-                ))}
+                );})}
               </div>
 
               <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-sm text-gray-600">
-                  ทั้งหมด {filteredShifts.length} รายการ | หน้า {page} / {totalPages}
+                  ทั้งหมด {groupedFilteredShifts.length} รายการ | หน้า {page} / {totalPages}
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -957,6 +1093,25 @@ export default function ShiftManagementPage() {
                   </div>
                 )}
 
+                <div>
+                  <label className="block mb-2 text-sm font-medium text-gray-700">สถานที่</label>
+                  <select
+                    value={formData.locationId ?? ''}
+                    onChange={(e) => {
+                      const nextLocationId = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                      setFormData({ ...formData, locationId: nextLocationId });
+                    }}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
+                  >
+                    <option value="">-- ไม่ระบุสถานที่ --</option>
+                    {locations.map((location) => (
+                      <option key={location.locationId} value={location.locationId}>
+                        {location.locationName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Employee Assignment */}
                 <div>
                   <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -982,55 +1137,43 @@ export default function ShiftManagementPage() {
                     </select>
                   </div>
 
-                  {editingShift ? (
-                    <select
-                      value={formData.userIds[0] || ''}
-                      onChange={(e) => {
-                        const nextId = e.target.value ? parseInt(e.target.value) : undefined;
-                        setFormData({ ...formData, userIds: nextId ? [nextId] : [] });
-                      }}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-orange-500 focus:outline-none"
-                    >
-                      <option value="">-- เลือกพนักงาน --</option>
-                      {assignableUsers.map((user) => (
-                        <option key={user.id} value={user.id}>
-                          {user.name} ({user.employeeId}) - {getUserBranchName(user)}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
-                      {assignableUsers.map((user) => {
-                        const checked = formData.userIds.includes(user.id);
-                        return (
-                          <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                            <span className="text-sm text-gray-800">{user.name} ({user.employeeId}) - {getUserBranchName(user)}</span>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                setFormData((prev) => ({
-                                  ...prev,
-                                  userIds: checked
-                                    ? prev.userIds.filter((id) => id !== user.id)
-                                    : [...prev.userIds, user.id],
-                                }));
-                              }}
-                              className="h-4 w-4"
-                            />
-                          </label>
-                        );
-                      })}
-                      {assignableUsers.length === 0 && (
-                        <p className="text-sm text-center text-gray-500">ไม่พบพนักงานตามเงื่อนไขที่กรอง</p>
-                      )}
-                    </div>
-                  )}
+                  <div className="p-3 border-2 border-gray-200 rounded-xl max-h-56 overflow-y-auto space-y-2">
+                    {assignableUsers.map((user) => {
+                      const checked = formData.userIds.includes(user.id);
+                      return (
+                        <label key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
+                          <span className="text-sm text-gray-800">{formatAssigneeLabel(user)}</span>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setFormData((prev) => ({
+                                ...prev,
+                                userIds: checked
+                                  ? prev.userIds.filter((id) => id !== user.id)
+                                  : [...prev.userIds, user.id],
+                              }));
+                            }}
+                            className="h-4 w-4"
+                          />
+                        </label>
+                      );
+                    })}
+                    {assignableUsers.length === 0 && (
+                      <p className="text-sm text-center text-gray-500">ไม่พบพนักงานตามเงื่อนไขที่กรอง</p>
+                    )}
+                  </div>
                   <p className="mt-2 text-xs text-gray-500">
-                    {editingShift
-                      ? 'แก้ไขได้ครั้งละ 1 พนักงาน'
-                      : `เลือกแล้ว ${formData.userIds.length} คน (สามารถสร้างกะเดียวกันให้หลายคนได้)`}
+                    เลือกแล้ว {formData.userIds.length} คน (สามารถ{editingShift ? 'เพิ่ม/ลดรายชื่อพนักงานในกะได้' : 'สร้างกะเดียวกันให้หลายคนได้'})
                   </p>
+                  {selectedAssignedUsers.length > 0 && (
+                    <p className="mt-1 text-xs text-gray-600">
+                      {editingShift ? 'พนักงานที่เลือก: ' : 'รายชื่อที่เลือก: '}
+                      {selectedAssignedUsers
+                        .map((user) => `${user.employeeId || '-'} ${user.name || 'ไม่พบชื่อ'}`)
+                        .join(', ')}
+                    </p>
+                  )}
                 </div>
 
                 {/* Submit Buttons */}
@@ -1100,13 +1243,26 @@ export default function ShiftManagementPage() {
                       <span className="font-medium">ระยะเวลา:</span>
                       <span>รอสาย {showDetailModal.gracePeriodMinutes} นาที / สายสูงสุด {showDetailModal.lateThresholdMinutes} นาที</span>
                     </div>
-                    {showDetailModal.user && (
+                    {detailAssignees.length > 0 && (
                       <div className="flex items-center gap-2">
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                         </svg>
                         <span className="font-medium">พนักงาน:</span>
-                        <span>{showDetailModal.user.name} ({showDetailModal.user.employeeId})</span>
+                        {detailAssignees.length === 1 ? (
+                          <span>{detailAssignees[0].name} ({detailAssignees[0].employeeId})</span>
+                        ) : (
+                          <span>{detailAssignees.length} คน</span>
+                        )}
+                      </div>
+                    )}
+                    {detailAssignees.length > 1 && (
+                      <div className="ml-7 flex flex-wrap gap-2">
+                        {detailAssignees.map((assignee) => (
+                          <Badge key={`${assignee.id}-${assignee.employeeId}`} variant="outline">
+                            {assignee.employeeId} {assignee.name}
+                          </Badge>
+                        ))}
                       </div>
                     )}
                     {showDetailModal.location && (

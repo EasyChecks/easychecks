@@ -78,14 +78,13 @@ function MyLateRequestsTab() {
 
       let attachmentUrl = undefined;
       if (attachmentFile) {
-        const result = await lateRequestService.uploadAttachment(attachmentFile);
-        attachmentUrl = result.url;
+        attachmentUrl = await lateRequestService.uploadAttachment(attachmentFile);
       }
 
       const lateMinutes = calculateLateMinutes(scheduledTime, actualTime);
 
       await lateRequestService.createLateRequest({
-        requestDate: new Date(requestDate),
+        requestDate,
         scheduledTime,
         actualTime,
         reason,
@@ -143,8 +142,7 @@ function MyLateRequestsTab() {
 
       let attachmentUrl = editAttachmentPreview || undefined;
       if (editAttachmentFile) {
-        const result = await lateRequestService.uploadAttachment(editAttachmentFile);
-        attachmentUrl = result.url;
+        attachmentUrl = await lateRequestService.uploadAttachment(editAttachmentFile);
       }
 
       await lateRequestService.updateLateRequest(selectedRequest.id, {
@@ -540,7 +538,7 @@ function LateRequestsToApproveTab() {
     try {
       setApproveSubmitting(true);
       setError('');
-      await lateRequestService.approveLateRequest(request.id, { adminComment });
+      await lateRequestService.approveLateRequest(request.id, adminComment);
       setShowSuccess(true);
       setSelectedRequest(null);
       setAdminComment('');
@@ -559,7 +557,7 @@ function LateRequestsToApproveTab() {
     try {
       setApproveSubmitting(true);
       setError('');
-      await lateRequestService.rejectLateRequest(request.id, { rejectionReason });
+      await lateRequestService.rejectLateRequest(request.id, rejectionReason);
       setShowSuccess(true);
       setSelectedRequest(null);
       setRejectionReason('');
@@ -605,7 +603,7 @@ function LateRequestsToApproveTab() {
                   <div className="flex items-center gap-2 mb-2">
                     <Clock className="w-4 h-4 text-orange-500" />
                     <span className="font-semibold text-gray-800">
-                      {request.user?.firstName} {request.user?.lastName}
+                      {request.user?.name}
                     </span>
                     <span className="text-gray-600 text-sm">
                       {new Date(request.requestDate).toLocaleDateString('th-TH')}
@@ -637,7 +635,7 @@ function LateRequestsToApproveTab() {
 
           <div className="space-y-4 mb-4">
             <p className="text-gray-600">
-              <span className="font-semibold">{selectedRequest.user?.firstName} {selectedRequest.user?.lastName}</span> ขอมาสาย
+              <span className="font-semibold">{selectedRequest.user?.name}</span> ขอมาสาย
               <span className="text-orange-600 font-semibold"> {selectedRequest.lateMinutes} นาที</span>
             </p>
             <p className="text-gray-600 text-sm">{selectedRequest.reason}</p>

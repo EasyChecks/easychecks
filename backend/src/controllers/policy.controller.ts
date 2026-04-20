@@ -16,7 +16,12 @@ export const getAll = asyncHandler(async (_req: Request, res: Response) => {
  * GET /api/policies/:key — ดึง policy ตาม key
  */
 export const getByKey = asyncHandler(async (req: Request, res: Response) => {
-  const { key } = req.params;
+  const keyParam = req.params.key;
+  const key = Array.isArray(keyParam) ? keyParam[0] : keyParam;
+
+  if (!key) {
+    throw new NotFoundError('ไม่พบนโยบายที่ระบุ');
+  }
 
   try {
     const policy = await getPolicyByKey(key);

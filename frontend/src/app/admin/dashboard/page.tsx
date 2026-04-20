@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +42,22 @@ const Circle = dynamic(
 );
 const Popup = dynamic(
   () => import("react-leaflet").then((mod) => mod.Popup),
+  { ssr: false }
+);
+const MapController = dynamic(
+  async () => {
+    const { useMap } = await import('react-leaflet');
+    const { useEffect } = await import('react');
+    function Controller({ center, zoom }: { center: [number, number] | null; zoom: number }) {
+      const map = useMap();
+      useEffect(() => {
+        if (!center) return;
+        map.flyTo(center, zoom, { duration: 1.5 });
+      }, [center, zoom, map]);
+      return null;
+    }
+    return Controller;
+  },
   { ssr: false }
 );
 
@@ -155,8 +171,34 @@ export default function AdminDashboard() {
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
   const [perEventStats, setPerEventStats] = useState<EventStatsResponse | null>(null);
   const [perEventStatsLoading, setPerEventStatsLoading] = useState(false);
+  const [mapFlyTarget, setMapFlyTarget] = useState<{ center: [number, number]; zoom: number } | null>(null);
+  const mapHomeRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
 
   // ── Fetch dashboard data ──
+  const fetchDashboardData = useCallback(async (dateParam?: string) => {
+    try {
+      const [summary, employees, branchesResp, eventsResp, locations] = await Promise.all([
+        dashboardService.getAttendanceSummary(undefined, dateParam),
+        dashboardService.getEmployeesToday(undefined, dateParam),
+        dashboardService.getBranchesMap(),
+        eventService.getAll({ take: 200 }),
+        locationService.getAll(),
+      ]);
+      setDashboardSummary(summary);
+      setEmployeesToday(employees.data);
+      setBranchesMap(branchesResp.data);
+      setApiEvents(eventsResp.data);
+      setApiLocations(locations.data);
+      const [locEventsResult] = await Promise.allSettled([
+        dashboardService.getLocationEvents(undefined, dateParam),
+      ]);
+      if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
+    } catch (err) {
+      console.error('[Dashboard] Failed to fetch data:', err);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.branchId]);
+
   useEffect(() => {
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
@@ -166,35 +208,12 @@ export default function AdminDashboard() {
 
     const fetchData = async () => {
       setIsLoading(true);
-      try {
-        // ดึงข้อมูลหลัก (ถ้าพังจะไม่แสดงอะไรเลย)
-        const [summary, employees, branchesResp, eventsResp, locations] = await Promise.all([
-          dashboardService.getAttendanceSummary(undefined, dateParam),
-          dashboardService.getEmployeesToday(undefined, dateParam),
-          dashboardService.getBranchesMap(),
-          eventService.getAll({ take: 100, branchId: user?.branchId ?? undefined }),
-          locationService.getAll(),
-        ]);
-        setDashboardSummary(summary);
-        setEmployeesToday(employees.data);
-        setBranchesMap(branchesResp.data);
-        setApiEvents(eventsResp.data);
-        setApiLocations(locations.data);
-
-        // ดึงข้อมูลเสริม (ถ้าพังไม่กระทบข้อมูลหลัก)
-        const [locEventsResult] = await Promise.allSettled([
-          dashboardService.getLocationEvents(undefined, dateParam),
-        ]);
-        if (locEventsResult.status === 'fulfilled') setLocationEvents(locEventsResult.value.data);
-      } catch (err) {
-        console.error('[Dashboard] Failed to fetch data:', err);
-      } finally {
-        setIsLoading(false);
-      }
+      await fetchDashboardData(dateParam);
+      setIsLoading(false);
     };
 
     fetchData();
-  }, [selectedDate, user?.branchId]);
+  }, [selectedDate, user?.branchId, fetchDashboardData]);
 
   // ── Fetch per-event stats when selectedEventId changes ──
   useEffect(() => {
@@ -211,6 +230,70 @@ export default function AdminDashboard() {
       .finally(() => { if (!cancelled) setPerEventStatsLoading(false); });
     return () => { cancelled = true; };
   }, [selectedEventId]);
+
+  // ── Real-time WebSocket for attendance updates ──
+  useEffect(() => {
+    const wsBase =
+      process.env.NEXT_PUBLIC_WS_URL ||
+      (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api')
+        .replace(/^http/, 'ws')
+        .replace('/api', '');
+
+    // Skip WS on remote deployments that don't support WebSocket
+    if (wsBase.includes('onrender.com') || wsBase.includes('vercel.app')) return;
+
+    const url = `${wsBase}/ws/attendance`;
+    console.log('[WS Admin] wsBase:', wsBase);
+    console.log('[WS Admin] Connecting to:', url);
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      console.log('[WS Admin] new WebSocket(', url, ')');
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        console.log('[WS Admin] Connected successfully');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'attendance_update') {
+            const dateStr = format(selectedDate, 'yyyy-MM-dd');
+            const isToday = format(new Date(), 'yyyy-MM-dd') === dateStr;
+            const dateParam = isToday ? undefined : dateStr;
+            fetchDashboardData(dateParam);
+            if (selectedEventId !== null) {
+              dashboardService.getEventStats(selectedEventId)
+                .then((data) => setPerEventStats(data))
+                .catch(() => {});
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.log('[WS Admin] Connection closed. Code:', event.code, 'Reason:', event.reason);
+        reconnectTimer = setTimeout(connect, 5000);
+      };
+
+      ws.onerror = (event) => {
+        console.error('[WS Admin] Connection error:', event);
+        ws?.close();
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchDashboardData]);
 
   // ── Map API employees → AttendanceStats ──
   const attendanceStats = useMemo((): AttendanceStats => {
@@ -279,34 +362,36 @@ export default function AdminDashboard() {
   // วันนี้ → แสดงเฉพาะ ongoing/upcoming (ไม่โชว์ที่สิ้นสุดแล้ว) เรียงจากใกล้ปัจจุบันสูงสุด
   // วันอื่น → แสดงกิจกรรมที่ overlap กับวันนั้น เรียง startDateTime
   const displayedEvents = useMemo(() => {
-    const now = new Date();
-    const todayStr = format(now, 'yyyy-MM-dd');
-    const selectedStr = format(selectedDate, 'yyyy-MM-dd');
-    const isToday = todayStr === selectedStr;
+    const dayStart = new Date(selectedDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(selectedDate);
+    dayEnd.setHours(23, 59, 59, 999);
 
-    let filtered: ApiEventItem[];
+    const branchId = user?.branchId;
 
-    if (isToday) {
-      // ซ่อนกิจกรรมที่สิ้นสุดแล้ว
-      filtered = apiEvents.filter(e => new Date(e.endDateTime) >= now);
-    } else {
-      // แสดงกิจกรรมที่เกิดขึ้นในวันนั้น (start <= dayEnd && end >= dayStart)
-      const dayStart = new Date(selectedDate);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(selectedDate);
-      dayEnd.setHours(23, 59, 59, 999);
-      filtered = apiEvents.filter(e => {
-        const start = new Date(e.startDateTime);
-        const end = new Date(e.endDateTime);
-        return start <= dayEnd && end >= dayStart;
-      });
-    }
+    const filtered = apiEvents.filter(e => {
+      // กรองตามวันที่ overlap
+      const start = new Date(e.startDateTime);
+      const end = new Date(e.endDateTime);
+      if (!(start <= dayEnd && end >= dayStart)) return false;
 
-    // เรียงจากวันที่ใกล้ปัจจุบันมากที่สุด
+      // กรองตามสิทธิ์สาขาของ Admin
+      if (e.participantType === 'ALL') return true;
+      if (e.participantType === 'BRANCH') {
+        return branchId != null &&
+          (e.event_participants ?? []).some(p => p.branchId === branchId);
+      }
+      // INDIVIDUAL / ROLE — แสดงถ้ามีพนักงานสาขานี้เช็คอินเข้ากิจกรรมนี้
+      const checkedInEventIds = new Set(
+        employeesToday.filter(emp => emp.eventId != null).map(emp => emp.eventId)
+      );
+      return checkedInEventIds.has(e.eventId);
+    });
+
     return filtered.sort(
       (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
     );
-  }, [apiEvents, selectedDate, user?.branchId, branchesMap]);
+  }, [apiEvents, selectedDate, user?.branchId, employeesToday]);
 
   // Combine locations from API data
   const mappingLocations: LocationWithStatus[] = apiLocations
@@ -325,7 +410,7 @@ export default function AdminDashboard() {
     statusColor: "text-green-600",
   }));
 
-  const eventLocations: LocationWithStatus[] = apiEvents
+  const eventLocations: LocationWithStatus[] = displayedEvents
     .filter(evt => evt.location?.latitude != null || evt.venueLatitude != null)
     .map((evt) => ({
       id: `event-${evt.eventId}`,
@@ -556,6 +641,7 @@ export default function AdminDashboard() {
                 ref={mapRef}
               >
                 <TileLayer attribution={getTileLayerAttribution()} url={getTileLayerUrl()} />
+                <MapController center={mapFlyTarget?.center ?? null} zoom={mapFlyTarget?.zoom ?? 16} />
                 {filteredLocations.map((location) => (
                   <React.Fragment key={location.id}>
                     <Marker position={[location.latitude, location.longitude]}>
@@ -613,10 +699,18 @@ export default function AdminDashboard() {
           <div className="border-t-2 border-borderMain bg-white flex flex-col flex-1 min-h-0">
             <div className="px-4 py-2 border-b border-borderMain flex items-center justify-between shrink-0">
               <h3 className="text-sm font-semibold text-primaryMain">
-                {statsType === 'attendance' ? 'บันทึกการเข้างาน' : 'รายการกิจกรรม'}
+                {statsType === 'attendance'
+                  ? 'บันทึกการเข้างาน'
+                  : (selectedEventId && (perEventStatsLoading || perEventStats))
+                    ? 'รายชื่อผู้เข้าร่วม'
+                    : 'รายการกิจกรรม'}
               </h3>
               <span className="text-xs text-textMain/60">
-                {statsType === 'attendance' ? employeesToday.length : displayedEvents.length} รายการ
+                {statsType === 'attendance'
+                  ? `${employeesToday.length} รายการ`
+                  : (selectedEventId && perEventStats)
+                    ? `${perEventStats.isOpenEvent ? perEventStats.joinedCount : perEventStats.joinedCount + perEventStats.notJoinedCount} คน`
+                    : `${displayedEvents.length} รายการ`}
               </span>
             </div>
             <div className="overflow-y-auto flex-1">
@@ -682,6 +776,71 @@ export default function AdminDashboard() {
                   </>
                 );
               })() : (() => {
+                // ── Participant view when event is selected ──
+                if (selectedEventId && (perEventStatsLoading || perEventStats)) {
+                  if (perEventStatsLoading) {
+                    return (
+                      <div className="flex items-center justify-center py-12 text-gray-400">
+                        <div className="text-center">
+                          <div className="w-8 h-8 mx-auto mb-2 border-b-2 border-primaryMain rounded-full animate-spin" />
+                          <p className="text-xs">กำลังโหลดข้อมูล...</p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  const participants = perEventStats!.isOpenEvent
+                    ? perEventStats!.joined.map(p => ({ ...p, hasJoined: true }))
+                    : [
+                        ...perEventStats!.joined.map(p => ({ ...p, hasJoined: true })),
+                        ...perEventStats!.notJoined.map(p => ({ ...p, hasJoined: false })),
+                      ];
+                  const PAGE_SIZE = 10;
+                  const totalPages = Math.max(1, Math.ceil(participants.length / PAGE_SIZE));
+                  const safePage = Math.min(tablePage, totalPages);
+                  const pageItems = participants.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+                  return (
+                    <>
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-gray-50 border-b border-borderMain">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">ชื่อ</th>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">สาขา</th>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">เวลาเช็คอิน</th>
+                            <th className="px-3 py-2 text-left font-medium text-textMain/70">สถานะ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-borderMain/50">
+                          {participants.length === 0 ? (
+                            <tr><td colSpan={4} className="text-center py-6 text-gray-400">ไม่มีข้อมูลผู้เข้าร่วม</td></tr>
+                          ) : (
+                            pageItems.map((p, idx) => (
+                              <tr key={`${p.name}-${idx}`} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-3 py-2 text-textMain font-medium">{p.name}</td>
+                                <td className="px-3 py-2 text-textMain/70">{p.branch || '-'}</td>
+                                <td className="px-3 py-2 text-textMain/70">{p.checkIn || '-'}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    p.hasJoined ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    {p.hasJoined ? 'เข้าร่วมแล้ว' : 'ยังไม่เข้าร่วม'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-center gap-2 py-2 border-t border-borderMain text-xs">
+                          <button onClick={() => setTablePage(p => Math.max(1, p - 1))} disabled={safePage === 1} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">‹</button>
+                          <span className="text-textMain/70">{safePage} / {totalPages}</span>
+                          <button onClick={() => setTablePage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages} className="px-2 py-1 rounded border border-borderMain disabled:opacity-40 hover:bg-gray-50">›</button>
+                        </div>
+                      )}
+                    </>
+                  );
+                }
+                // ── Events list ──
                 const PAGE_SIZE = 10;
                 const totalPages = Math.max(1, Math.ceil(displayedEvents.length / PAGE_SIZE));
                 const safePage = Math.min(tablePage, totalPages);
@@ -717,7 +876,24 @@ export default function AdminDashboard() {
                             return (
                               <tr
                                 key={evt.eventId}
-                                onClick={() => setSelectedEventId(isSelected ? null : evt.eventId)}
+                                onClick={() => {
+                                  setSelectedEventId(isSelected ? null : evt.eventId);
+                                  const lat = evt.location?.latitude ?? evt.venueLatitude;
+                                  const lng = evt.location?.longitude ?? evt.venueLongitude;
+                                  if (!isSelected && lat != null && lng != null) {
+                                    // บันทึกตำแหน่งเดิมก่อน fly ไป event
+                                    if (!mapHomeRef.current && filteredLocations.length > 0) {
+                                      mapHomeRef.current = { center: [filteredLocations[0].latitude, filteredLocations[0].longitude], zoom: 13 };
+                                    }
+                                    setMapFlyTarget({ center: [lat, lng], zoom: 16 });
+                                  } else if (isSelected) {
+                                    // fly กลับบ้าน
+                                    if (mapHomeRef.current) {
+                                      setMapFlyTarget(mapHomeRef.current);
+                                      mapHomeRef.current = null;
+                                    }
+                                  }
+                                }}
                                 className={`cursor-pointer transition-colors ${isSelected ? 'bg-primaryMain/10 border-l-2 border-primaryMain' : 'hover:bg-gray-50'}`}
                               >
                                 <td className="px-3 py-2 text-textMain font-medium">{evt.eventName}</td>
@@ -809,7 +985,13 @@ export default function AdminDashboard() {
                   {perEventStats?.eventName || '...'}
                   {perEventStats?.isOpenEvent && <span className="ml-1 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">เปิดทั่วไป</span>}
                 </span>
-                <button onClick={() => setSelectedEventId(null)} className="text-textMain/40 hover:text-textMain/80 text-xs">✕</button>
+                <button onClick={() => {
+                  setSelectedEventId(null);
+                  if (mapHomeRef.current) {
+                    setMapFlyTarget(mapHomeRef.current);
+                    mapHomeRef.current = null;
+                  }
+                }} className="text-textMain/40 hover:text-textMain/80 text-xs">✕</button>
               </div>
             )}
             {statsType === 'event' && !selectedEventId && (
@@ -895,12 +1077,8 @@ export default function AdminDashboard() {
             {statsType === 'attendance' ? (
               <>
                 <div className="flex justify-between text-xs">
-                  <span className="text-textMain/60">พนักงานทั้งหมด</span>
-                  <span className="font-bold text-primaryMain">{attendanceStats.totalEmployees} คน</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-textMain/60">คิดรวมอัตราการสถิติ</span>
-                  <span className="font-bold text-emerald-600">{totalChartSum} คน</span>
+                  <span className="text-textMain/60">สรุปยอดพนักงาน (ตามสถิติ)</span>
+                  <span className="font-bold text-primaryMain">{totalChartSum} คน</span>
                 </div>
               </>
             ) : (
@@ -911,13 +1089,19 @@ export default function AdminDashboard() {
                 </div>
                 {perEventStats ? (
                   <>
+                    {!perEventStats.isOpenEvent && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-textMain/60">เป้าหมาย</span>
+                        <span className="font-bold text-primaryMain">{perEventStats.joinedCount + perEventStats.notJoinedCount} คน</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-xs">
-                      <span className="text-textMain/60">เข้าร่วม</span>
+                      <span className="text-textMain/60">มาแล้ว</span>
                       <span className="font-bold text-emerald-600">{perEventStatsLoading ? '...' : perEventStats.joinedCount} คน</span>
                     </div>
                     {!perEventStats.isOpenEvent && (
                       <div className="flex justify-between text-xs">
-                        <span className="text-textMain/60">ยังไม่เข้าร่วม</span>
+                        <span className="text-textMain/60">ยังไม่มา</span>
                         <span className="font-bold text-red-500">{perEventStatsLoading ? '...' : perEventStats.notJoinedCount} คน</span>
                       </div>
                     )}

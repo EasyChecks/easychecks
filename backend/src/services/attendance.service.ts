@@ -8,6 +8,8 @@ import { uploadAttendancePhotoToSupabase } from '../utils/supabase-storage.js';
 
 const THAI_OFFSET_MS = 7 * 60 * 60 * 1000;
 const AUTO_CHECKOUT_GRACE_MINUTES = 30;
+const MIN_CHECKOUT_MINUTES_AFTER_CHECKIN = 1;
+const MAX_EARLY_CHECKIN_MINUTES = 30;
 
 /**
  * 📋 Attendance Service — บริการจัดการการเข้า-ออกงาน
@@ -91,6 +93,131 @@ function calculateDistance(
     { latitude: lat1, longitude: lon1 },
     { latitude: lat2, longitude: lon2 },
   );
+}
+
+const THAI_DAY_ENUMS = [
+  'SUNDAY',
+  'MONDAY',
+  'TUESDAY',
+  'WEDNESDAY',
+  'THURSDAY',
+  'FRIDAY',
+  'SATURDAY',
+] as const;
+
+type ThaiDayEnum = (typeof THAI_DAY_ENUMS)[number];
+
+function toThaiDate(date: Date): Date {
+  return new Date(date.getTime() + THAI_OFFSET_MS);
+}
+
+function toThaiDateKey(date: Date): string {
+  const thai = toThaiDate(date);
+  const year = thai.getUTCFullYear();
+  const month = String(thai.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(thai.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toThaiHHMM(date: Date): string {
+  const thai = toThaiDate(date);
+  const hour = String(thai.getUTCHours()).padStart(2, '0');
+  const minute = String(thai.getUTCMinutes()).padStart(2, '0');
+  return `${hour}:${minute}`;
+}
+
+function shiftMatchesAttendanceDate(shift: Shift, checkIn: Date): boolean {
+  if (shift.shiftType === 'REGULAR') return true;
+
+  const thaiDay = THAI_DAY_ENUMS[toThaiDate(checkIn).getUTCDay()] as ThaiDayEnum;
+
+  if (shift.shiftType === 'SPECIFIC_DAY') {
+    return (shift.specificDays ?? []).includes(thaiDay);
+  }
+
+  if (shift.shiftType === 'CUSTOM') {
+    if (!shift.customDate) return false;
+    return toThaiDateKey(shift.customDate) === toThaiDateKey(checkIn);
+  }
+
+  return true;
+}
+
+function inferShiftForAttendance(checkIn: Date, userShifts: Shift[]): Shift | null {
+  if (userShifts.length === 0) return null;
+
+  const checkInHHMM = toThaiHHMM(checkIn);
+  const candidates = userShifts.filter((shift) => shiftMatchesAttendanceDate(shift, checkIn));
+  if (candidates.length === 0) return null;
+
+  let bestShift: Shift | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (const shift of candidates) {
+    const score = Math.abs(calculateTimeDifference(checkInHHMM, shift.startTime));
+    if (score < bestScore) {
+      bestScore = score;
+      bestShift = shift;
+      continue;
+    }
+
+    if (score === bestScore && bestShift && shift.isActive && !bestShift.isActive) {
+      bestShift = shift;
+    }
+  }
+
+  return bestShift;
+}
+
+type AttendanceRowWithShift = {
+  userId: number;
+  checkIn: Date;
+  checkOut: Date | null;
+  shift: Shift | null;
+};
+
+async function attachMissingShiftRelations<T extends AttendanceRowWithShift>(rows: T[]): Promise<T[]> {
+  if (rows.length === 0 || rows.every((row) => row.shift !== null)) {
+    return rows;
+  }
+
+  const missingUserIds = Array.from(
+    new Set(rows.filter((row) => row.shift === null).map((row) => row.userId)),
+  );
+
+  if (missingUserIds.length === 0) {
+    return rows;
+  }
+
+  const userShifts = await prisma.shift.findMany({
+    where: {
+      userId: { in: missingUserIds },
+      isDeleted: false,
+    },
+    orderBy: [
+      { isActive: 'desc' },
+      { shiftId: 'desc' },
+    ],
+  });
+
+  const shiftsByUserId = new Map<number, Shift[]>();
+  for (const shift of userShifts) {
+    const existing = shiftsByUserId.get(shift.userId) ?? [];
+    existing.push(shift);
+    shiftsByUserId.set(shift.userId, existing);
+  }
+
+  return rows.map((row) => {
+    if (row.shift !== null) return row;
+
+    const inferredShift = inferShiftForAttendance(row.checkIn, shiftsByUserId.get(row.userId) ?? []);
+    if (!inferredShift) return row;
+
+    return {
+      ...row,
+      shift: inferredShift,
+    };
+  });
 }
 
 function getShiftEndDateFromCheckIn(checkIn: Date, shiftEndTime: string): Date {
@@ -337,6 +464,16 @@ export const checkIn = async (data: CheckInDTO) => {
   if (shift.userId !== userId) throw new Error('กะนี้ไม่ใช่ของคุณ');  // ป้องกัน check-in สลับกะคนอื่น
   if (!shift.isActive) throw new Error('กะนี้ถูกปิดใช้งานแล้ว');      // Admin ปิดกะแล้ว
 
+  if (!shiftMatchesAttendanceDate(shift, new Date())) {
+    if (shift.shiftType === 'SPECIFIC_DAY') {
+      throw new Error('วันนี้ไม่ใช่วันที่กำหนดสำหรับกะนี้');
+    }
+    if (shift.shiftType === 'CUSTOM') {
+      throw new Error('กะนี้ใช้ได้เฉพาะวันที่กำหนดเท่านั้น');
+    }
+    throw new Error('วันนี้ไม่สามารถเข้างานกะนี้ได้');
+  }
+
   // ===== 2.1 ตรวจสอบว่าเลยเวลาออกงานหรือยัง =====
   // ทำไมต้องเช็ค? ถ้ากะ 08:00-17:00 แล้วมาเข้างานตอน 18:00
   // ไม่มีประโยชน์แล้ว → บล็อกไว้เลย ไม่ให้สร้าง record ขยะ
@@ -344,6 +481,11 @@ export const checkIn = async (data: CheckInDTO) => {
   //
   // SQL เทียบเท่า: ไม่มี — เป็น business logic ฝั่ง application
   const currentTimeHHMM = getThaiTimeHHMM();
+  const diffFromStart = calculateTimeDifference(currentTimeHHMM, shift.startTime);
+  if (diffFromStart < -MAX_EARLY_CHECKIN_MINUTES) {
+    throw new Error(`คุณต้องเข้างานก่อนเวลาได้ไม่เกิน ${MAX_EARLY_CHECKIN_MINUTES} นาที`);
+  }
+
   const diffFromEnd = calculateTimeDifference(currentTimeHHMM, shift.endTime);
   if (diffFromEnd > 0) {
     throw new Error(`ไม่สามารถเข้างานได้ — เลยเวลาออกงาน (${shift.endTime}) แล้ว`);
@@ -488,7 +630,7 @@ export const checkOut = async (data: CheckOutDTO) => {
     // WHERE "attendanceId"=$1 AND "userId"=$2 AND "checkOut" IS NULL AND "isDeleted"=false
     attendance = await prisma.attendance.findFirst({
       where: { attendanceId, userId, checkOut: null, isDeleted: false },
-      include: { location: true }, // ต้องการ location.radius สำหรับตรวจ GPS
+      include: { location: true, shift: true }, // ต้องการ location.radius และเวลาเลิกกะสำหรับตรวจเวลา
     });
   } else {
     // ไม่มี attendanceId → หา record ล่าสุดที่ยังไม่ check-out ของ user นี้
@@ -501,13 +643,27 @@ export const checkOut = async (data: CheckOutDTO) => {
         isDeleted: false,
       },
       orderBy: { checkIn: 'desc' }, // เอาล่าสุดก่อนเสมอ
-      include: { location: true },
+      include: { location: true, shift: true },
     });
   }
 
   // ไม่พบ record → อาจ check-out ซ้ำ หรือยังไม่เคย check-in เลย
   if (attendance === null || attendance === undefined) {
     throw new Error('ไม่พบการ check-in ที่ยังไม่ได้ check-out');
+  }
+
+  const now = new Date();
+  const minutesSinceCheckIn = (now.getTime() - attendance.checkIn.getTime()) / 60000;
+  if (minutesSinceCheckIn < MIN_CHECKOUT_MINUTES_AFTER_CHECKIN) {
+    throw new Error(`เพิ่งเข้างานเมื่อสักครู่ กรุณารออย่างน้อย ${MIN_CHECKOUT_MINUTES_AFTER_CHECKIN} นาทีจึงจะออกงานได้`);
+  }
+
+  if (attendance.shift !== null) {
+    const shiftEndDate = getShiftEndDateFromCheckIn(attendance.checkIn, attendance.shift.endTime);
+    if (now.getTime() < shiftEndDate.getTime()) {
+      const remainingMinutes = Math.ceil((shiftEndDate.getTime() - now.getTime()) / 60000);
+      throw new Error(`คุณต้องออกงานหลังเวลาเลิกกะ (${attendance.shift.endTime}) หรือรออีกประมาณ ${remainingMinutes} นาที`);
+    }
   }
 
   // ===== 2. ตรวจสอบ GPS (ถ้ามี location ผูกอยู่) =====
@@ -537,7 +693,7 @@ export const checkOut = async (data: CheckOutDTO) => {
   const updatedAttendance = await prisma.attendance.update({
     where: { attendanceId: attendance.attendanceId }, // id ของ record ที่พบข้างบน
     data: {
-      checkOut: new Date(),          // timestamp ปัจจุบัน
+      checkOut: now,          // timestamp ปัจจุบัน
       checkOutPhoto: checkOutPhotoUrl, // URL รูปจาก Supabase Storage
       checkOutLat: latitude,         // ← บังคับบันทึก GPS (ไม่ใช่ null)
       checkOutLng: longitude,
@@ -589,7 +745,8 @@ export const getTodayAttendance = async (userId: number) => {
     orderBy: { checkIn: 'desc' },
   });
 
-  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
+  const rowsWithShift = await attachMissingShiftRelations(rows);
+  return Promise.all(rowsWithShift.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -618,7 +775,8 @@ export const getAttendanceHistory = async (
     orderBy: { checkIn: 'desc' },
   });
 
-  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
+  const rowsWithShift = await attachMissingShiftRelations(rows);
+  return Promise.all(rowsWithShift.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -659,7 +817,8 @@ export const getAllAttendances = async (filters?: {
     orderBy: { checkIn: 'desc' },
   });
 
-  return Promise.all(rows.map((row) => enrichWithWorkSummary(row)));
+  const rowsWithShift = await attachMissingShiftRelations(rows);
+  return Promise.all(rowsWithShift.map((row) => enrichWithWorkSummary(row)));
 };
 
 /**
@@ -686,6 +845,12 @@ export const updateAttendance = async (
   );
   if (isTimeChanged && (!data.editReason || data.editReason.trim().length === 0)) {
     throw new Error('การแก้เวลาเข้างาน/ออกงานต้องระบุเหตุผล (editReason)');
+  }
+
+  const effectiveCheckIn = data.checkIn ?? attendance.checkIn;
+  const effectiveCheckOut = data.checkOut ?? attendance.checkOut;
+  if (effectiveCheckOut !== null && effectiveCheckOut.getTime() < effectiveCheckIn.getTime()) {
+    throw new Error('เวลาออกงานต้องไม่น้อยกว่าเวลาเข้างาน');
   }
 
   const { editReason, ...updatePayload } = data;

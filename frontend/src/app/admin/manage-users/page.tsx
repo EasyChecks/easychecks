@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { userService } from '@/services/user';
+import { attendanceService } from '@/services/attendance';
 import UserTable from '@/components/admin/UserTable';
 import AlertDialog from '@/components/common/AlertDialog';
 import { User, AlertDialogState, AttendanceEditData, AttendanceCheckData, CsvUserData, AttendanceRecord } from '@/types/user';
@@ -43,7 +44,8 @@ export default function AdminManageUser() {
     csv: false,
     createUser: false,
     editUser: false,
-    attendance: false
+    attendance: false,
+    loadingAttendance: false
   });
   
   // Grouped: Filter states (4 → 1)
@@ -113,16 +115,8 @@ export default function AdminManageUser() {
   const filteredUsers = useMemo(() => {
     let filtered = users;
     
-    // Branch filter for admin role
-    if (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'admin') {
-      const adminBranch = currentUser.branch || currentUser.provinceCode;
-      if (adminBranch) {
-        filtered = filtered.filter(user => {
-          const userBranch = user.branch || user.provinceCode;
-          return userBranch === adminBranch;
-        });
-      }
-    }
+    // Backend already filters by branchId for ADMIN role via RBAC
+    // No client-side branch filter needed here
     
     // Search filter
     filtered = filtered.filter(user => {
@@ -226,14 +220,20 @@ export default function AdminManageUser() {
         setSelectedUser(updatedUsers.find(u => u.id === editing.user!.id) || null);
       }
       closeEditUser();
+
+      let successMessage = 'แก้ไขข้อมูลผู้ใช้เรียบร้อยแล้ว';
+      if (savedUser.adminPassword) {
+        successMessage += `\n\nรหัส Admin Dashboard: ${savedUser.adminPassword}`;
+      }
+
       setUi(prev => ({
         ...prev,
         alertDialog: {
           isOpen: true,
           type: 'success',
           title: 'บันทึกสำเร็จ',
-          message: 'แก้ไขข้อมูลผู้ใช้เรียบร้อยแล้ว',
-          autoClose: true
+          message: successMessage,
+          autoClose: !savedUser.adminPassword
         }
       }));
     } catch (err: unknown) {
@@ -544,6 +544,37 @@ export default function AdminManageUser() {
     setUi(prev => ({ ...prev, alertDialog: { ...prev.alertDialog, isOpen: false } }));
   };
 
+  const fetchAttendanceForUser = async () => {
+    if (!selectedUser) return;
+    setModals(prev => ({ ...prev, loadingAttendance: true }));
+    try {
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 30);
+      const records = await attendanceService.getMyHistory(Number(selectedUser.id), {
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0],
+      });
+      const mapped: AttendanceRecord[] = records.map(r => ({
+        date: r.checkIn ? new Date(r.checkIn).toLocaleDateString('th-TH') : '-',
+        checkIn: r.checkIn ? {
+          time: new Date(r.checkIn).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+          status: r.status === 'ON_TIME' ? 'onTime' as const : 'late' as const,
+          photo: r.checkInPhoto || undefined,
+        } : undefined,
+        checkOut: r.checkOut ? {
+          time: new Date(r.checkOut).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+          photo: r.checkOutPhoto || undefined,
+        } : undefined,
+      }));
+      setSelectedUser(prev => prev ? { ...prev, attendanceRecords: mapped } : prev);
+    } catch (err) {
+      console.error('Failed to fetch attendance:', err);
+    } finally {
+      setModals(prev => ({ ...prev, loadingAttendance: false }));
+    }
+  };
+
   const getFilteredAttendanceRecords = (): AttendanceRecord[] => {
     if (!selectedUser || !selectedUser.attendanceRecords) return [];
     
@@ -703,12 +734,19 @@ export default function AdminManageUser() {
             user={selectedUser}
             showDetail={modals.detail}
             showAttendance={modals.attendance}
+            loadingAttendance={modals.loadingAttendance}
             selectedDate={ui.selectedDate}
             currentUser={currentUser as User | null}
             onClose={closeDetail}
             onEdit={openEditUser}
             onDelete={handleDeleteUser}
-            onToggleAttendance={() => setModals(prev => ({ ...prev, attendance: !prev.attendance }))}
+            onToggleAttendance={() => {
+              const willShow = !modals.attendance;
+              setModals(prev => ({ ...prev, attendance: willShow }));
+              if (willShow && (!selectedUser?.attendanceRecords || selectedUser.attendanceRecords.length === 0)) {
+                fetchAttendanceForUser();
+              }
+            }}
             getStatusBadge={getStatusBadge}
             getFilteredAttendanceRecords={getFilteredAttendanceRecords}
             onSetSelectedDate={(date) => setUi(prev => ({ ...prev, selectedDate: date }))}

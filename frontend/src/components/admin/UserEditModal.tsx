@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { User } from '@/types/user';
+import type { AuthUser } from '@/types/auth';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
@@ -10,7 +11,7 @@ type FormState = Record<string, string | number | boolean | null>;
 interface UserEditModalProps {
   show: boolean;
   editingUser: User;
-  currentUser: User | null;
+  currentUser: User | AuthUser | null;
   onClose: () => void;
   onSave: (form: FormState) => Promise<void>;
 }
@@ -24,6 +25,7 @@ export default function UserEditModal({
 }: UserEditModalProps) {
   const [form, setForm] = useState<FormState>({});
   const [saving, setSaving] = useState(false);
+  const [visible, setVisible] = useState(false);
 
   // กำหนดค่าเริ่มต้นเมื่อ editingUser เปลี่ยน
   useEffect(() => {
@@ -47,7 +49,19 @@ export default function UserEditModal({
     });
   }, [editingUser]);
 
+  useEffect(() => {
+    if (show) {
+      requestAnimationFrame(() => setVisible(true));
+    }
+    return () => setVisible(false);
+  }, [show]);
+
   if (!show) return null;
+
+  const handleClose = () => {
+    setVisible(false);
+    setTimeout(onClose, 200);
+  };
 
   const canEditRole = (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'superadmin') ||
     (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'admin' && 
@@ -69,14 +83,14 @@ export default function UserEditModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
       <div 
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm" 
-        onClick={onClose}
+        className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}
+        onClick={handleClose}
       />
-      <Card className="relative z-10 w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl p-6">
+      <Card className={`relative z-10 w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl p-6 transition-all duration-200 ${visible ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-900">แก้ไขข้อมูล: {editingUser.name}</h2>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 text-gray-400 transition-colors rounded-full hover:bg-gray-100 hover:text-gray-600"
           >
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -215,7 +229,7 @@ export default function UserEditModal({
 
           {/* Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t">
-            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+            <Button type="button" variant="outline" onClick={handleClose} disabled={saving}>
               ยกเลิก
             </Button>
             <Button type="button" onClick={handleSave} disabled={saving} className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50">

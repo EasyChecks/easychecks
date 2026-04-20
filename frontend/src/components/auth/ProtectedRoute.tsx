@@ -35,8 +35,11 @@ export default function ProtectedRoute({
     // 1. User's actual role is in allowedRoles, OR
     // 2. User is admin/manager/superadmin and route allows 'user' (frontend pages)
     const userActualRole = user?.role;
-    const hasAccess = allowedRoles && userActualRole && (allowedRoles.includes(userActualRole) || 
-                      (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole)));
+    const hasAccess =
+      !allowedRoles ||
+      !userActualRole ||
+      allowedRoles.includes(userActualRole) ||
+      (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole));
     
     if (requireAuth && user && allowedRoles && userActualRole && !hasAccess) {
       // Redirect to appropriate dashboard based on actual role
@@ -85,8 +88,11 @@ export default function ProtectedRoute({
   // 1. User's actual role is in allowedRoles, OR
   // 2. User is admin/manager/superadmin and route allows 'user' (frontend pages)
   const userActualRole = user?.role;
-  const hasAccess = allowedRoles.includes(userActualRole) || 
-                    (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole));
+  const hasAccess =
+    !allowedRoles ||
+    !userActualRole ||
+    allowedRoles.includes(userActualRole) ||
+    (allowedRoles.includes('user') && ['admin', 'manager', 'superadmin'].includes(userActualRole));
   
   if (requireAuth && user && allowedRoles && userActualRole && !hasAccess) {
     return null; // Will redirect in useEffect

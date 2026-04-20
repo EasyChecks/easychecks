@@ -1,20 +1,6 @@
 'use client';
 
-/**
- * หน้า Attendance (src/app/user/attendance/page.tsx)
- * ────────────────────────────────────────────────────
- * ทำหน้าที่: ให้พนักงานบันทึกเวลาเข้า-ออกงาน
- *
- * Flow การใช้งาน:
- *  1. โหลดหน้า → ดึงสถานะวันนี้ + สถิติเดือนนี้ + กะที่ใช้ได้วันนี้
- *  2. กดปุ่ม "เข้างาน" หรือ "ออกงาน" → เปิดกล้อง + ดึง GPS อัตโนมัติ
- *  3. ถ่ายรูป → เลือกกะ (ถ้ามีหลายกะ) → กด "ยืนยัน"
- *  4. ส่งข้อมูลไป backend → แสดง popup สำเร็จ → reload สถิติ
- *
- * Component มี 2 โหมด UI:
- *  - mode = null     → หน้าหลัก (แสดงสถานะ + ปุ่ม + สถิติ)
- *  - mode = 'checkIn' | 'checkOut' → หน้ากล้อง + ยืนยันตำแหน่ง
- */
+
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -24,13 +10,11 @@ import { shiftService } from '@/services/shift';
 import { Shift, Attendance } from '@/types/attendance';
 
 export default function AttendancePage() {
-  // ดึง user ที่ login อยู่ เพื่อเอา id ส่งไปยัง API (backend ต้องการ userId ใน URL)
   const { user } = useAuth();
   const userId = user ? parseInt(user.id) : null;
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  // ถ้าเข้ามาโดยไม่มี ?mode= → redirect ไปที่ dashboard ไม่ต้องแสดงหน้านี้เลย
   useEffect(() => {
     const m = searchParams.get('mode');
     if (!m || (m !== 'checkIn' && m !== 'checkOut')) {
@@ -38,7 +22,6 @@ export default function AttendancePage() {
     }
   }, [searchParams, router]);
 
-  // ── State หลักของ UI ──
   const [mode, setMode] = useState<'checkIn' | 'checkOut' | null>(() => {
     const m = searchParams.get('mode');
     if (m === 'checkIn' || m === 'checkOut') return m;
@@ -50,7 +33,7 @@ export default function AttendancePage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [selectedShift, setSelectedShift] = useState<number | null>(null);
   const [successResult, setSuccessResult] = useState<{ time: string; status: string; shiftName?: string } | null>(null);
-  const [countdown, setCountdown] = useState(0); // นับถอยหลังก่อน redirect กลับ dashboard
+  const [countdown, setCountdown] = useState(0);
   const [messageModal, setMessageModal] = useState<{ open: boolean; message: string }>({
     open: false,
     message: '',
@@ -59,21 +42,17 @@ export default function AttendancePage() {
     hasCheckedIn: boolean;
     hasCheckedOut: boolean;
     attendance?: Attendance;
-  }>({ hasCheckedIn: false, hasCheckedOut: false });               // สถานะเข้า-ออกงานวันนี้
+  }>({ hasCheckedIn: false, hasCheckedOut: false });
 
   const openMessageModal = useCallback((message: string) => {
     setMessageModal({ open: true, message });
   }, []);
 
-  // ── Refs สำหรับกล้อง ──
-  const videoRef = useRef<HTMLVideoElement>(null);  // แสดง live preview จากกล้อง
-  const canvasRef = useRef<HTMLCanvasElement>(null); // ใช้ capture ภาพนิ่งจาก video
-  const streamRef = useRef<MediaStream | null>(null); // เก็บ stream ไว้เพื่อ stop ทีหลัง
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  /**
-   * โหลดข้อมูลเริ่มต้นเมื่อ userId พร้อม
-   * รอ userId ก่อน (ไม่ใช่ [] เดิม) เพราะถ้า userId = null → API จะเรียกไม่ได้
-   */
+  
   const loadTodayStatus = async () => {
     if (!userId) return;
     try {
@@ -89,7 +68,6 @@ export default function AttendancePage() {
     try {
       const todayShifts = await shiftService.getTodayByUserId(userId);
       setShifts(todayShifts);
-      // auto-select กะแรก (ให้ auto-select เสมอ ไม่ต้องให้ user เลือก ถ้ามีแค่ตัวเดียว)
       if (todayShifts.length > 0) {
         const firstShiftId = typeof todayShifts[0].id === 'string' 
           ? parseInt(todayShifts[0].id, 10) 
@@ -108,8 +86,6 @@ export default function AttendancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // ตรวจสอบสถานะ: ถ้า mode=checkOut แต่ยังไม่ได้ checkIn → แก้เป็น checkIn อัตโนมัติ
-  // ถ้า mode=checkIn แต่ checkIn แล้ว → แก้เป็น checkOut อัตโนมัติ
   useEffect(() => {
     if (!mode) return;
     if (mode === 'checkOut' && !todayStatus.hasCheckedIn) {
@@ -119,22 +95,17 @@ export default function AttendancePage() {
     }
   }, [mode, todayStatus]);
 
-  // เมื่อมาจาก dashboard พร้อม ?mode= ให้เริ่ม GPS ทันที
   useEffect(() => {
     if (mode) {
       navigator.geolocation?.getCurrentPosition(
         (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => {/* GPS ไม่บังคับ */}
+        () => undefined
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /**
-   * requestCameraPermission() — ตรวจสอบว่าผู้ใช้อนุญาตกล้องไหม
-   * ใช้ Permissions API ก่อน → ถ้า 'denied' แจ้งให้เปิดที่ settings เบราว์เซอร์
-   * ถ้า browser ไม่รองรับ Permissions API → return true แล้วลองเปิดกล้องเลย
-   */
+  
   const requestCameraPermission = useCallback(async () => {
     try {
       const result = await navigator.permissions.query({ name: 'camera' as PermissionName });
@@ -146,14 +117,11 @@ export default function AttendancePage() {
       
       return true;
     } catch {
-      return true; // ไม่รองรับ Permissions API → ลองเปิดกล้องตรงๆ
+      return true;
     }
   }, [openMessageModal]);
 
-  /**
-   * startCamera() — เปิดกล้องหน้า (facingMode: 'user') แสดงใน <video>
-   * เก็บ MediaStream ไว้ใน streamRef เพื่อ stop ได้ทีหลัง
-   */
+  
   const startCamera = useCallback(async () => {
     try {
       const hasPermission = await requestCameraPermission();
@@ -180,7 +148,7 @@ export default function AttendancePage() {
     }
   }, [openMessageModal, requestCameraPermission]);
 
-  /** stopCamera() — หยุด stream กล้องทั้งหมด (ป้องกัน indicator กล้องค้างบน browser) */
+  
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -189,55 +157,40 @@ export default function AttendancePage() {
     setUi(prev => ({ ...prev, isCameraActive: false }));
   }, []);
 
-  /**
-   * takePhoto() — capture ภาพนิ่งจาก <video> ลงใน <canvas> แล้วแปลงเป็น Base64 JPEG
-   * ภาพ Base64 นี้จะถูกส่งไป backend ใน checkIn/checkOut request
-   */
+  
   const takePhoto = useCallback(() => {
     if (videoRef.current && canvasRef.current) {
       const context = canvasRef.current.getContext('2d');
       if (context) {
-        // ใช้ videoWidth/videoHeight ถ้ามี ไม่งั้น fallback เป็น clientWidth/clientHeight
         const w = videoRef.current.videoWidth || videoRef.current.clientWidth || 640;
         const h = videoRef.current.videoHeight || videoRef.current.clientHeight || 480;
         canvasRef.current.width = w;
         canvasRef.current.height = h;
         context.drawImage(videoRef.current, 0, 0, w, h);
-        const data = canvasRef.current.toDataURL('image/jpeg', 0.8); // 0.8 quality เพื่อลดขนาด
+        const data = canvasRef.current.toDataURL('image/jpeg', 0.8);
         setPhoto({ taken: true, data });
-        stopCamera(); // ปิดกล้องหลังถ่ายรูป
+        stopCamera();
       }
     }
   }, [stopCamera]);
 
-  /** retakePhoto() — ล้างรูปที่ถ่ายแล้ว แล้วเปิดกล้องใหม่ */
+  
   const retakePhoto = useCallback(() => {
     setPhoto({ taken: false, data: null });
     startCamera();
   }, [startCamera]);
 
-  /**
-   * handleSubmit() — กดปุ่ม "ยืนยัน" หลังถ่ายรูปและได้ GPS แล้ว
-   *
-   * Validation ก่อนส่ง:
-   *  - ต้องมีรูป (photo.data)
-   *  - ต้องมีพิกัด GPS จริง ไม่ใช่ (0,0) หรือ null
-   *  - ต้องเลือกกะ (selectedShift)
-   *
-   * ส่ง:
-   *  - checkIn  → attendanceService.checkIn({ shiftId, photo, latitude, longitude })
-   *  - checkOut → attendanceService.checkOut({ shiftId, photo, latitude, longitude })
-   *
-   * หลังสำเร็จ:
-   *  - แสดง popup "บันทึกสำเร็จ" พร้อมนับถอยหลัง 5 วินาที → redirect กลับ dashboard
-   *  - ป้องกัน double-punch โดยให้ user กลับ dashboard ทันที
-   */
+  
   const handleSubmit = useCallback(async () => {
+    if (mode === 'checkIn' && shifts.length === 0) {
+      openMessageModal('วันนี้ไม่มีกะงานที่สามารถลงเวลาได้');
+      return;
+    }
+
     if (!photo.data) {
       openMessageModal('กรุณาถ่ายรูปก่อนยืนยัน');
       return;
     }
-    // ─ GPS validation: ต้องมีพิกัดจริง ไม่ใช่ (0,0) ─
     if (!location || (location.lat === 0 && location.lng === 0)) {
       openMessageModal('ไม่สามารถรับพิกัด GPS ได้ กรุณาเปิด GPS แล้วลองใหม่');
       return;
@@ -289,8 +242,6 @@ export default function AttendancePage() {
       setUi({ loading: false, showSuccess: true, isCameraActive: false, permissionGranted: false });
       await loadTodayStatus();
 
-      // นับถอยหลัง 5 วินาที แล้ว redirect กลับ dashboard อัตโนมัติ
-      // ป้องกัน double-punch: user ไม่สามารถกดซ้ำได้เพราะอยู่หน้า success modal
       setCountdown(5);
       const timer = setInterval(() => {
         setCountdown(prev => {
@@ -311,24 +262,18 @@ export default function AttendancePage() {
     }
   }, [photo.data, location, selectedShift, mode, shifts.length, openMessageModal, router]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /**
-   * handleCancel() — กดปุ่ม "ยกเลิก" หรือ "กลับ"
-   * ปิดกล้อง reset state ทั้งหมด ไปกลับ dashboard
-   */
+  
   const handleCancel = useCallback(() => {
     stopCamera();
     router.push('/user/dashboard');
   }, [stopCamera, router]);
 
 
-  // ─────────────────────────────────────────────────────────────
-  // UI โหมดกล้อง — fullscreen overlay matching Figma design
-  // ─────────────────────────────────────────────────────────────
   if (mode) {
     return (
       <div className="fixed inset-0 z-9999 flex flex-col bg-[#f5f6f7]">
 
-        {/* ── Orange gradient header ── */}
+        
         <div className="bg-linear-to-r from-[#f26623] to-[#ea580c] px-4 pt-12 pb-5">
           <div className="flex items-center gap-3 mb-1">
             <button onClick={handleCancel} className="text-white p-1 -ml-1 rounded-full hover:bg-white/20 transition-colors">
@@ -341,15 +286,15 @@ export default function AttendancePage() {
           <p className="text-white/80 text-sm ml-9">ถ่ายรูปเพื่อบันทึกเวลา</p>
         </div>
 
-        {/* ── Body ── */}
+        
         <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto">
 
-          {/* ── Camera area ── */}
+          
           <div
             className="relative bg-[#1e293b] rounded-2xl overflow-hidden flex items-center justify-center border-2 border-[#f26623]"
             style={{ minHeight: '340px' }}
           >
-            {/* State 1: กล้องยังไม่เปิด */}
+            
             {!ui.isCameraActive && !photo.taken && (
               <div className="flex flex-col items-center gap-4 text-white/40 select-none">
                 <div className="w-24 h-24 rounded-full border-2 border-white/15 flex items-center justify-center">
@@ -361,7 +306,7 @@ export default function AttendancePage() {
               </div>
             )}
 
-            {/* State 2: กล้องเปิดแล้ว (live preview) */}
+            
             <video
               ref={videoRef}
               autoPlay
@@ -373,7 +318,7 @@ export default function AttendancePage() {
               style={{ minHeight: '340px' }}
             />
 
-            {/* Shutter button — orange circle with white ring */}
+            
             {ui.isCameraActive && !photo.taken && (
               <button
                 onClick={takePhoto}
@@ -383,7 +328,7 @@ export default function AttendancePage() {
               </button>
             )}
 
-            {/* State 3: photo taken */}
+            
             {photo.taken && photo.data && (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
@@ -395,10 +340,10 @@ export default function AttendancePage() {
             )}
           </div>
 
-          {/* hidden canvas for capture */}
+          
           <canvas ref={canvasRef} className="hidden" />
 
-          {/* ── GPS status indicator ── */}
+          
           <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm ${
             location && !(location.lat === 0 && location.lng === 0)
               ? 'bg-green-100 text-green-800'
@@ -419,7 +364,7 @@ export default function AttendancePage() {
             )}
           </div>
 
-          {/* ── Shift selector (when multiple shifts & photo taken) ── */}
+          
           {shifts.length > 1 && photo.taken && (
             <div className="bg-white rounded-2xl p-4 space-y-2 shadow-sm">
               <p className="text-gray-700 text-sm font-bold mb-2">เลือกกะทำงาน</p>
@@ -452,8 +397,8 @@ export default function AttendancePage() {
             </div>
           )}
 
-          {/* ── Bottom buttons ── */}
-          {/* State 1: Camera not open → open camera button */}
+          
+          
           {!ui.isCameraActive && !photo.taken && (
             <button
               onClick={startCamera}
@@ -467,7 +412,7 @@ export default function AttendancePage() {
             </button>
           )}
 
-          {/* State 3: Photo taken → cancel + confirm */}
+          
           {photo.taken && (
             <div className="flex gap-3">
               <button
@@ -495,7 +440,7 @@ export default function AttendancePage() {
           )}
         </div>
 
-        {/* ── Success Modal (พร้อมนับถอยหลัง redirect) ── */}
+        
         {ui.showSuccess && (
           <div className="fixed inset-0 z-99999 flex items-end justify-center bg-black/60">
             <div className="w-full bg-white rounded-t-3xl p-6 text-center space-y-4 pb-10">
@@ -556,6 +501,5 @@ export default function AttendancePage() {
     );
   }
 
-  // ถ้า mode ไม่ถูกตั้ง → ไม่แสดงอะไร (ระบบจะ redirect ไปที่ dashboard อัตโนมัติผ่าน useEffect)
   return null;
 }

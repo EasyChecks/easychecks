@@ -32,10 +32,10 @@
     "@types/ws": "^8.18.1",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
-    "csv-parse": "^6.1.0",
+    "csv-parse": "^7.0.3",
     "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
-    "exceljs": "^4.4.0",
+    "exceljs": "^3.4.0",
     "express": "^5.2.1",
     "geolib": "^3.3.4",
     "jsonwebtoken": "^9.0.3",
@@ -56,7 +56,6 @@
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
-    "@vitest/coverage-v8": "^2.1.8",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.2.3",
     "@types/node-cron": "^3.0.11",
@@ -65,16 +64,18 @@
     "@types/supertest": "^6.0.2",
     "@typescript-eslint/eslint-plugin": "^8.55.0",
     "@typescript-eslint/parser": "^8.55.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "eslint": "^9.39.2",
     "supertest": "^6.3.4",
     "ts-node-dev": "^2.0.0",
     "tsx": "^4.21.0",
-    "vitest": "^2.1.8",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.55.0"
+    "typescript-eslint": "^8.55.0",
+    "vitest": "^5.1.1"
   },
   "overrides": {
     "hono": "^4.11.9",
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.21",
+    "uuid": "^11.1.1"
   }
 }

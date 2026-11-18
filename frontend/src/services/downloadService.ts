@@ -112,7 +112,10 @@ export const downloadService = {
     // - browser ไม่มี API สำหรับ save file ตรงๆ → ใช้ trick สร้าง invisible link
     // - URL.createObjectURL สร้าง temporary URL จาก blob data in memory
     // - ต้อง revokeObjectURL หลังใช้ ไม่งั้น memory รั่ว (leak)
-    const blob = new Blob([res.data], { type: res.headers['content-type'] });
+    const contentType = res.headers['content-type'];
+    const blob = new Blob([res.data], {
+      type: typeof contentType === 'string' ? contentType : undefined,
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

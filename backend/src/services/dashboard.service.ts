@@ -243,7 +243,7 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
         : null,
       lateMinutes: att.lateMinutes || 0,
       eventId: att.eventId ?? null,
-      avatarUrl: (att.user as any).avatarUrl ?? null,
+      avatarUrl: (att.user as { avatarUrl?: string | null }).avatarUrl ?? null,
     });
   }
 
@@ -260,7 +260,7 @@ export async function getEmployeesToday(user: User, branchId?: number, date?: st
         checkOut: null,
         lateMinutes: 0,
         eventId: null,
-        avatarUrl: (u as any).avatarUrl ?? null,
+        avatarUrl: (u as { avatarUrl?: string | null }).avatarUrl ?? null,
       });
     }
   }

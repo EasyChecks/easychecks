@@ -41,9 +41,10 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     const user = await authService.validateToken(token);
     req.user = user as AuthUser;
     next();
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Token ไม่ถูกต้อง';
     res.status(401).json({
-      error: error.message || 'Token ไม่ถูกต้อง'
+      error: message
     });
   }
 }

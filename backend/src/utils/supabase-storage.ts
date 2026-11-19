@@ -87,7 +87,7 @@ export async function uploadAvatarToSupabase(
     // 1. ดาวน์โหลดรูปจาก RandomUser API (รูปผู้ใหญ่เท่านั้น)
     const randomUserUrl = `https://randomuser.me/api/?gender=${gender}&seed=${employeeId}&nat=th,us,gb`;
     const response = await fetch(randomUserUrl);
-    const data = await response.json() as any;
+    const data = await response.json() as { results?: Array<{ picture: { large: string } }> };
     
     if (!data.results || data.results.length === 0) {
       throw new Error('ไม่สามารถดาวน์โหลดรูปจาก RandomUser API');
@@ -101,7 +101,7 @@ export async function uploadAvatarToSupabase(
     
     // 3. อัปโหลดไป Supabase Storage
     const fileName = `avatars/${employeeId}.jpg`;
-    const { data: uploadData, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from(bucketName)
       .upload(fileName, Buffer.from(imageBuffer), {
         contentType: 'image/jpeg',

@@ -71,7 +71,7 @@ export const createLocation = asyncHandler(async (req: Request, res: Response) =
  */
 export const getAllLocations = asyncHandler(async (req: Request, res: Response) => {
   const search = req.query.search as string | undefined;
-  const locationType = req.query.locationType as any;
+  const locationType = req.query.locationType as Parameters<typeof LocationUserActions.getAllLocations>[0]['locationType'];
   const isActive =
     req.query.isActive !== undefined
       ? req.query.isActive === 'true'

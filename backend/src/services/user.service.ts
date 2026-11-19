@@ -2,7 +2,7 @@
 // RBAC: SuperAdmin ทุกสาขา, Admin เฉพาะสาขาตัวเอง, User เฉพาะตัวเอง
 // employeeId auto-gen จาก branchCode + running number (เช่น BKK001)
 
-import { Role, UserStatus, Gender, Title } from '@prisma/client';
+import { Prisma, Role, UserStatus, Gender, Title } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
 import { uploadAvatarToSupabase } from '../utils/supabase-storage.js';
@@ -222,7 +222,9 @@ export async function getAvatarUrl(employeeId: string): Promise<string | null> {
 }
 
 // fallback เป็น ui-avatars.com ถ้าไม่มี avatar ใน Supabase
-async function formatUserWithAvatar(user: any): Promise<any> {
+async function formatUserWithAvatar<
+  T extends { avatarUrl?: string | null; employeeId: string; firstName: string; lastName: string }
+>(user: T): Promise<T> {
   if (user.avatarUrl) return user;
   
   const avatarUrl = await getAvatarUrl(user.employeeId);
@@ -233,7 +235,9 @@ async function formatUserWithAvatar(user: any): Promise<any> {
   };
 }
 
-async function formatUsersWithAvatars(users: any[]): Promise<any[]> {
+async function formatUsersWithAvatars<
+  T extends { avatarUrl?: string | null; employeeId: string; firstName: string; lastName: string }
+>(users: T[]): Promise<T[]> {
   return Promise.all(users.map(formatUserWithAvatar));
 }
 
@@ -363,7 +367,7 @@ export const getUsers = async (
   page: number = 1,
   limit: number = 20
 ) => {
-  const where: any = {};
+  const where: Prisma.UserWhereInput = {};
 
   // RBAC: Admin lock สาขาตัวเอง, User lock ตัวเอง, SuperAdmin ดูทั้งหมด
   if (requesterRole === 'ADMIN' && requesterBranchId) {
@@ -495,7 +499,7 @@ export const updateUser = async (
   }
 
   // สร้าง updateData เฉพาะ field ที่ส่งมา (undefined = ไม่แก้)
-  const updateData: any = {};
+  const updateData: Prisma.UserUncheckedUpdateInput = {};
 
   if (data.firstName !== undefined) updateData.firstName = data.firstName;
   if (data.lastName !== undefined) updateData.lastName = data.lastName;
@@ -751,7 +755,7 @@ export const bulkCreateUsers = async (
       try {
         const avatarGender = gender === 'FEMALE' ? 'female' : 'male';
         avatarUrl = await uploadAvatarToSupabase(employeeId, avatarGender);
-      } catch (error) {
+      } catch (_error) {
         avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.firstName + ' ' + userData.lastName)}&background=random&size=200`;
       }
 
@@ -794,11 +798,11 @@ export const bulkCreateUsers = async (
         lastName: user.lastName,
       });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       result.failed++;
       result.errors.push({
         row: rowNumber,
-        error: error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ',
+        error: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ',
       });
     }
   }
@@ -828,7 +832,7 @@ export const getUserStatistics = async (
   requesterBranchId?: number
 ) => {
   // Admin เห็นเฉพาะสาขาตัวเอง, SuperAdmin ไม่มี filter
-  const where: any = {};
+  const where: Prisma.UserWhereInput = {};
   if (requesterRole === 'ADMIN' && requesterBranchId) {
     where.branchId = requesterBranchId;
   }

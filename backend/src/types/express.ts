@@ -10,7 +10,7 @@ export type Request = express.Request;
 export type Response = express.Response;
 
 // NextFunction for Express 5.x
-export type NextFunction = (err?: any) => void;
+export type NextFunction = (err?: unknown) => void;
 
 // RequestHandler type
 export type RequestHandler = (
@@ -21,7 +21,7 @@ export type RequestHandler = (
 
 // ErrorRequestHandler type
 export type ErrorRequestHandler = (
-  err: any,
+  err: unknown,
   req: Request,
   res: Response,
   next: NextFunction

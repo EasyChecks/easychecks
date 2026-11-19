@@ -26,10 +26,10 @@ export const authController = {
       );
 
       return res.json(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Login error:', error);
       return res.status(401).json({
-        error: error.message || 'เข้าสู่ระบบล้มเหลว'
+        error: error instanceof Error ? error.message : 'เข้าสู่ระบบล้มเหลว'
       });
     }
   },
@@ -47,9 +47,9 @@ export const authController = {
 
       await authService.logout(token);
       res.json({ message: 'Logout สำเร็จ' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       res.status(400).json({
-        error: error.message || 'Logout ล้มเหลว'
+        error: error instanceof Error ? error.message : 'Logout ล้มเหลว'
       });
     }
   },
@@ -79,9 +79,9 @@ export const authController = {
       );
 
       res.json({ message: 'เปลี่ยนรหัสผ่านสำเร็จ' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       res.status(400).json({
-        error: error.message || 'เปลี่ยนรหัสผ่านล้มเหลว'
+        error: error instanceof Error ? error.message : 'เปลี่ยนรหัสผ่านล้มเหลว'
       });
     }
   },
@@ -100,10 +100,10 @@ export const authController = {
 
       const result = await authService.refreshAccessToken(refreshToken);
       return res.json(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Refresh token error:', error);
       return res.status(401).json({
-        error: error.message || 'Refresh token ล้มเหลว'
+        error: error instanceof Error ? error.message : 'Refresh token ล้มเหลว'
       });
     }
   }

@@ -18,7 +18,11 @@ interface ErrorResponse {
 interface SuccessResponse {
   type: 'success';
   message: string;
-  data?: any;
+  data?: unknown;
+}
+
+interface WatchMessage {
+  targetUserId?: number;
 }
 
 // Store active subscriptions
@@ -81,24 +85,24 @@ export function setupLateRequestWebSocket(server: Server) {
         const message = JSON.parse(data.toString());
         
         switch (message.type) {
-          case 'watch-late-requests':
-            await handleLateRequestsWatch(ws, message);
-            break;
+        case 'watch-late-requests':
+          await handleLateRequestsWatch(ws, message);
+          break;
             
-          case 'unwatch-late-requests':
-            await handleLateRequestsUnwatch(ws, message);
-            break;
+        case 'unwatch-late-requests':
+          await handleLateRequestsUnwatch(ws, message);
+          break;
             
-          case 'ping':
-            ws.send(JSON.stringify({ type: 'pong', timestamp: toThaiIso(new Date()) }));
-            break;
+        case 'ping':
+          ws.send(JSON.stringify({ type: 'pong', timestamp: toThaiIso(new Date()) }));
+          break;
             
-          default:
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: `Unknown message type: ${message.type}`,
-              code: 'UNKNOWN_TYPE'
-            } as ErrorResponse));
+        default:
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Unknown message type: ${message.type}`,
+            code: 'UNKNOWN_TYPE'
+          } as ErrorResponse));
         }
       } catch (error) {
         console.error('❌ Error processing late request message:', error);
@@ -129,7 +133,7 @@ export function setupLateRequestWebSocket(server: Server) {
   return wss;
 }
 
-async function handleLateRequestsWatch(ws: AuthenticatedWebSocket, message: any) {
+async function handleLateRequestsWatch(ws: AuthenticatedWebSocket, message: WatchMessage) {
   try {
     if (!ws.userId) {
       throw new Error('User not authenticated');
@@ -162,17 +166,17 @@ async function handleLateRequestsWatch(ws: AuthenticatedWebSocket, message: any)
 
     console.log(`✅ User ${ws.employeeId} watching late requests for user ${userToWatch}`);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Late requests watch error:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: error.message || 'Failed to watch late requests',
+      message: error instanceof Error ? error.message : 'Failed to watch late requests',
       code: 'WATCH_FAILED'
     } as ErrorResponse));
   }
 }
 
-async function handleLateRequestsUnwatch(ws: AuthenticatedWebSocket, message: any) {
+async function handleLateRequestsUnwatch(ws: AuthenticatedWebSocket, message: WatchMessage) {
   try {
     const { targetUserId } = message;
     const userToUnwatch = targetUserId || ws.userId;
@@ -198,11 +202,11 @@ async function handleLateRequestsUnwatch(ws: AuthenticatedWebSocket, message: an
 
     console.log(`✅ User ${ws.employeeId} stopped watching user ${userToUnwatch}`);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Late requests unwatch error:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: error.message || 'Failed to unwatch late requests',
+      message: error instanceof Error ? error.message : 'Failed to unwatch late requests',
       code: 'UNWATCH_FAILED'
     } as ErrorResponse));
   }
@@ -212,7 +216,7 @@ async function handleLateRequestsUnwatch(ws: AuthenticatedWebSocket, message: an
  * Broadcast late request updates to all watchers
  * Usage: broadcastLateRequestUpdate(userId, 'created', lateRequestData)
  */
-export function broadcastLateRequestUpdate(userId: number, action: string, data: any) {
+export function broadcastLateRequestUpdate(userId: number, action: string, data: unknown) {
   const watchers = lateSubscriptions.get(userId);
   
   if (!watchers || watchers.size === 0) {
@@ -239,7 +243,7 @@ export function broadcastLateRequestUpdate(userId: number, action: string, data:
 /**
  * Broadcast to all admins watching late requests
  */
-export function broadcastToLateRequestAdmins(message: any) {
+export function broadcastToLateRequestAdmins(message: unknown) {
   let adminCount = 0;
 
   for (const watchers of lateSubscriptions.values()) {

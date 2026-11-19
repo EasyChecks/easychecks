@@ -1271,7 +1271,7 @@ async function getAllLeaveRequests(
   // Also include self-requests (where userId = current user)
   if (normalizedRole === 'ADMIN') {
     // ADMIN can only approve MANAGER and USER requests, OR their own requests
-    const orConditions: any[] = [
+    const orConditions: Prisma.LeaveRequestWhereInput[] = [
       { user: { role: { in: ['MANAGER', 'USER'] } } },
     ];
     if (currentUserId) {
@@ -1280,7 +1280,7 @@ async function getAllLeaveRequests(
     where.OR = orConditions;
   } else if (normalizedRole === 'MANAGER') {
     // MANAGER can only approve USER requests, OR their own requests
-    const orConditions: any[] = [
+    const orConditions: Prisma.LeaveRequestWhereInput[] = [
       { user: { role: { in: ['USER'] } } },
     ];
     if (currentUserId) {

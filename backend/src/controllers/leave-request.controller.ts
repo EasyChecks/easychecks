@@ -148,8 +148,8 @@ export const getAllLeaveRequests = asyncHandler(async (req: Request, res: Respon
   const status = req.query.status as 'PENDING' | 'APPROVED' | 'REJECTED' | undefined;
   const skip = req.query.skip ? parseInt(req.query.skip as string) : 0;
   const take = req.query.take ? parseInt(req.query.take as string) : 10;
-  const userRole = (req as any).user?.role; // Get current user's role for approval hierarchy filtering
-  const currentUserId = (req as any).user?.userId; // Get current user's ID for self-request inclusion
+  const userRole = req.user?.role; // Get current user's role for approval hierarchy filtering
+  const currentUserId = req.user?.userId; // Get current user's ID for self-request inclusion
 
   const result = await LeaveRequestAdminActions.getAllLeaveRequests(status, skip, take, userRole, currentUserId);
 
@@ -307,17 +307,23 @@ export const rejectLeaveRequest = asyncHandler(async (req: Request, res: Respons
  * ดึงข้อมูลประเภทการลาทั้งหมด (ชื่อ, icon, กฎ)
  */
 export const getLeaveTypeMetadata = asyncHandler(async (req: Request, res: Response) => {
-  const leaveTypes = Object.keys(LEAVE_RULES).map((leaveType: any) => {
+  const leaveTypes = (Object.keys(LEAVE_RULES) as Array<keyof typeof LEAVE_RULES>).map((leaveType) => {
     const display = getLeaveTypeDisplay(leaveType);
-    const rules = getLeaveTypeRules(leaveType);
+    const rules = getLeaveTypeRules(leaveType) as {
+      maxPaidDaysPerYear?: number | null;
+      maxDaysTotal?: number | null;
+      paid?: boolean;
+      requireMedicalCert?: boolean;
+      genderRestriction?: string | null;
+    };
     return {
       ...display,
       rules: {
-        maxPaidDaysPerYear: (rules as any).maxPaidDaysPerYear ?? null,
-        maxDaysTotal: (rules as any).maxDaysTotal ?? null,
-        paid: (rules as any).paid,
-        requireMedicalCert: (rules as any).requireMedicalCert || false,
-        genderRestriction: (rules as any).genderRestriction || null,
+        maxPaidDaysPerYear: rules.maxPaidDaysPerYear ?? null,
+        maxDaysTotal: rules.maxDaysTotal ?? null,
+        paid: rules.paid,
+        requireMedicalCert: rules.requireMedicalCert || false,
+        genderRestriction: rules.genderRestriction || null,
       },
     };
   });

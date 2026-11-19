@@ -33,8 +33,8 @@ export const createAnnouncement = async (req: Request, res: Response) => {
     });
 
     sendSuccess(res, announcement, 'สร้างประกาศเรียบร้อยแล้ว', 201);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้างประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้างประกาศ');
   }
 };
 
@@ -43,15 +43,15 @@ export const getAnnouncements = async (req: Request, res: Response) => {
   try {
     const { status, createdByUserId } = req.query;
 
-    const filters: any = {};
-    if (status) filters.status = status;
+    const filters: { status?: string; createdByUserId?: number } = {};
+    if (status) filters.status = status as string;
     if (createdByUserId) filters.createdByUserId = parseInt(createdByUserId as string);
 
     const announcements = await announcementService.getAnnouncements(filters);
 
     sendSuccess(res, announcements);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงประกาศ');
   }
 };
 
@@ -67,8 +67,8 @@ export const getAnnouncementById = async (req: Request, res: Response) => {
     const announcement = await announcementService.getAnnouncementById(announcementId);
 
     sendSuccess(res, announcement);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงประกาศ');
   }
 };
 
@@ -101,8 +101,8 @@ export const updateAnnouncement = async (req: Request, res: Response) => {
     );
 
     sendSuccess(res, updated, 'อัปเดตประกาศเรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการอัปเดตประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอัปเดตประกาศ');
   }
 };
 
@@ -127,8 +127,8 @@ export const sendAnnouncement = async (req: Request, res: Response) => {
     );
 
     sendSuccess(res, result, `ส่งประกาศเรียบร้อยแล้ว ส่งให้ ${result.recipientCount} คน`);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการส่งประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการส่งประกาศ');
   }
 };
 
@@ -156,8 +156,8 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
     );
 
     sendSuccess(res, deleted, 'ลบประกาศเรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการลบประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบประกาศ');
   }
 };
 
@@ -191,8 +191,8 @@ export const deleteRecipient = async (req: Request, res: Response) => {
     );
 
     sendSuccess(res, result, 'ลบผู้รับประกาศเรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการลบผู้รับประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบผู้รับประกาศ');
   }
 };
 
@@ -215,8 +215,8 @@ export const clearAllRecipients = async (req: Request, res: Response) => {
     );
 
     sendSuccess(res, result, `ล้างผู้รับประกาศเรียบร้อยแล้ว ลบ ${result.clearedCount} รายการ`);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการล้างผู้รับประกาศ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการล้างผู้รับประกาศ');
   }
 };
 

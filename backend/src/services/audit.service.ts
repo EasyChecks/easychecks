@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 
 /**
@@ -72,8 +73,8 @@ export const createAuditLog = async (data: CreateAuditLogDTO) => {
         action: data.action,                // string ตาม AuditAction constants
         targetTable: data.targetTable,      // ชื่อตาราง เช่น "attendance"
         targetId: data.targetId,            // id ของ record ที่ถูกกระทำ
-        oldValues: data.oldValues || null,  // null ถ้าเป็น CREATE (ไม่มีข้อมูลก่อนหน้า)
-        newValues: data.newValues || null,  // null ถ้าเป็น DELETE ที่ hard-delete
+        oldValues: (data.oldValues as Prisma.InputJsonValue | undefined) ?? Prisma.JsonNull,  // null ถ้าเป็น CREATE (ไม่มีข้อมูลก่อนหน้า)
+        newValues: (data.newValues as Prisma.InputJsonValue | undefined) ?? Prisma.JsonNull,  // null ถ้าเป็น DELETE ที่ hard-delete
         ipAddress: data.ipAddress || null,  // null ถ้า internal call ไม่มี HTTP context
         userAgent: data.userAgent || null,  // null ถ้า internal call
       },

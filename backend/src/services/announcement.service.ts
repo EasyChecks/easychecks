@@ -1,3 +1,4 @@
+import type { Prisma, Role } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { createAuditLog, AuditAction } from './audit.service.js';
 import { sendBulkAnnouncementEmails } from './email.service.js';
@@ -41,7 +42,7 @@ export const createAnnouncement = async (data: CreateAnnouncementDTO) => {
     data: {
       title: data.title,
       content: data.content,
-      targetRoles: data.targetRoles || [],
+      targetRoles: (data.targetRoles || []) as Role[],
       targetBranchIds: data.targetBranchIds || [],
       targetUserIds: data.targetUserIds || [],
       // กำหนด DRAFT เสมอ — ป้องกันการส่งผ่าน API โดยตรงโดยไม่ผ่าน send endpoint
@@ -84,10 +85,10 @@ export const getAnnouncements = async (
     createdByUserId?: number;
   }
 ) => {
-  const whereClause: any = {};
+  const whereClause: Prisma.AnnouncementWhereInput = {};
 
   if (filters?.status) {
-    whereClause.status = filters.status;
+    whereClause.status = filters.status as Prisma.EnumAnnouncementStatusFilter | undefined;
   }
   if (filters?.createdByUserId) {
     whereClause.createdByUserId = filters.createdByUserId;
@@ -197,7 +198,7 @@ export const updateAnnouncement = async (
       // ใช้ !== undefined แทน truthy เพื่อให้ส่ง [] (ล้างค่า) หรือ "" ได้
       ...(data.title !== undefined && { title: data.title }),
       ...(data.content !== undefined && { content: data.content }),
-      ...(data.targetRoles !== undefined && { targetRoles: data.targetRoles }),
+      ...(data.targetRoles !== undefined && { targetRoles: data.targetRoles as Role[] }),
       ...(data.targetBranchIds !== undefined && { targetBranchIds: data.targetBranchIds }),
       ...(data.targetUserIds !== undefined && { targetUserIds: data.targetUserIds }),
     },
@@ -267,7 +268,7 @@ export const sendAnnouncement = async (
     let users;
     if (announcement.targetUserIds && announcement.targetUserIds.length > 0) {
       // ─── ระบุ targetUserIds เฉพาะ ─────────────────────────────
-      const userQuery: any = {
+      const userQuery: Prisma.UserWhereInput = {
         userId: { in: announcement.targetUserIds },
         status: 'ACTIVE',
       };
@@ -282,10 +283,10 @@ export const sendAnnouncement = async (
       });
     } else {
       // ─── ใช้ role/branch filter ─────────────────────────────────
-      let recipientQuery: any = { status: 'ACTIVE' };
+      const recipientQuery: Prisma.UserWhereInput = { status: 'ACTIVE' };
 
       if (announcement.targetRoles && announcement.targetRoles.length > 0) {
-        recipientQuery.role = { in: (announcement.targetRoles || []) as any };
+        recipientQuery.role = { in: announcement.targetRoles as Role[] };
       }
 
       if (announcement.targetBranchIds && announcement.targetBranchIds.length > 0) {
@@ -296,9 +297,10 @@ export const sendAnnouncement = async (
         // บังคับเฉพาะสาขาตัวเอง
         recipientQuery.branchId = sentByUserBranchId;
         // กรอง SUPERADMIN ออก
-        if (recipientQuery.role?.in) {
+        const roleFilter = recipientQuery.role as Prisma.EnumRoleFilter<'User'> | undefined;
+        if (roleFilter?.in) {
           recipientQuery.role = {
-            in: (recipientQuery.role.in as string[]).filter((r: string) => r !== 'SUPERADMIN'),
+            in: (roleFilter.in as Role[]).filter((r) => r !== 'SUPERADMIN'),
           };
         } else {
           recipientQuery.role = { not: 'SUPERADMIN' };

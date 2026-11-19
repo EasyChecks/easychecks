@@ -139,8 +139,8 @@ export const authService = {
       });
 
       return result;
-    } catch (error: any) {
-      console.error('❌ Login service error:', error.message);
+    } catch (error: unknown) {
+      console.error('❌ Login service error:', error instanceof Error ? error.message : error);
       throw error;
     }
   },
@@ -150,11 +150,10 @@ export const authService = {
   // ถ้า session ถูกลบ (logout) → token ใช้ไม่ได้แม้ JWT ยังไม่หมดอายุ
   async validateToken(token: string) {
     try {
-      let decoded: jwt.JwtPayload;
       try {
-        decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
-      } catch (jwtError: any) {
-        if (jwtError.name === 'TokenExpiredError') {
+        jwt.verify(token, JWT_SECRET);
+      } catch (jwtError: unknown) {
+        if (jwtError instanceof Error && jwtError.name === 'TokenExpiredError') {
           throw new Error('Access Token หมดอายุแล้ว');
         }
         throw new Error('Token ไม่ถูกต้อง');
@@ -253,8 +252,8 @@ export const authService = {
           role: session.user.role
         }
       };
-    } catch (error: any) {
-      console.error('❌ Refresh token error:', error.message);
+    } catch (error: unknown) {
+      console.error('❌ Refresh token error:', error instanceof Error ? error.message : error);
       throw error;
     }
   },

@@ -18,7 +18,11 @@ interface ErrorResponse {
 interface SuccessResponse {
   type: 'success';
   message: string;
-  data?: any;
+  data?: unknown;
+}
+
+interface WatchMessage {
+  targetUserId?: number;
 }
 
 // Store active subscriptions
@@ -81,24 +85,24 @@ export function setupLeaveRequestWebSocket(server: Server) {
         const message = JSON.parse(data.toString());
         
         switch (message.type) {
-          case 'watch-leave-requests':
-            await handleLeaveRequestsWatch(ws, message);
-            break;
+        case 'watch-leave-requests':
+          await handleLeaveRequestsWatch(ws, message);
+          break;
             
-          case 'unwatch-leave-requests':
-            await handleLeaveRequestsUnwatch(ws, message);
-            break;
+        case 'unwatch-leave-requests':
+          await handleLeaveRequestsUnwatch(ws, message);
+          break;
             
-          case 'ping':
-            ws.send(JSON.stringify({ type: 'pong', timestamp: toThaiIso(new Date()) }));
-            break;
+        case 'ping':
+          ws.send(JSON.stringify({ type: 'pong', timestamp: toThaiIso(new Date()) }));
+          break;
             
-          default:
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: `Unknown message type: ${message.type}`,
-              code: 'UNKNOWN_TYPE'
-            } as ErrorResponse));
+        default:
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Unknown message type: ${message.type}`,
+            code: 'UNKNOWN_TYPE'
+          } as ErrorResponse));
         }
       } catch (error) {
         console.error('❌ Error processing leave request message:', error);
@@ -129,7 +133,7 @@ export function setupLeaveRequestWebSocket(server: Server) {
   return wss;
 }
 
-async function handleLeaveRequestsWatch(ws: AuthenticatedWebSocket, message: any) {
+async function handleLeaveRequestsWatch(ws: AuthenticatedWebSocket, message: WatchMessage) {
   try {
     if (!ws.userId) {
       throw new Error('User not authenticated');
@@ -162,17 +166,17 @@ async function handleLeaveRequestsWatch(ws: AuthenticatedWebSocket, message: any
 
     console.log(`✅ User ${ws.employeeId} watching leave requests for user ${userToWatch}`);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Leave requests watch error:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: error.message || 'Failed to watch leave requests',
+      message: error instanceof Error ? error.message : 'Failed to watch leave requests',
       code: 'WATCH_FAILED'
     } as ErrorResponse));
   }
 }
 
-async function handleLeaveRequestsUnwatch(ws: AuthenticatedWebSocket, message: any) {
+async function handleLeaveRequestsUnwatch(ws: AuthenticatedWebSocket, message: WatchMessage) {
   try {
     const { targetUserId } = message;
     const userToUnwatch = targetUserId || ws.userId;
@@ -198,11 +202,11 @@ async function handleLeaveRequestsUnwatch(ws: AuthenticatedWebSocket, message: a
 
     console.log(`✅ User ${ws.employeeId} stopped watching user ${userToUnwatch}`);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Leave requests unwatch error:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: error.message || 'Failed to unwatch leave requests',
+      message: error instanceof Error ? error.message : 'Failed to unwatch leave requests',
       code: 'UNWATCH_FAILED'
     } as ErrorResponse));
   }
@@ -212,7 +216,7 @@ async function handleLeaveRequestsUnwatch(ws: AuthenticatedWebSocket, message: a
  * Broadcast leave request updates to all watchers
  * Usage: broadcastLeaveRequestUpdate(userId, 'created', leaveRequestData)
  */
-export function broadcastLeaveRequestUpdate(userId: number, action: string, data: any) {
+export function broadcastLeaveRequestUpdate(userId: number, action: string, data: unknown) {
   const watchers = leaveSubscriptions.get(userId);
   
   if (!watchers || watchers.size === 0) {
@@ -239,7 +243,7 @@ export function broadcastLeaveRequestUpdate(userId: number, action: string, data
 /**
  * Broadcast to all admins watching leave requests
  */
-export function broadcastToLeaveRequestAdmins(message: any) {
+export function broadcastToLeaveRequestAdmins(message: unknown) {
   let adminCount = 0;
 
   for (const watchers of leaveSubscriptions.values()) {

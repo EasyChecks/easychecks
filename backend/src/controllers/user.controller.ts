@@ -32,8 +32,8 @@ export const createUser = async (req: Request, res: Response) => {
     }
 
     const requiredFields = ['title', 'firstName', 'lastName', 'gender', 'nationalId', 
-                           'emergent_tel', 'emergent_first_name', 'emergent_last_name', 'emergent_relation',
-                           'phone', 'email', 'birthDate', 'branchId'];
+      'emergent_tel', 'emergent_first_name', 'emergent_last_name', 'emergent_relation',
+      'phone', 'email', 'birthDate', 'branchId'];
     for (const field of requiredFields) {
       if (!userData[field]) {
         return sendError(res, `กรุณาระบุ ${field}`, 400);
@@ -62,8 +62,8 @@ export const createUser = async (req: Request, res: Response) => {
 
     broadcastUserUpdate('CREATE', user);
     sendSuccess(res, user, 'สร้างผู้ใช้เรียบร้อยแล้ว', 201);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้างผู้ใช้');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้างผู้ใช้');
   }
 };
 
@@ -73,10 +73,10 @@ export const getUsers = async (req: Request, res: Response) => {
     const requester = req.user!;
     const { branchId, role, status, search, page, limit } = req.query;
 
-    const filters: any = {};
+    const filters: Parameters<typeof userService.getUsers>[3] = {};
     if (branchId) filters.branchId = parseInt(branchId as string);
-    if (role) filters.role = role as string;
-    if (status) filters.status = status as string;
+    if (role) filters.role = role as NonNullable<Parameters<typeof userService.getUsers>[3]>['role'];
+    if (status) filters.status = status as NonNullable<Parameters<typeof userService.getUsers>[3]>['status'];
     if (search) filters.search = search as string;
 
     const result = await userService.getUsers(
@@ -89,8 +89,8 @@ export const getUsers = async (req: Request, res: Response) => {
     );
 
     sendSuccess(res, result);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ใช้');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ใช้');
   }
 };
 
@@ -111,8 +111,8 @@ export const getUserById = async (req: Request, res: Response) => {
     );
 
     sendSuccess(res, user);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ใช้');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ใช้');
   }
 };
 
@@ -141,8 +141,8 @@ export const updateUser = async (req: Request, res: Response) => {
 
     broadcastUserUpdate('UPDATE', updatedUser);
     sendSuccess(res, updatedUser, 'อัปเดตผู้ใช้เรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการอัปเดตผู้ใช้');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอัปเดตผู้ใช้');
   }
 };
 
@@ -175,8 +175,8 @@ export const deleteUser = async (req: Request, res: Response) => {
 
     broadcastUserUpdate('DELETE', result);
     sendSuccess(res, null, 'ลบผู้ใช้เรียบร้อยแล้ว');
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการลบผู้ใช้');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบผู้ใช้');
   }
 };
 
@@ -194,15 +194,16 @@ export const bulkCreateUsers = async (req: Request, res: Response) => {
       return sendError(res, 'กรุณาระบุ csvData', 400);
     }
 
-    let users: any[];
+    let users: Parameters<typeof userService.bulkCreateUsers>[0];
     try {
       users = parse(csvData, {
         columns: true,
         skip_empty_lines: true,
         trim: true,
       });
-    } catch (parseError: any) {
-      return sendError(res, `รูปแบบ CSV ไม่ถูกต้อง: ${parseError.message}`, 400);
+    } catch (parseError: unknown) {
+      const msg = parseError instanceof Error ? parseError.message : String(parseError);
+      return sendError(res, `รูปแบบ CSV ไม่ถูกต้อง: ${msg}`, 400);
     }
 
     if (!users || users.length === 0) {
@@ -225,8 +226,8 @@ export const bulkCreateUsers = async (req: Request, res: Response) => {
     }
 
     sendSuccess(res, result, `นำเข้าข้อมูลสำเร็จ ${result.success} รายการ, ล้มเหลว ${result.failed} รายการ`, 201);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการนำเข้าข้อมูล');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการนำเข้าข้อมูล');
   }
 };
 
@@ -239,8 +240,8 @@ export const getUserStatistics = async (req: Request, res: Response) => {
       requester.branchId
     );
     sendSuccess(res, statistics);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลสถิติ');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงข้อมูลสถิติ');
   }
 };
 
@@ -258,8 +259,8 @@ export const getUserAvatar = async (req: Request, res: Response) => {
       employeeId: user.employeeId,
       avatarUrl: user.avatarUrl
     });
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการดึงรูปโปรไฟล์');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการดึงรูปโปรไฟล์');
   }
 };
 
@@ -274,8 +275,8 @@ MISS,สมหญิง,รักดี,หญิง,FEMALE,1234567890124,081234
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=users_import_template.csv');
     res.send('\ufeff' + template);
-  } catch (error: any) {
-    sendError(res, error.message || 'เกิดข้อผิดพลาดในการสร้าง template');
+  } catch (error: unknown) {
+    sendError(res, error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการสร้าง template');
   }
 };
 

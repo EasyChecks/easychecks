@@ -30,7 +30,7 @@ export function generateToken(payload: {
   return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
 
-export function verifyToken(token: string): any {
+export function verifyToken(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -72,11 +72,11 @@ function parseJwtExpiration(expiresIn: string): number {
   const numValue = parseInt(value, 10);
 
   switch (unit) {
-    case 's': return numValue;
-    case 'm': return numValue * 60;
-    case 'h': return numValue * 3600;
-    case 'd': return numValue * 86400;
-    default: return 86400;
+  case 's': return numValue;
+  case 'm': return numValue * 60;
+  case 'h': return numValue * 3600;
+  case 'd': return numValue * 86400;
+  default: return 86400;
   }
 }
 
@@ -94,7 +94,6 @@ function base64urlDecode(str: string): string {
 }
 
 function generateSignature(message: string, secret: string): string {
-  const crypto = require('crypto');
   return crypto
     .createHmac('sha256', secret)
     .update(message)

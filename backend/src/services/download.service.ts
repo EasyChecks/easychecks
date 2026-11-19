@@ -65,7 +65,7 @@ export async function downloadReport(
   fileName: string;
   mimeType: string;
 }> {
-  const { type, format, startDate, endDate } = query;
+  const { format, startDate, endDate } = query;
 
   // เลือก branchId ตามสิทธิ์ (SuperAdmin สามารถเลือก branch อื่นได้)
   const branchId = user.role === 'SUPERADMIN' ? query.branchId : user.branchId;
@@ -119,7 +119,7 @@ async function downloadAttendanceReport(
   startDate?: Date,
   endDate?: Date,
   branchId?: number,
-  filterType?: 'all' | 'shift' | 'event'
+  _filterType?: 'all' | 'shift' | 'event'
 ): Promise<{ buffer: Buffer; fileName: string }> {
   console.log('📊 Fetching attendance data...');
   

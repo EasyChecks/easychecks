@@ -44,7 +44,7 @@ const adapter = new PrismaPg(pool);               // ← แปลง pg pool �
 // ═══════════════════════════════════════════════════════════════
 // ④ Lazy Initialization — สร้าง PrismaClient ครั้งแรกที่เรียกใช้
 // ═══════════════════════════════════════════════════════════════
-let prismaInstance: any = null;                   // ← เก็บ instance ไว้ ป้องกันสร้างซ้ำ
+let prismaInstance: PrismaClient | null = null;                   // ← เก็บ instance ไว้ ป้องกันสร้างซ้ำ
 
 async function initPrisma() {                     // ← ฟังก์ชันสร้าง PrismaClient (เรียกครั้งเดียว)
   if (!prismaInstance) {                          // ← ถ้ายังไม่เคยสร้าง
@@ -69,7 +69,7 @@ export async function getPrisma() {               // ← ใช้เมื่�
 }
 
 // Export synchronous reference (สำหรับ import ปกติ)
-export let prisma: any = null;                    // ← ตัวแปรกลาง — ใช้ได้ทันทีหลัง init เสร็จ
+export let prisma!: PrismaClient;                    // ← ตัวแปรกลาง — ใช้ได้ทันทีหลัง init เสร็จ
 
 // Initialize ตอน module load (async IIFE)
 (async () => {                                    // ← IIFE: เรียก initPrisma ทันทีตอน import

@@ -47,9 +47,9 @@ export class ConflictError extends AppError {
 }
 
 export class ValidationError extends AppError {
-  errors: any[];
+  errors: unknown[];
 
-  constructor(message: string = 'ข้อมูลไม่ถูกต้อง', errors: any[] = []) {
+  constructor(message: string = 'ข้อมูลไม่ถูกต้อง', errors: unknown[] = []) {
     super(message, 422);
     this.errors = errors;
   }

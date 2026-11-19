@@ -10,7 +10,6 @@ Attendance and workforce management platform with Next.js frontend, Express Type
 
 - `frontend`: Next.js app (port 3000 in local dev)
 - `backend`: Express API + Prisma (port 3001 in local dev)
-- `legacy-frontend`: legacy Vite codebase (reference/migration only)
 - `test-apis.sh`: one-click core API smoke tests (attendance, shift, audit)
 
 ## Prerequisites

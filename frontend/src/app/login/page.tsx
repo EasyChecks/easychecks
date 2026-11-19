@@ -7,6 +7,59 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
+interface FastLoginAccount {
+  label: string;
+  sublabel: string;
+  username: string;
+  password: string;
+  colorClass: string;
+}
+
+const FAST_LOGIN_ACCOUNTS: FastLoginAccount[] = [
+  {
+    label: 'SuperAdmin',
+    sublabel: 'SA001 · Admin Dashboard',
+    username: 'SA001',
+    password: 'sup0012',
+    colorClass: 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100',
+  },
+  {
+    label: 'SuperAdmin (User)',
+    sublabel: 'SA001 · โหมดพนักงาน',
+    username: 'SA001',
+    password: '8017231061031',
+    colorClass: 'bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100',
+  },
+  {
+    label: 'Admin',
+    sublabel: 'BKK0001 · Admin Dashboard',
+    username: 'BKK0001',
+    password: 'adm0034',
+    colorClass: 'bg-orange-50 text-orange-800 border-orange-200 hover:bg-orange-100',
+  },
+  {
+    label: 'Admin (User)',
+    sublabel: 'BKK0001 · โหมดพนักงาน',
+    username: 'BKK0001',
+    password: '4850495039640',
+    colorClass: 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100',
+  },
+  {
+    label: 'Manager',
+    sublabel: 'BKK0002 · Manager Dashboard',
+    username: 'BKK0002',
+    password: '9198422755622',
+    colorClass: 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100',
+  },
+  {
+    label: 'User',
+    sublabel: 'BR0001 · พนักงานทั่วไป',
+    username: 'BR0001',
+    password: '4743300812066',
+    colorClass: 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100',
+  },
+];
+
 export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
@@ -27,14 +80,13 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const performLogin = async (empId: string, pwd: string) => {
     setError('');
     setIsLoading(true);
 
     try {
       // login() คืน role → redirect ไป dashboard ที่ตรงกับ role
-      const role = await login({ username, password, rememberMe });
+      const role = await login({ username: empId, password: pwd, rememberMe });
       
       if (role === 'superadmin') {
         router.push('/superadmin/dashboard');
@@ -50,6 +102,18 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    await performLogin(username, password);
+  };
+
+  const handleFastLogin = async (account: FastLoginAccount) => {
+    if (isLoading) return;
+    setUsername(account.username);
+    setPassword(account.password);
+    await performLogin(account.username, account.password);
   };
 
   return (
@@ -158,6 +222,27 @@ export default function LoginPage() {
               )}
             </Button>
           </form>
+
+          {/* Fast Login — กดแล้วกรอกข้อมูลลงฟอร์มพร้อมเข้าสู่ระบบให้อัตโนมัติ */}
+          <div className="mt-6 pt-5 border-t border-gray-200">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider text-center mb-3">
+              เข้าสู่ระบบด่วน (Fast Login)
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {FAST_LOGIN_ACCOUNTS.map((account) => (
+                <button
+                  key={`${account.username}-${account.password}`}
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => handleFastLogin(account)}
+                  className={`px-3 py-2 rounded-lg border text-left transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${account.colorClass}`}
+                >
+                  <div className="text-xs font-bold leading-tight">{account.label}</div>
+                  <div className="text-[11px] opacity-80 truncate mt-0.5">{account.sublabel}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         </Card>
       </div>
     </div>

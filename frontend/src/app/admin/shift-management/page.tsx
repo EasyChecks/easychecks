@@ -14,7 +14,28 @@ import {
   UpdateShiftRequest,
 } from '@/types/attendance';
 
-const weekDays = [
+type WeekDay = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+type ShiftTypeOption = 'REGULAR' | 'SPECIFIC_DAY' | 'CUSTOM';
+
+interface ApiErrorPayload {
+  code?: string;
+  error?: string;
+  message?: string;
+  details?: unknown;
+}
+
+function getApiErrorInfo(error: unknown): { data?: ApiErrorPayload; message: string } {
+  if (typeof error === 'object' && error !== null) {
+    const maybeAxios = error as { response?: { data?: ApiErrorPayload }; message?: string };
+    return {
+      data: maybeAxios.response?.data,
+      message: typeof maybeAxios.message === 'string' ? maybeAxios.message : '',
+    };
+  }
+  return { message: '' };
+}
+
+const weekDays: { th: string; en: WeekDay }[] = [
   { th: 'จันทร์', en: 'MONDAY' },
   { th: 'อังคาร', en: 'TUESDAY' },
   { th: 'พุธ', en: 'WEDNESDAY' },
@@ -24,7 +45,7 @@ const weekDays = [
   { th: 'อาทิตย์', en: 'SUNDAY' },
 ];
 
-const shiftTypes = [
+const shiftTypes: { value: ShiftTypeOption; label: string; description: string }[] = [
   { value: 'REGULAR', label: 'จันทร์-ศุกร์', description: 'ทำงานวันจันทร์ถึงศุกร์ตามที่กำหนด' },
   { value: 'SPECIFIC_DAY', label: 'เฉพาะวัน', description: 'เลือกวันที่ทำงาน (จ-อา)' },
 ];
@@ -226,12 +247,12 @@ export default function ShiftManagementPage() {
     setFeedbackModal({ type: 'success', message });
   };
 
-  const handleToggleWorkDay = (day: string) => {
+  const handleToggleWorkDay = (day: WeekDay) => {
     setFormData(prev => ({
       ...prev,
-      specificDays: prev.specificDays.includes(day as any)
+      specificDays: prev.specificDays.includes(day)
         ? prev.specificDays.filter(d => d !== day)
-        : [...prev.specificDays, day as any],
+        : [...prev.specificDays, day],
     }));
   };
 
@@ -324,10 +345,11 @@ export default function ShiftManagementPage() {
 
         try {
           await shiftService.create(bulkCreateData);
-        } catch (error: any) {
-          const code = error?.response?.data?.code;
-          const details = Array.isArray(error?.response?.data?.details)
-            ? (error.response.data.details as BulkShiftErrorDetail[])
+        } catch (error: unknown) {
+          const { data } = getApiErrorInfo(error);
+          const code = data?.code;
+          const details = Array.isArray(data?.details)
+            ? (data.details as BulkShiftErrorDetail[])
             : [];
 
           if (code === 'SHIFT_CONFLICT' && details.length > 0) {
@@ -358,11 +380,12 @@ export default function ShiftManagementPage() {
       }
 
       await finalizeSaveSuccess(editingShift ? 'แก้ไขกะงานสำเร็จ' : 'สร้างกะงานสำเร็จ');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error saving shift:', error);
+      const { data, message } = getApiErrorInfo(error);
       setFeedbackModal({
         type: 'error',
-        message: error?.response?.data?.error || error?.response?.data?.message || error?.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล',
+        message: data?.error || data?.message || message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล',
       });
     } finally {
       setLoading(false);
@@ -387,9 +410,10 @@ export default function ShiftManagementPage() {
       await shiftService.update(toggleTargetShift.id, { isActive: nextIsActive });
       setToggleTargetShift(null);
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error toggling shift:', error);
-      const message = error?.response?.data?.message || error?.message || '';
+      const { data, message: errMsg } = getApiErrorInfo(error);
+      const message = data?.message || errMsg || '';
       if (!toggleTargetShift.isActive && isActiveShiftConflictError(message)) {
         setReassignModal({
           mode: 'edit',
@@ -421,11 +445,12 @@ export default function ShiftManagementPage() {
       setDeleteReason('');
       await loadData();
       setFeedbackModal({ type: 'success', message: 'ลบกะงานสำเร็จ' });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error deleting shift:', error);
+      const { data } = getApiErrorInfo(error);
       setFeedbackModal({
         type: 'error',
-        message: error.response?.data?.message || 'เกิดข้อผิดพลาด',
+        message: data?.message || 'เกิดข้อผิดพลาด',
       });
     } finally {
       setLoading(false);
@@ -451,11 +476,12 @@ export default function ShiftManagementPage() {
         await finalizeSaveSuccess('สร้างกะงานสำเร็จ');
       }
       setReassignModal(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error replacing existing shifts:', error);
+      const { data } = getApiErrorInfo(error);
       setFeedbackModal({
         type: 'error',
-        message: error?.response?.data?.message || 'เกิดข้อผิดพลาดในการย้ายกะ',
+        message: data?.message || 'เกิดข้อผิดพลาดในการย้ายกะ',
       });
     } finally {
       setLoading(false);
@@ -981,7 +1007,7 @@ export default function ShiftManagementPage() {
                       <button
                         key={type.value}
                         type="button"
-                        onClick={() => setFormData({ ...formData, shiftType: type.value as any })}
+                        onClick={() => setFormData({ ...formData, shiftType: type.value })}
                         className={`p-4 rounded-xl border-2 transition-all text-left ${
                           formData.shiftType === type.value
                             ? 'border-orange-500 bg-orange-50'
@@ -1064,7 +1090,7 @@ export default function ShiftManagementPage() {
                           type="button"
                           onClick={() => handleToggleWorkDay(day.en)}
                           className={`px-4 py-3 rounded-xl border-2 transition-all text-sm font-medium ${
-                            formData.specificDays.includes(day.en as any)
+                            formData.specificDays.includes(day.en)
                               ? 'border-orange-500 bg-orange-50 text-orange-700'
                               : 'border-gray-200 hover:border-gray-300 text-gray-700'
                           }`}

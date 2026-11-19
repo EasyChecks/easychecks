@@ -3,16 +3,18 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 
-export default function ManagerProfilePage() {
-  const { user, logout } = useAuth();
-  const router = useRouter();
-
-  const InfoRow = ({ label, value }: { label: string; value?: string | null }) => (
+function InfoRow({ label, value }: { label: string; value?: string | null }) {
+  return (
     <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
       <span className="text-sm text-gray-500">{label}</span>
       <span className="text-sm font-medium text-gray-800 text-right max-w-[55%] truncate">{value || '-'}</span>
     </div>
   );
+}
+
+export default function ManagerProfilePage() {
+  const { user, logout } = useAuth();
+  const router = useRouter();
 
   return (
     <div className="-mt-4">

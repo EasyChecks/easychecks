@@ -44,8 +44,8 @@ export async function generateExcel(options: ExcelOptions): Promise<Buffer> {
 
   // เพิ่มชื่อเรื่องด้านบน (เพื่อทำให้เห็นว่ารายงานนี้คืออะไร)
   if (title) {
-    worksheet.insertRows(1, [
-      [title], // merged cell สินค้าด้านบน
+    worksheet.spliceRows(1, 0, [
+      title, // merged cell สินค้าด้านบน
     ]);
     worksheet.mergeCells('A1:' + String.fromCharCode(64 + columns.length) + '1');
     const titleCell = worksheet.getCell('A1');
@@ -62,8 +62,8 @@ export async function generateExcel(options: ExcelOptions): Promise<Buffer> {
      * - ให้มีพื้นที่สำหรับชื่อรายงาน (row 1)
      * - ให้ header row (row 2) อยู่ติดกับข้อมูล เวลา freeze ทั้งหมดเห็น
      */
-    data.forEach((row, index) => {
-      worksheet.insertRow(index + 3, Object.values(row));
+    data.forEach((row) => {
+      worksheet.addRow(Object.values(row));
     });
 
     /**

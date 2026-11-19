@@ -2,7 +2,6 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactCompiler: false, // Disabled for dev to reduce memory usage
-  output: 'standalone',
   productionBrowserSourceMaps: false,
 
   // อนุญาตให้ next/image โหลดรูปจาก Supabase Storage
@@ -14,6 +13,7 @@ const nextConfig: NextConfig = {
         pathname: '/storage/v1/object/public/**',
       },
     ],
+    unoptimized : true
   },
   
   // Proxy /api-local/* → backend container

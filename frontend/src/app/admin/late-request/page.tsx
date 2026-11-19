@@ -103,8 +103,8 @@ function MyLateRequestsTab() {
       await loadRequests();
 
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาด');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
       console.error('Error submitting request:', err);
     } finally {
       setSubmitting(false);
@@ -157,8 +157,8 @@ function MyLateRequestsTab() {
       setSelectedRequest(null);
       await loadRequests();
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาด');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
       console.error('Error updating request:', err);
     } finally {
       setSubmitting(false);
@@ -177,8 +177,8 @@ function MyLateRequestsTab() {
       setShowEditDeleteConfirm(false);
       await loadRequests();
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (err: any) {
-      setError(err.message || 'ไม่สามารถลบได้');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'ไม่สามารถลบได้');
       console.error('Error deleting request:', err);
     } finally {
       setSubmitting(false);
@@ -544,8 +544,8 @@ function LateRequestsToApproveTab() {
       setAdminComment('');
       await loadRequests();
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (err: any) {
-      setError(err.message || 'ไม่สามารถอนุมัติได้');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'ไม่สามารถอนุมัติได้');
       console.error('Error approving request:', err);
     } finally {
       setApproveSubmitting(false);
@@ -563,8 +563,8 @@ function LateRequestsToApproveTab() {
       setRejectionReason('');
       await loadRequests();
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (err: any) {
-      setError(err.message || 'ไม่สามารถปฏิเสธได้');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'ไม่สามารถปฏิเสธได้');
       console.error('Error rejecting request:', err);
     } finally {
       setApproveSubmitting(false);

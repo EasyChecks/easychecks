@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from '@/components/ui/card';
 import LocationManagement from '@/components/admin/LocationManagement';
-import EventManagement from '../event-management/page';
+import EventManagement from '../event-management/EventManagementClient';
 
 export default function MappingAndEventsPage() {
   const [activeTab, setActiveTab] = useState<'locations' | 'events'>('locations');

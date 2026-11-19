@@ -154,8 +154,8 @@ export default function AnnouncementManagement() {
     try {
       const response = await api.get('/users', { params: { limit: 500 } });
       const data = response.data?.data ?? response.data;
-      const rawList: any[] = Array.isArray(data) ? data : (data?.users ?? []);
-      const mapped: SimpleUser[] = rawList.map((u: any) => ({
+      const rawList: Record<string, unknown>[] = Array.isArray(data) ? data : (data?.users ?? []);
+      const mapped: SimpleUser[] = rawList.map((u: Record<string, unknown>) => ({
         userId: Number(u.userId ?? u.user_id ?? u.id),
         firstName: String(u.firstName ?? u.first_name ?? ''),
         lastName: String(u.lastName ?? u.last_name ?? ''),

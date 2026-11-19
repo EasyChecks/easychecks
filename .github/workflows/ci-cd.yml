@@ -58,11 +58,11 @@ jobs:
         working-directory: ./backend
         run: npx prisma generate
 
-      - name: Run database migrations
+      - name: Push database schema
         working-directory: ./backend
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/easycheck_test
-        run: npx prisma migrate deploy
+        run: npx prisma db push
 
       - name: Run tests
         working-directory: ./backend
